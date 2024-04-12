@@ -16,6 +16,7 @@ mod arith;
 mod ut;
 mod limits;
 
+use sel4::BootInfo;
 use sel4_root_task::{root_task, Never};
 use crate::debug::debug_print_bootinfo;
 use crate::bootstrap::smos_bootstrap;
@@ -67,6 +68,8 @@ fn main(bootinfo: &sel4::BootInfo) -> sel4::Result<Never> {
     let badged_notification = sel4::BootInfo::init_cspace_local_cptr::<sel4::cap_type::Notification>(
         badged_notification_slot,
     );
+
+
 
     let cnode = sel4::BootInfo::init_thread_cnode();
 
