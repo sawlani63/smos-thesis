@@ -2,7 +2,7 @@
 
 git clone https://github.com/seL4/seL4.git --config advice.detachedHead=false;
 cd seL4
-git checkout 1c7a0cb549021bc0781b49aa69359ee8d035981c;
+git checkout 9bac64c6ceb1ece54fe00eae44065a836bd224f3;
 cmake \
     -DCROSS_COMPILER_PREFIX=aarch64-linux-gnu- \
     -DCMAKE_TOOLCHAIN_FILE=gcc.cmake \

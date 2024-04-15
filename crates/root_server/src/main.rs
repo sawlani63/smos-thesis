@@ -20,6 +20,7 @@ use sel4::BootInfo;
 use sel4_root_task::{root_task, Never};
 use crate::debug::debug_print_bootinfo;
 use crate::bootstrap::smos_bootstrap;
+use sel4::CPtr;
 
 macro_rules! log_rs {
     () => {
@@ -32,23 +33,19 @@ macro_rules! log_rs {
 }
 
 #[root_task]
-fn main(bootinfo: &sel4::BootInfo) -> sel4::Result<Never> {
+fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
     debug_print_bootinfo(bootinfo);
 
     log_rs!("Starting...");
     // Name the thread
-    sel4::BootInfo::init_thread_tcb().debug_name(b"SMOS:root");
+    sel4::init_thread::slot::TCB.cap().debug_name(b"SMOS:root");
 
     let cspace = smos_bootstrap(bootinfo);
-
-
-
-
 
     let blueprint = sel4::ObjectBlueprint::Notification;
 
     let untyped = {
-        let slot = bootinfo.untyped().start
+        let slot = bootinfo.untyped().start()
             + bootinfo
                 .untyped_list()
                 .iter()
@@ -56,22 +53,18 @@ fn main(bootinfo: &sel4::BootInfo) -> sel4::Result<Never> {
                     !desc.is_device() && desc.size_bits() >= blueprint.physical_size_bits()
                 })
                 .unwrap();
-        sel4::BootInfo::init_cspace_local_cptr::<sel4::cap_type::Untyped>(slot)
+
+        CPtr::from_bits(slot.try_into().unwrap()).cast::<sel4::cap_type::Untyped>()
     };
 
-    let mut empty_slots = bootinfo.empty();
+    let mut empty_slots = bootinfo.empty().range();
     let unbadged_notification_slot = empty_slots.next().unwrap();
     let badged_notification_slot = empty_slots.next().unwrap();
-    let unbadged_notification = sel4::BootInfo::init_cspace_local_cptr::<
-        sel4::cap_type::Notification,
-    >(unbadged_notification_slot);
-    let badged_notification = sel4::BootInfo::init_cspace_local_cptr::<sel4::cap_type::Notification>(
-        badged_notification_slot,
-    );
+    let unbadged_notification = CPtr::from_bits(unbadged_notification_slot.try_into().unwrap()).cast::<sel4::cap_type::Notification>();
+    let badged_notification = CPtr::from_bits(badged_notification_slot.try_into().unwrap()).cast::<sel4::cap_type::Notification>();
 
 
-
-    let cnode = sel4::BootInfo::init_thread_cnode();
+    let cnode = sel4::init_thread::slot::CNODE.cap();
 
     untyped.untyped_retype(
         &blueprint,
@@ -97,6 +90,6 @@ fn main(bootinfo: &sel4::BootInfo) -> sel4::Result<Never> {
 
     sel4::debug_println!("TEST_PASS");
 
-    sel4::BootInfo::init_thread_tcb().tcb_suspend()?;
+    sel4::init_thread::slot::TCB.cap().tcb_suspend()?;
     unreachable!()
 }

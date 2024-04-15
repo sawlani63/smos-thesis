@@ -2,7 +2,7 @@ use core::mem::size_of;
 use crate::limits::CHAR_BIT;
 
 pub fn ROUND_UP(n: usize, b: usize) -> usize {
-	if (n == 0) {
+	if n == 0 {
 		return 0;
 	}
 	return (((n - 1) >> b) + 1) << b
