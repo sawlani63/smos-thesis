@@ -16,3 +16,4 @@ sel4 = { git = "https://github.com/seL4/rust-sel4" }
 sel4-sys = { git = "https://github.com/seL4/rust-sel4" }
 sel4-config = { git = "https://github.com/seL4/rust-sel4" }
 sel4-root-task = { git = "https://github.com/seL4/rust-sel4" }
+bit-vec = { version = "0.6", default-features = false }
