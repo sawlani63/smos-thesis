@@ -90,7 +90,8 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(), sel4::Error>{
 	// cspace.bootstrap = None;
 
 	// The initial CNode
-    let init_cnode = sel4::init_thread::slot::CNODE.cap();
+	let mut init_task_cnode_cptr = sel4::init_thread::slot::CNODE.cap().relative_self();
+    let mut init_task_cnode = sel4::init_thread::slot::CNODE.cap();
 
     /* use three slots from the current boot cspace */
 	assert!(bi.empty().end() - bi.empty().start() >= 2);
@@ -144,18 +145,18 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(), sel4::Error>{
     let mut blueprint = sel4::ObjectBlueprint::CNode{
     	size_bits: CNODE_SLOT_BITS(INITIAL_TASK_CNODE_SIZE_BITS)
     };
-
     ut_cptr.untyped_retype(&blueprint, &sel4::init_thread::slot::CNODE.cap().relative_self(),
     					   lvl1_cptr, 1).expect("Could not create new top-level CNode");
-    let lvl1_cnode_cptr = init_cnode.relative_bits_with_depth(lvl1_cptr as u64, sel4::WORD_SIZE);
-    let lvl1_cnode = CPtr::from_bits(lvl1_cnode_cptr.path().bits()).cast::<sel4::cap_type::CNode>();
+    let mut lvl1_cnode_cptr = init_task_cnode.relative_bits_with_depth(lvl1_cptr as u64, sel4::WORD_SIZE);
+    let mut lvl1_cnode = CPtr::from_bits(lvl1_cnode_cptr.path().bits()).cast::<sel4::cap_type::CNode>();
+
+    /* now create the 2nd level nodes, directly in the node we just created */
     let mut chunk: usize = 0;
     let mut total: usize = n_cnodes;
     blueprint = sel4::ObjectBlueprint::CNode{
     	size_bits: CNODE_SLOT_BITS(CNODE_SIZE_BITS),
     };
 
-    /* now create the 2nd level nodes, directly in the node we just created */
     while total > 0 {
     	chunk = usize::min(sel4_cfg_usize!(RETYPE_FAN_OUT_LIMIT), total);
     	ut_cptr.untyped_retype(&blueprint, &lvl1_cnode_cptr, n_cnodes - total, chunk)?;
@@ -164,36 +165,48 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(), sel4::Error>{
     let depth : usize = CNODE_SLOT_BITS(INITIAL_TASK_CNODE_SIZE_BITS) + CNODE_SLOT_BITS(CNODE_SIZE_BITS);
 
     /* copy the old root cnode to cptr 0 in the new cspace */
-    let init_cnode_cap = init_cnode.relative_bits_with_depth(2, sel4::WORD_SIZE);
-    let boot_cptr_cap = lvl1_cnode.relative_bits_with_depth(boot_cptr, depth);
-    boot_cptr_cap.copy(&init_cnode_cap , sel4::CapRightsBuilder::all().build())?;
+    let init_task_cnode_self = init_task_cnode.relative_bits_with_depth(sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode.into(), sel4::WORD_SIZE);
+    let mut init_task_cnode_copy = lvl1_cnode.relative_bits_with_depth(boot_cptr, depth);
+    init_task_cnode_copy.copy(&init_task_cnode_self, sel4::CapRightsBuilder::all().build())?;
 
     /* mint a cap to our new cnode at seL4_CapInitThreadCnode in the new cspace with the correct guard */
-    let guard = sel4_sys::seL4_CNode_CapData::new(0, (sel4::WORD_SIZE - depth) as u64);
-    let init_cnode_cap = lvl1_cnode.relative_bits_with_depth(2, depth); // @alwin: This should be seL4_CapInitThreadCNode probably
-    init_cnode_cap.mint(&lvl1_cnode_cptr, sel4::CapRightsBuilder::all().build(), guard.get_guard() as u64)?;
+    let cap_data = sel4_sys::seL4_CNode_CapData::new(0, (sel4::WORD_SIZE - depth) as u64);
+    let lvl1_self_cptr = lvl1_cnode.relative_bits_with_depth(sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode.into(), depth); // @alwin: This should be seL4_CapInitThreadCNode probably
+    lvl1_self_cptr.mint(&lvl1_cnode_cptr, sel4::CapRightsBuilder::all().build(), cap_data.get_guardSize())?;
 
-    // @alwin: sel4-rust doesn't seem to have a TCB_SetSpace call yet
+    /* Set the new CNode as our default top-level CNode */
+    // @alwin: Does this really need to be unsafe?
+    unsafe {
+    	let x = (*bi.ipc_buffer()).inner_mut().seL4_TCB_SetSpace(sel4::init_thread::slot::TCB.cptr().bits(), 0, lvl1_cptr.try_into().unwrap(), cap_data.get_guardSize() , sel4::init_thread::slot::VSPACE.cptr().bits(), 0);
+    }
+
+    /* Redefine the CPtrs's relative to the new top-level CSpace */
+    lvl1_cnode_cptr = sel4::init_thread::slot::CNODE.cap().relative_self();
+    lvl1_cnode = sel4::init_thread::slot::CNODE.cap();
+    init_task_cnode_cptr = lvl1_cnode.relative_bits_with_depth(boot_cptr, sel4::WORD_SIZE);
+    init_task_cnode = CPtr::from_bits(init_task_cnode_cptr.path().bits()).cast::<sel4::cap_type::CNode>();;
+
+    /* Copy capabilities over from the initial cspace to the new cspace */
     for i in 1..bi.empty().start() {
-    	match i {
-    	    // sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode |
-    	    // sel4_sys::seL4_RootCNodeCapSlots::seL4_CapIOPortControl |
-    	    // sel4_sys::seL4_RootCNodeCapSlots::seL4_CapIOSpace |
-    	    // sel4_sys::seL4_RootCNodeCapSlots::seL4_CapSMMUSIDControl |
-    	    // sel4_sys::seL4_RootCNodeCapSlots::seL4_CapSMMUCBControl => { @alwin: I can't find these for some reason
-    	    2 | 7 | 8 | 12 |  13 => {
+    	match i.try_into().unwrap() {
+    	    sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode |
+    	    sel4_sys::seL4_RootCNodeCapSlots::seL4_CapIOPortControl |
+    	    sel4_sys::seL4_RootCNodeCapSlots::seL4_CapIOSpace |
+    	    sel4_sys::seL4_RootCNodeCapSlots::seL4_CapSMMUSIDControl |
+    	    sel4_sys::seL4_RootCNodeCapSlots::seL4_CapSMMUCBControl => {
     	    	continue;
     	    },
     	    _ => {}
     	}
 
-    	lvl1_cnode.relative_bits_with_depth(i.try_into().unwrap(), depth).move_(&init_cnode.relative_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE))?;
+    	let _ = lvl1_cnode.relative_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE).move_(&init_task_cnode.relative_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE));
     }
 
-    /* Remove the original cnode -- it's empty and we need slot 0 to be free as it acts
+   	/* Remove the original cnode -- it's empty and we need slot 0 to be free as it acts
      * as the NULL capability and should be empty, or any invocation of seL4_CapNull will
-     * invoke this cnode. */
-  	boot_cptr_cap.delete()?;
+     * invoke this cnode.
+     */
+  	init_task_cnode_cptr.delete();
 
     /* Next, allocate and map enough paging structures and frames to create the
      * untyped table */
