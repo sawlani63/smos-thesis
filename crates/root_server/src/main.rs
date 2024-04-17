@@ -15,6 +15,10 @@ mod bootstrap;
 mod arith;
 mod ut;
 mod limits;
+mod bitfield;
+mod dma;
+mod mapping;
+mod util;
 
 use sel4::BootInfo;
 use sel4_root_task::{root_task, Never};
