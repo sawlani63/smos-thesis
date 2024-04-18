@@ -1,7 +1,10 @@
+use sel4::ObjectBlueprint;
+
 use crate::{bootstrap, page::{BIT, PAGE_SIZE_4K}};
-use core::mem::size_of;
-use bit_vec::BitVec;
+use core::{mem::size_of, ptr::{null, null_mut}};
 use crate::bootstrap::{INITIAL_TASK_CNODE_SIZE_BITS, INITIAL_TASK_CSPACE_BITS, INITIAL_TASK_CSPACE_SLOTS};
+use crate::bitfield::{bitfield_type, BITFIELD_SIZE, bitfield_init};
+use crate::ut::UT;
 
 pub const fn CNODE_SLOT_BITS(x : usize) -> usize {
 	x - sel4_sys::seL4_SlotBits as usize
@@ -22,16 +25,17 @@ pub const BOT_LVL_PER_NODE : usize = (PAGE_SIZE_4K - sel4::WORD_SIZE * 3) / size
 
 // const BOT_LVL_PER_NODE: usize = (PAGE_SIZE_4K - (sel4_sys::seL4_WordSizeBits * 3) as usize) / size_of::<BotLvlT>();
 
+#[derive(Copy, Clone)]
 struct BotLvlT {
-	pub bf : BitField,
-	// untyped : todo!() /* ??? */
+	pub bf : bitfield_type!(CNODE_SLOTS(CNODE_SIZE_BITS)),
+	untyped: UT
 }
 
 // @alwin: Should this be public?
 #[derive(Copy, Clone)]
 pub struct BotLvlNodeT {
 	pub n_cnodes: sel4_sys::seL4_Word,
-	// untyped: todo!() /* ??? */,
+	pub untyped: UT,
 	pub frame: sel4::cap::SmallPage,
 	pub cnodes: [BotLvlT; BOT_LVL_PER_NODE]
 }
@@ -47,8 +51,9 @@ pub struct CSpace<'a> {
 	pub root_cnode: sel4::cap::CNode,
 	pub two_level: bool,
 	top_level_size_bits: usize,
-	pub top_bf: BitField,
+	pub top_bf: bitfield_type!(CNODE_SLOTS(INITIAL_TASK_CNODE_SIZE_BITS)),
 	bot_lvl_nodes: [*mut BotLvlNodeT; INITIAL_TASK_CSPACE_SLOTS / BOT_LVL_PER_NODE + 1],
+	pub n_bot_lvl_nodes: usize,
 	// untyped: todo!()/* ?? */, // @alwin: Add this back when I figure out what it should be
 	pub bootstrap: Option<&'a CSpace<'a>>,
 	// alloc: CSpaceAlloc, // @alwin: Add this back when I figure out what it should be
@@ -65,20 +70,31 @@ impl<'a> CSpace<'a> {
 		return CSpace { root_cnode: root_cnode,
 						two_level: two_level,
 						top_level_size_bits: top_level_size_bits,
-						top_bf: BitField::new(CNODE_SLOTS(INITIAL_TASK_CNODE_SIZE_BITS)),
+						top_bf: bitfield_init!(CNODE_SLOTS(INITIAL_TASK_CNODE_SIZE_BITS)),
+						n_bot_lvl_nodes: 0,
 						bot_lvl_nodes:
 							[
-								BotLvlNodeT {
-									n_cnodes: 0,
-									frame: None,
-									cnodes: [BotLvlT {bf: BitField::new(BITFIELD_SIZE(CNODE_SIZE_BITS))} ; BOT_LVL_PER_NODE ]
-								};
+								null_mut::<BotLvlNodeT>();
 								INITIAL_TASK_CSPACE_SLOTS / BOT_LVL_PER_NODE + 1
 							],
 						bootstrap: bootstrap,
 						// alloc: alloc,
-						// watermark: [0] 
+						// watermark: [0]
 					};
+	}
+
+	pub fn untyped_retype(self: &Self, ut: &sel4::cap::Untyped, blueprint: ObjectBlueprint,
+						  target: usize) -> Result<(), sel4::Error> {
+
+		if self.two_level {
+			let cnode = target >> CNODE_SLOT_BITS(CNODE_SIZE_BITS);
+			return ut.untyped_retype(&blueprint,
+									 &self.root_cnode.relative_bits_with_depth(cnode.try_into().unwrap(),
+					  				 sel4::WORD_SIZE - CNODE_SLOT_BITS(CNODE_SIZE_BITS)),
+					  				 target % CNODE_SLOTS(CNODE_SIZE_BITS), 1);
+		} else {
+			return ut.untyped_retype(&blueprint, &self.root_cnode.relative_self(), target, 1)
+		}
 	}
 
 	pub fn get_bot_lvl_node(self: &Self, i : usize) -> &mut BotLvlNodeT {

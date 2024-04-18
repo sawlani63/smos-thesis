@@ -1,11 +1,13 @@
 use core::mem::size_of;
 
 use sel4::cap::Untyped;
+use sel4::CPtr;
 
 use crate::page::PAGE_SIZE_4K;
 
+#[derive(Copy, Clone)]
 pub struct UT {
-	cptr: usize,
+	pub cap: sel4::cap::Untyped,
 	valid: bool,
 	size_bits: u8,
 	next: Option<*mut UT>
@@ -22,16 +24,16 @@ pub struct UTTable {
 }
 
 pub fn push(head: &mut Option<*mut UT>, new: &mut UT) {
-	new.next = head;
+	new.next = *head;
 	*head = Some(new as *mut UT);
 }
 
 const fn SIZE_BITS_TO_INDEX(x: usize) -> usize {
-	x - sel4_sys::seL4_EndpointBits
+	x - sel4_sys::seL4_EndpointBits as usize
 }
 
 impl UTTable {
-	pub fn alloc_4k_untyped() -> Option<(UT, usize)> {
+	pub fn alloc_4k_untyped(self: &Self) -> Result<(usize, UT), sel4::Error> {
 		todo!();
 	}
 
@@ -41,17 +43,17 @@ impl UTTable {
 	}
 
 	fn paddr_to_ut(self: &Self, paddr: usize) -> &mut UT {
-		return unsafe{ &mut *self.untypeds[(paddr - self.first_paddr) / PAGE_SIZE_4K * size_of::<UT>()] };
+		return unsafe{ &mut *self.untypeds.unwrap().wrapping_add((paddr - self.first_paddr) / PAGE_SIZE_4K * size_of::<UT>()) };
 	}
 
 	pub fn add_untyped_range(self: &Self, paddr: usize, cptr: usize, n_pages: usize, device: bool) {
-		let mut list = &mut self.free_untypeds[SIZE_BITS_TO_INDEX(sel4_sys::seL4_PageBits)];
+		let mut list = &mut self.free_untypeds[SIZE_BITS_TO_INDEX(sel4_sys::seL4_PageBits as usize) as usize];
 		for i in 0..n_pages {
 			let node = self.paddr_to_ut(paddr + (i * PAGE_SIZE_4K));
-			node.cptr = cptr;
-			node.valid = 1;
+			node.cap = CPtr::from_bits(cptr.try_into().unwrap()).cast::<sel4::cap_type::Untyped>();
+			node.valid = true;
 			if !device {
-				node.size_bits = sel4_sys::seL4_PageBits;
+				node.size_bits = sel4_sys::seL4_PageBits.try_into().unwrap();
 				push(&mut list, &mut node);
 				self.n_4k_untyped += 1;
 			}
