@@ -7,10 +7,12 @@
 # Basis for seL4 kernel configuration
 
 set(ARM_CPU cortex-a57 CACHE STRING "")
+#set(ARM_CPU cortex-a53 CACHE STRING "")
 set(KernelIsMCS ON CACHE BOOL "" FORCE)
 set(KernelArch arm CACHE STRING "")
 set(KernelArmHypervisorSupport ON CACHE BOOL "")
 set(KernelMaxNumNodes 2 CACHE STRING "")
 set(KernelPlatform qemu-arm-virt CACHE STRING "")
+#set(KernelPlatform odroidc2 CACHE STRING "")
 set(KernelSel4Arch aarch64 CACHE STRING "")
 set(KernelVerificationBuild OFF CACHE BOOL "")

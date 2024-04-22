@@ -15,7 +15,7 @@ pub const fn SIZE_BITS_TO_BYTES(size_bits: usize) -> usize {
 	BIT(size_bits)
 }
 pub const fn BYTES_TO_SIZE_BITS_PAGES(b : usize, size_bits : usize) -> usize {
-	if (b / BIT(size_bits)) + (b % BIT(size_bits)) > 0 { 1 } else { 0 }
+	(b / BIT(size_bits)) + if (b % BIT(size_bits)) > 0 { 1 } else { 0 }
 }
 
 pub const PAGE_BITS_4K: usize =  12;
