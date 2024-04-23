@@ -1,6 +1,8 @@
 mod uart_meson;
 mod uart_pl011;
 
+use core::fmt::Write;
+
 use crate::mapping::map_device;
 use crate::page::{PAGE_SIZE_4K, PAGE_ALIGN_4K};
 use crate::ut::UTTable;
@@ -14,41 +16,46 @@ use crate::uart::uart_pl011::{UART, UART_PADDR, plat_uart_init, plat_uart_put_ch
 #[sel4_cfg(PLAT = "odroidc2")]
 use crate::uart::uart_meson::{UART, UART_PADDR, plat_uart_init, plat_uart_put_char};
 
+#[derive(Copy, Clone)]
+pub struct UARTPrinter {
+	uart_vaddr: usize,
+}
+
+impl UARTPrinter {
+	fn uart_put_char(self: &mut Self, c: char) {
+		let uart = UART::from_vaddr(self.uart_vaddr);
+
+		plat_uart_put_char(uart, c);
+		if c == '\n' {
+			plat_uart_put_char(uart, '\r');
+		}
+	}
+}
+
+impl Write for UARTPrinter {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        for c in s.chars() {
+        	self.uart_put_char(c);
+        }
+
+        return Ok(())
+    }
+}
+
 impl UART {
 	pub fn from_vaddr<'b>(vaddr: usize) -> &'b mut Self{
 	    unsafe { &mut *(vaddr as *mut Self) }
 	}
 }
 
-static mut uart_vaddr: Option<usize> = None;
-
-
-pub fn uart_init(cspace: &mut CSpace, ut_table: &mut UTTable) -> Result<(), sel4::Error> {
+pub fn uart_init(cspace: &mut CSpace, ut_table: &mut UTTable) -> Result<UARTPrinter, sel4::Error> {
 	let uart_page_vaddr = map_device(cspace, ut_table, PAGE_ALIGN_4K(UART_PADDR), PAGE_SIZE_4K)?;
-	let uart = unsafe {
-		uart_vaddr = Some(uart_page_vaddr + (UART_PADDR & MASK(sel4_sys::seL4_PageBits.try_into().unwrap())));
-		UART::from_vaddr(uart_vaddr.unwrap())
-	};
-
+	let uart_vaddr = uart_page_vaddr + (UART_PADDR & MASK(sel4_sys::seL4_PageBits.try_into().unwrap()));
+	let uart = UART::from_vaddr(uart_vaddr);
 	plat_uart_init(uart);
 
-	Ok(())
+	Ok(UARTPrinter { uart_vaddr: uart_vaddr })
 }
 
-pub fn uart_put_char(c: char) -> Result<(), sel4::Error> {
-	let uart = unsafe {
-		if (uart_vaddr.is_none()) {
-			sel4::debug_println!("Attempting to use uart_put_char without initializing");
-			return Err(sel4::Error::IllegalOperation);
-		}
-		UART::from_vaddr(uart_vaddr.unwrap())
-	};
 
-	plat_uart_put_char(uart, c);
-	if c == '\n' {
-		plat_uart_put_char(uart, '\r');
-	}
-
-	return Ok(());
-}
 
