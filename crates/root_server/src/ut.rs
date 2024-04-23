@@ -57,6 +57,16 @@ impl UTTable {
 		}
 	}
 
+	pub fn alloc_4k_device(self: &mut Self, paddr: usize) -> Result<UT, sel4::Error> {
+		let ut = self.paddr_to_ut(paddr);
+		unsafe {
+			if !(*ut).valid {
+				return Err(sel4::Error::InvalidArgument);
+			}
+			return Ok((*ut).clone());
+		}
+	}
+
 	pub fn new(memory: usize, region: UTRegion) -> UTTable {
 		UTTable { first_paddr: region.start, untypeds: Some(memory as *mut UT),
 				  free_untypeds: [None; N_UNTYPED_LISTS], n_4k_untyped: 0, free_structures: None}

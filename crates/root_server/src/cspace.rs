@@ -139,7 +139,7 @@ impl<'a> CSpace<'a> {
 		   	}
 
 	        /* now allocate a bottom level index */
-		   	let mut bot_lvl = self.get_bot_lvl_node(NODE_INDEX(cptr)).cnodes[CNODE_INDEX(cptr)];
+		   	let mut bot_lvl = &mut self.get_bot_lvl_node(NODE_INDEX(cptr)).cnodes[CNODE_INDEX(cptr)];
 		   	let bot_index = bf_first_free(&bot_lvl.bf);
 		   	bf_set_bit(&mut bot_lvl.bf, bot_index);
 
@@ -160,6 +160,10 @@ impl<'a> CSpace<'a> {
 
 	pub fn get_bot_lvl_node(self: &Self, i : usize) -> &mut BotLvlNodeT {
 		return unsafe{&mut *self.bot_lvl_nodes[i]};
+	}
+
+	pub fn set_bot_lvl_node(self: &mut Self, i : usize, ptr: *mut BotLvlNodeT)  {
+		self.bot_lvl_nodes[i] = ptr;
 	}
 
 	pub fn init_bot_lvl_node(self: &mut Self, i : usize, ptr: *mut BotLvlNodeT) {

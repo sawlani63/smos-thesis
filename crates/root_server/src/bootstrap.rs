@@ -103,7 +103,7 @@ struct BootstrapCSpace {
 }
 
 // pub fn smos_bootstrap(bi: &sel4::BootInfo) -> CSpace{
-pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(), sel4::Error>{
+pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Error>{
 	let mut bootinfo_avail_bytes : [usize; sel4_cfg_usize!(MAX_NUM_BOOTINFO_UNTYPED_CAPS) ] = [0; sel4_cfg_usize!(MAX_NUM_BOOTINFO_UNTYPED_CAPS)];
 
     let mut bootstrap_data = BootstrapCSpace {next_free_vaddr: SOS_UT_TABLE, vspace: sel4::init_thread::slot::VSPACE.cap()};
@@ -388,5 +388,5 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(), sel4::Error>{
     	cspace.watermark[i] = cspace.alloc_slot()?;
     }
 
-	return Ok(());
+	return Ok((cspace, ut_table));
 }
