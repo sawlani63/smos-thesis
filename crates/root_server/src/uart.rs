@@ -37,7 +37,7 @@ pub fn uart_init(cspace: &mut CSpace, ut_table: &mut UTTable) -> Result<(), sel4
 
 pub fn uart_put_char(c: char) -> Result<(), sel4::Error> {
 	let uart = unsafe {
-		if (unsafe { uart_vaddr.is_none() }) {
+		if (uart_vaddr.is_none()) {
 			sel4::debug_println!("Attempting to use uart_put_char without initializing");
 			return Err(sel4::Error::IllegalOperation);
 		}
