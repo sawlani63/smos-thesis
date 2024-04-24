@@ -1,17 +1,13 @@
-use core::cell::RefCell;
 use core::mem::size_of;
-use crate::{bootstrap, dma};
-use crate::page::{PAGE_BITS_4K, PAGE_SIZE_4K, BIT, BYTES_TO_SIZE_BITS_PAGES, BYTES_TO_4K_PAGES, BYTES_TO_SIZE_BITS};
+use crate::page::{PAGE_SIZE_4K, BIT, BYTES_TO_4K_PAGES, BYTES_TO_SIZE_BITS};
 use crate::cspace::{BotLvlNodeT, CSpace, BOT_LVL_PER_NODE, CNODE_INDEX, CNODE_SIZE_BITS, CNODE_SLOTS,
 					CNODE_SLOT_BITS, NODE_INDEX, TOP_LVL_INDEX, BOT_LVL_INDEX, WATERMARK_SLOTS};
-// use crate::cspace::{CNODE_SLOTS, CNODE_SIZE_BITS, CNODE_SLOT_BITS};
 use crate::ut::{UTRegion, UT, UTTable};
 use crate::arith::{ROUND_UP};
 use crate::util::{ALIGN_DOWN, ALIGN_UP};
-use sel4::{CPtr, ObjectBlueprint};
+use sel4::{CPtr};
 use crate::dma::DMA;
 use crate::bitfield::bf_set_bit;
-use core::ptr::null_mut;
 use crate::vmem_layout::UT_TABLE;
 
 use sel4_config::sel4_cfg_usize;
@@ -184,7 +180,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     /* copy the old root cnode to cptr 0 in the new cspace */
     let init_task_cnode_self = init_task_cnode.relative_bits_with_depth(sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode.into(),
     																	sel4::WORD_SIZE);
-    let mut init_task_cnode_copy = lvl1_cnode.relative_bits_with_depth(boot_cptr, depth);
+    let init_task_cnode_copy = lvl1_cnode.relative_bits_with_depth(boot_cptr, depth);
     init_task_cnode_copy.copy(&init_task_cnode_self, sel4::CapRightsBuilder::all().build())?;
 
     /* mint a cap to our new cnode at seL4_CapInitThreadCnode in the new cspace with the correct guard */
@@ -196,7 +192,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     /* Set the new CNode as our default top-level CNode */
     // @alwin: Does this really need to be unsafe?
     unsafe {
-    	let x = (*bi.ipc_buffer()).inner_mut().seL4_TCB_SetSpace(sel4::init_thread::slot::TCB.cptr().bits(),
+    	(*bi.ipc_buffer()).inner_mut().seL4_TCB_SetSpace(sel4::init_thread::slot::TCB.cptr().bits(),
     															 0, lvl1_cptr.try_into().unwrap(),
     															 cap_data.get_guardSize(),
     															 sel4::init_thread::slot::VSPACE.cptr().bits(), 0);
@@ -206,7 +202,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     lvl1_cnode_cptr = sel4::init_thread::slot::CNODE.cap().relative_self();
     lvl1_cnode = sel4::init_thread::slot::CNODE.cap();
     init_task_cnode_cptr = lvl1_cnode.relative_bits_with_depth(boot_cptr, sel4::WORD_SIZE);
-    init_task_cnode = CPtr::from_bits(init_task_cnode_cptr.path().bits()).cast::<sel4::cap_type::CNode>();;
+    init_task_cnode = CPtr::from_bits(init_task_cnode_cptr.path().bits()).cast::<sel4::cap_type::CNode>();
 
     /* Copy capabilities over from the initial cspace to the new cspace */
     for i in 1..bi.empty().start() {
@@ -236,7 +232,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
      * as the NULL capability and should be empty, or any invocation of seL4_CapNull will
      * invoke this cnode.
      */
-  	init_task_cnode_cptr.delete();
+  	init_task_cnode_cptr.delete()?;
 
     /* Next, allocate and map enough paging structures and frames to create the
      * untyped table */
@@ -280,7 +276,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
 
     /* and pages to cover the UT table */
     let slots_per_cnode = CNODE_SLOTS(CNODE_SIZE_BITS);
-    for i in 0..ut_pages {
+    for _i in 0..ut_pages {
 		cspace.untyped_retype(&ut, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
 							  first_free_slot)?;
 		let page = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
@@ -340,16 +336,16 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
 
     let n_bot_lvl = usize::max(first_free_slot / slots_per_cnode + 1, n_cnodes) / BOT_LVL_PER_NODE + 1;
     for i in 0..n_bot_lvl {
-    	let (node_paddr, node_ut) = ut_table.alloc_4k_untyped()?;
+    	let (_, node_ut) = ut_table.alloc_4k_untyped()?;
     	cspace.untyped_retype(&node_ut.get_cap(), sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
-    						  first_free_slot);
+    						  first_free_slot)?;
 		let page = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
 		page.frame_map(sel4::init_thread::slot::VSPACE.cap(), bootstrap_data.next_free_vaddr,
 					   sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT)?;
 		cspace.init_bot_lvl_node(i, bootstrap_data.next_free_vaddr as *mut BotLvlNodeT);
 		bootstrap_data.next_free_vaddr += PAGE_SIZE_4K;
 
-		let mut bot_lvl_node = cspace.get_bot_lvl_node(i);
+		let bot_lvl_node = cspace.get_bot_lvl_node(i);
 		bot_lvl_node.untyped = node_ut;
 		bot_lvl_node.frame = page;
 		cspace.n_bot_lvl_nodes += 1;
@@ -357,12 +353,12 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     }
 
     let dma_vaddr = ALIGN_UP(bootstrap_data.next_free_vaddr + PAGE_SIZE_4K, BIT(sel4_sys::seL4_LargePageBits.try_into().unwrap()));
-    let dma = DMA::new(&mut cspace, &mut ut_table, bootstrap_data.vspace, dma_page, dma_paddr, dma_vaddr)?;
+    let _dma = DMA::new(&mut cspace, &mut ut_table, bootstrap_data.vspace, dma_page, dma_paddr, dma_vaddr)?;
     bootstrap_data.next_free_vaddr = dma_vaddr + BIT(sel4_sys::seL4_LargePageBits.try_into().unwrap()) + PAGE_SIZE_4K;
 
     /* now record all the cptrs we have already used to bootstrap */
     for i in (0..ALIGN_DOWN(first_free_slot, slots_per_cnode)).step_by(slots_per_cnode) {
-    	let mut bot_lvl_node = cspace.get_bot_lvl_node(NODE_INDEX(i));
+    	let bot_lvl_node = cspace.get_bot_lvl_node(NODE_INDEX(i));
     	/* @alwin: there should be a check here that bot_lvl_node is not NULL */
     	bot_lvl_node.n_cnodes += 1;
     	for i in 0..CNODE_SLOTS(CNODE_SIZE_BITS)/sel4::WORD_SIZE {
@@ -372,7 +368,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     	bf_set_bit(&mut cspace.top_bf, TOP_LVL_INDEX(i));
     }
 
-    let mut bot_lvl_node = cspace.get_bot_lvl_node(first_free_slot / slots_per_cnode / BOT_LVL_PER_NODE);
+    let bot_lvl_node = cspace.get_bot_lvl_node(first_free_slot / slots_per_cnode / BOT_LVL_PER_NODE);
     bot_lvl_node.n_cnodes += 1;
 
     for i in ALIGN_DOWN(first_free_slot, slots_per_cnode)..first_free_slot {

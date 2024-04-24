@@ -1,11 +1,12 @@
 use core::ptr;
-
-use sel4::sel4_cfg;
 use crate::page::BIT;
+use sel4::sel4_cfg;
 
+#[sel4_cfg(PLAT = "qemu-arm-virt")]
 pub const UART_PADDR: usize = 0x9000000;
 const PL011_UARTFR_TXFF: u32 = BIT(5) as u32;
 
+#[sel4_cfg(PLAT = "qemu-arm-virt")]
 #[repr(C)]
 pub struct UART {
     dr: u32,        /* 0x000 Data Register */
@@ -30,6 +31,7 @@ pub struct UART {
     /* The rest of the registers are either reserved or not used */
 }
 
+#[sel4_cfg(PLAT = "qemu-arm-virt")]
 pub fn plat_uart_init(uart: &mut UART) {
     unsafe {
         ptr::write_volatile(&mut uart.imsc as *mut u32, 0x50);
@@ -37,6 +39,7 @@ pub fn plat_uart_init(uart: &mut UART) {
 }
 
 
+#[sel4_cfg(PLAT = "qemu-arm-virt")]
 pub fn plat_uart_put_char(uart: &mut UART, c: char) {
     unsafe {
         while (ptr::read_volatile(&uart.fr as *const u32) & PL011_UARTFR_TXFF) != 0 {};

@@ -18,7 +18,7 @@ pub fn map_frame(cspace: &mut CSpace, ut_table: &mut UTTable, frame_cap: sel4::c
 	let mut i = 0;
 	let mut used : usize = 0;
 	while i < MAPPING_SLOTS && err.is_err_and(|err| err == sel4::Error::FailedLookup) {
-		let (paddr, ut) = ut_table.alloc_4k_untyped()?;
+		let (_, ut) = ut_table.alloc_4k_untyped()?;
 
 		let slot = {
 			if let Some(free_slots_internal) = free_slots {
@@ -38,6 +38,8 @@ pub fn map_frame(cspace: &mut CSpace, ut_table: &mut UTTable, frame_cap: sel4::c
 		if err.is_ok() {
 			err = frame_cap.frame_map(vspace, vaddr, rights.clone(), attributes);
 		}
+
+		i += 1;
 	}
 
 	if err.is_ok() {

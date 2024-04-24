@@ -27,8 +27,8 @@ pub fn utils_run_on_stack(stack_top: usize, func: unsafe extern "C" fn(*mut CSpa
         //     "mov sp, x20",
         //     new_stack = in(reg) stack_top,
         //     func = in(reg) func,
-        //     arg0 = in("x0") cspace as *mut CSpace,
-        //     arg1 = in("x1") ut_table as *mut UTTable,
+        //     arg0 = in(reg) cspace as *mut CSpace,
+        //     arg1 = in(reg) ut_table as *mut UTTable,
         // )
     }
 }

@@ -1,8 +1,9 @@
 use sel4::ObjectBlueprint;
 
-use crate::{bitfield::{bf_clr_bit, bf_first_free, bf_set_bit}, bootstrap, err_rs, log_rs, page::{BIT, PAGE_SIZE_4K}};
-use core::{cell::RefMut, mem::size_of, ptr::{null, null_mut}};
-use crate::bootstrap::{INITIAL_TASK_CNODE_SIZE_BITS, INITIAL_TASK_CSPACE_BITS, INITIAL_TASK_CSPACE_SLOTS};
+use crate::bitfield::{bf_clr_bit, bf_first_free, bf_set_bit};
+use crate::page::{BIT, PAGE_SIZE_4K};
+use core::mem::size_of;
+use crate::bootstrap::{INITIAL_TASK_CNODE_SIZE_BITS};
 use crate::bitfield::{bitfield_type, BITFIELD_SIZE, bitfield_init};
 use crate::ut::UTWrapper;
 use crate::util::MASK;
@@ -105,7 +106,7 @@ impl<'a> CSpace<'a> {
 		}
 	}
 
-	pub fn ensure_levels(self: &Self, cptr: usize, n_slots: usize) -> Result<usize, sel4::Error> {
+	pub fn ensure_levels(self: &Self, _cptr: usize, _n_slots: usize) -> Result<usize, sel4::Error> {
 		todo!();
 	}
 
@@ -144,7 +145,7 @@ impl<'a> CSpace<'a> {
 		   	}
 
 	        /* now allocate a bottom level index */
-		   	let mut bot_lvl = &mut self.get_bot_lvl_node(NODE_INDEX(cptr)).cnodes[CNODE_INDEX(cptr)];
+		   	let bot_lvl = &mut self.get_bot_lvl_node(NODE_INDEX(cptr)).cnodes[CNODE_INDEX(cptr)];
 		   	let bot_index = bf_first_free(&bot_lvl.bf);
 		   	bf_set_bit(&mut bot_lvl.bf, bot_index);
 
@@ -155,7 +156,7 @@ impl<'a> CSpace<'a> {
 
 			cptr += bot_index;
 
-			self.refill_watermark(used);
+			self.refill_watermark(used)?;
 	   	} else {
 	   		bf_set_bit(&mut self.top_bf, top_index)
 	   	}
@@ -188,7 +189,7 @@ impl<'a> CSpace<'a> {
 			let node = NODE_INDEX(cptr);
 			if self.n_bot_lvl_nodes > node {
 				let cnode = CNODE_INDEX(cptr);
-				if (self.get_bot_lvl_node(node).n_cnodes > cnode) {
+				if self.get_bot_lvl_node(node).n_cnodes > cnode {
 					bf_clr_bit(&mut self.get_bot_lvl_node(node).cnodes[cnode].bf, BOT_LVL_INDEX(cptr));
 				} else {
 					warn_rs!("Attempting to free unallocated cptr {}", cptr);

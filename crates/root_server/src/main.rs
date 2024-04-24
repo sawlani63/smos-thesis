@@ -25,18 +25,13 @@ mod printing;
 mod vmem_layout;
 mod stack;
 
-use core::panic::PanicInfo;
-
-use sel4::BootInfo;
 use sel4_root_task::{root_task, Never};
 use crate::debug::debug_print_bootinfo;
 use crate::bootstrap::smos_bootstrap;
-use sel4::CPtr;
 use crate::uart::uart_init;
 use crate::cspace::CSpace;
 use crate::ut::UTTable;
 use crate::printing::print_init;
-use crate::vmem_layout::{STACK, STACK_PAGES};
 use crate::page::PAGE_SIZE_4K;
 use crate::util::alloc_retype;
 use crate::mapping::map_frame;
@@ -70,14 +65,15 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
 
      // Allocate and switch to a bigger stack with a guard page
      let mut vaddr = vmem_layout::STACK;
-     for i in 0..vmem_layout::STACK_PAGES {
-        let (frame_cptr, ut) = alloc_retype(&mut cspace, &mut ut_table,
+     for _i in 0..vmem_layout::STACK_PAGES {
+        let (frame_cptr, _) = alloc_retype(&mut cspace, &mut ut_table,
                                             sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage))
                                             .expect("Failed to alloc_retype");
 
         let frame = sel4::CPtr::from_bits(frame_cptr.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
         map_frame(&mut cspace, &mut ut_table, frame.cast(), sel4::init_thread::slot::VSPACE.cap(), vaddr,
-                  sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT, None);
+                  sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT, None)
+                  .expect("Failed to map stack page");
         vaddr += PAGE_SIZE_4K;
      }
 

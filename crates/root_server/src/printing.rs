@@ -60,11 +60,7 @@ macro_rules! warn_rs {
     }};
 }
 
-pub(crate) use warn_rs;
-pub(crate) use err_rs;
-pub(crate) use log_rs;
-pub(crate) use println;
-pub(crate) use print;
+
 
 
 pub fn print_init(uart_printer: UARTPrinter) {

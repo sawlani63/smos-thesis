@@ -19,7 +19,7 @@ pub fn bf_first_free(bf: &[u64]) -> usize {
 
 	let mut bit = i * WORD_BITS;
 
-	if (i < bf.len()) {
+	if i < bf.len() {
 	    /* we want to find the first 0 bit, do this by inverting the value */
 		let val = !bf[i];
 		assert!(val != 0);

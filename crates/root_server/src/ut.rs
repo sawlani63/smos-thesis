@@ -1,7 +1,4 @@
-use core::mem::size_of;
-
-use sel4::cap::Untyped;
-use sel4::{CPtr, ObjectBlueprint};
+use sel4::CPtr;
 use crate::cspace::CSpace;
 
 use crate::err_rs;
@@ -97,9 +94,7 @@ impl UTTable {
 		let res = pop(list)?;
 		self.free_untypeds[SIZE_BITS_TO_INDEX(sel4_sys::seL4_PageBits.try_into().unwrap())] = res.0;
 
-		unsafe {
-			return Ok((self.ut_to_paddr(res.1), UTWrapper{ ut: res.1 }));
-		}
+		return Ok((self.ut_to_paddr(res.1), UTWrapper{ ut: res.1 }));
 	}
 
 	pub fn alloc_4k_device(self: &mut Self, paddr: usize) -> Result<UTWrapper, sel4::Error> {
@@ -119,17 +114,17 @@ impl UTTable {
 
 	pub fn alloc(self: &mut Self, cspace: &mut CSpace, size_bits: usize) -> Result<UTWrapper, sel4::Error> {
 		/* Check we can handle the size */
-		if (size_bits > sel4_sys::seL4_PageBits.try_into().unwrap()) {
+		if size_bits > sel4_sys::seL4_PageBits.try_into().unwrap() {
 			err_rs!("UT table can only allocate untypeds <= 4K in size");
 			return Err(sel4::Error::InvalidArgument);
 		}
 
-		if (size_bits < sel4_sys::seL4_EndpointBits.try_into().unwrap()) {
+		if size_bits < sel4_sys::seL4_EndpointBits.try_into().unwrap() {
 			err_rs!("UT Table cannot alloc untyped < {:x} in size", sel4_sys::seL4_EndpointBits);
 			return Err(sel4::Error::InvalidArgument)
 		}
 
-		if (size_bits == sel4_sys::seL4_PageBits.try_into().unwrap()) {
+		if size_bits == sel4_sys::seL4_PageBits.try_into().unwrap() {
 			return Ok(self.alloc_4k_untyped()?.1);
 		}
 
@@ -208,7 +203,7 @@ impl UTTable {
     											  cslot2) {
 				self.free(larger);
 				self.free_structures = push(self.free_structures, new1);
-    			cspace.delete(cslot1);
+    			cspace.delete(cslot1)?;
 				cspace.free_slot(cslot1);
 				self.free_structures = push(self.free_structures, new2);
 				cspace.free_slot(cslot2);
