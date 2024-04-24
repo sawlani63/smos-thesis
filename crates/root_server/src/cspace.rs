@@ -1,11 +1,12 @@
 use sel4::ObjectBlueprint;
 
-use crate::{bitfield::{bf_first_free, bf_set_bit}, bootstrap, page::{BIT, PAGE_SIZE_4K}};
+use crate::{bitfield::{bf_clr_bit, bf_first_free, bf_set_bit}, bootstrap, err_rs, log_rs, page::{BIT, PAGE_SIZE_4K}};
 use core::{cell::RefMut, mem::size_of, ptr::{null, null_mut}};
 use crate::bootstrap::{INITIAL_TASK_CNODE_SIZE_BITS, INITIAL_TASK_CSPACE_BITS, INITIAL_TASK_CSPACE_SLOTS};
 use crate::bitfield::{bitfield_type, BITFIELD_SIZE, bitfield_init};
-use crate::ut::UT;
+use crate::ut::UTWrapper;
 use crate::util::MASK;
+use crate::warn_rs;
 
 pub const fn CNODE_SLOT_BITS(x : usize) -> usize {
 	x - sel4_sys::seL4_SlotBits as usize
@@ -33,14 +34,14 @@ pub const BOT_LVL_PER_NODE : usize = (PAGE_SIZE_4K - sel4::WORD_SIZE * 3) / size
 #[derive(Copy, Clone)]
 pub struct BotLvlT {
 	pub bf : bitfield_type!(CNODE_SLOTS(CNODE_SIZE_BITS)),
-	untyped: UT
+	untyped: UTWrapper
 }
 
 // @alwin: Should this be public?
 #[derive(Copy, Clone)]
 pub struct BotLvlNodeT {
 	pub n_cnodes: usize,
-	pub untyped: UT,
+	pub untyped: UTWrapper,
 	pub frame: sel4::cap::SmallPage,
 	pub cnodes: [BotLvlT; BOT_LVL_PER_NODE]
 }
@@ -108,6 +109,10 @@ impl<'a> CSpace<'a> {
 		todo!();
 	}
 
+	pub fn ensure_new_structures(self: &Self) -> Result<(), sel4::Error> {
+		todo!();
+	}
+
 	pub fn refill_watermark(self: &mut Self, used: usize) -> Result<(), sel4::Error> {
 		for i in 0..WATERMARK_SLOTS {
 			if used & BIT(i) != 0 {
@@ -156,6 +161,42 @@ impl<'a> CSpace<'a> {
 	   	}
 
 	   	return Ok(cptr);
+	}
+
+	pub fn delete(self: &mut Self, cptr: usize) -> Result<(), sel4::Error> {
+		self.root_cnode.relative_bits_with_depth(cptr.try_into().unwrap(), sel4::WORD_SIZE).delete()
+	}
+
+	pub fn free_slot(self: &mut Self, cptr: usize) {
+		if cptr == 0 {
+			return;
+		}
+
+		if !self.two_level {
+			if cptr > CNODE_SLOTS(self.top_level_size_bits) {
+				warn_rs!("Attempting to delete slot greater than cspace bounds");
+				return;
+			}
+			bf_clr_bit(&mut self.top_bf, cptr);
+		} else {
+			if cptr >CNODE_SLOTS(CNODE_SIZE_BITS + self.top_level_size_bits) {
+				warn_rs!("Attempting to delete slot greater than cspace bounds");
+				return;
+			}
+
+			bf_clr_bit(&mut self.top_bf, TOP_LVL_INDEX(cptr));
+			let node = NODE_INDEX(cptr);
+			if self.n_bot_lvl_nodes > node {
+				let cnode = CNODE_INDEX(cptr);
+				if (self.get_bot_lvl_node(node).n_cnodes > cnode) {
+					bf_clr_bit(&mut self.get_bot_lvl_node(node).cnodes[cnode].bf, BOT_LVL_INDEX(cptr));
+				} else {
+					warn_rs!("Attempting to free unallocated cptr {}", cptr);
+				}
+			} else {
+				warn_rs!("Attempting to free unallocated cptr {}", cptr);
+			}
+		}
 	}
 
 	pub fn get_bot_lvl_node(self: &Self, i : usize) -> &mut BotLvlNodeT {

@@ -33,7 +33,7 @@ pub fn map_frame(cspace: &mut CSpace, ut_table: &mut UTTable, frame_cap: sel4::c
 			return Err(sel4::Error::InvalidCapability);
 		}
 
-		err = retype_map_pt(cspace, vspace, vaddr, ut.cap, slot);
+		err = retype_map_pt(cspace, vspace, vaddr, ut.get_cap(), slot);
 
 		if err.is_ok() {
 			err = frame_cap.frame_map(vspace, vaddr, rights.clone(), attributes);
@@ -62,7 +62,7 @@ pub fn map_device(cspace: &mut CSpace, ut_table: &mut UTTable, paddr: usize, siz
 	for curr in (paddr..paddr+size).step_by(PAGE_SIZE_4K) {
 		let ut = ut_table.alloc_4k_device(curr)?;
 		let frame_cptr = cspace.alloc_slot()?;
-		cspace.untyped_retype(&ut.cap, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage), frame_cptr)?;
+		cspace.untyped_retype(&ut.get_cap(), sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage), frame_cptr)?;
 		let frame = CPtr::from_bits(frame_cptr.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
 		unsafe {
 			map_frame(cspace, ut_table, frame.cast(), sel4::init_thread::slot::VSPACE.cap(), DEVICE_VIRT,

@@ -6,6 +6,9 @@ const WORD_BITS: usize = size_of::<u64>() * 8;
 pub fn bf_set_bit(bf: &mut [u64], idx: usize) {
 	bf[WORD_INDEX(idx)] |= BIT(BIT_INDEX(idx)) as u64;
 }
+pub fn bf_clr_bit(bf: &mut [u64], idx: usize) {
+    bf[WORD_INDEX(idx)] &= !(BIT(BIT_INDEX(idx))) as u64;
+}
 
 pub fn bf_first_free(bf: &[u64]) -> usize {
     /* find the first free word */
