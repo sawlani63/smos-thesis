@@ -296,7 +296,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     let dma_page = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::LargePage>();
     first_free_slot += 1;
 
-    let mut ut_table = UTTable::new(UT_TABLE, memory);
+    let mut ut_table = UTTable::new(UT_TABLE, memory, bootstrap_data.next_free_vaddr);
 
     for (i, untyped) in bi.untyped_list().iter().enumerate() {
     	if !untyped_in_range(untyped) {
@@ -340,10 +340,10 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     	cspace.untyped_retype(&node_ut.get_cap(), sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
     						  first_free_slot)?;
 		let page = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
-		page.frame_map(sel4::init_thread::slot::VSPACE.cap(), bootstrap_data.next_free_vaddr,
+		page.frame_map(sel4::init_thread::slot::VSPACE.cap(), ut_table.next_free_vaddr,
 					   sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT)?;
-		cspace.init_bot_lvl_node(i, bootstrap_data.next_free_vaddr as *mut BotLvlNodeT);
-		bootstrap_data.next_free_vaddr += PAGE_SIZE_4K;
+		cspace.init_bot_lvl_node(i, ut_table.next_free_vaddr as *mut BotLvlNodeT);
+		ut_table.next_free_vaddr += PAGE_SIZE_4K;
 
 		let bot_lvl_node = cspace.get_bot_lvl_node(i);
 		bot_lvl_node.untyped = node_ut;
@@ -352,9 +352,9 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
 		first_free_slot += 1;
     }
 
-    let dma_vaddr = ALIGN_UP(bootstrap_data.next_free_vaddr + PAGE_SIZE_4K, BIT(sel4_sys::seL4_LargePageBits.try_into().unwrap()));
+    let dma_vaddr = ALIGN_UP(ut_table.next_free_vaddr + PAGE_SIZE_4K, BIT(sel4_sys::seL4_LargePageBits.try_into().unwrap()));
     let _dma = DMA::new(&mut cspace, &mut ut_table, bootstrap_data.vspace, dma_page, dma_paddr, dma_vaddr)?;
-    bootstrap_data.next_free_vaddr = dma_vaddr + BIT(sel4_sys::seL4_LargePageBits.try_into().unwrap()) + PAGE_SIZE_4K;
+    ut_table.next_free_vaddr = dma_vaddr + BIT(sel4_sys::seL4_LargePageBits.try_into().unwrap()) + PAGE_SIZE_4K;
 
     /* now record all the cptrs we have already used to bootstrap */
     for i in (0..ALIGN_DOWN(first_free_slot, slots_per_cnode)).step_by(slots_per_cnode) {

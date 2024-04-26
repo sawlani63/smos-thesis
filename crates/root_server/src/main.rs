@@ -36,10 +36,40 @@ use crate::page::PAGE_SIZE_4K;
 use crate::util::alloc_retype;
 use crate::mapping::map_frame;
 
+
+/* Create and endpoint and a bounding notification object. These are never freed so we don't keep
+   track of the UTs used to allocate them.  */
+fn ipc_init(cspace: &mut CSpace, ut_table: &mut UTTable)
+            -> Result<(sel4::cap::Endpoint, sel4::cap::Notification), sel4::Error> {
+
+    /* Create the notification */
+    let (ntfn_cptr, _) = alloc_retype(cspace, ut_table, sel4::ObjectBlueprint::Notification)?;
+    let ntfn = sel4::CPtr::from_bits(ntfn_cptr.try_into().unwrap()).cast::<sel4::cap_type::Notification>();
+
+    /* Bind it to the TCB */
+    sel4::init_thread::slot::TCB.cap().tcb_bind_notification(ntfn)?;
+
+    /* Create the endpoint */
+    let (ep_cptr, _) = alloc_retype(cspace, ut_table, sel4::ObjectBlueprint::Endpoint)?;
+    let ep = sel4::CPtr::from_bits(ep_cptr.try_into().unwrap()).cast::<sel4::cap_type::Endpoint>();
+    return Ok((ep, ntfn));
+}
+
 extern "C" fn main_continued(cspace_ptr : *mut CSpace, ut_table_ptr: *mut UTTable) {
     log_rs!("Switched to new stack...");
 
+    /* Get the cspace and ut_table back. This is slightly cursed because these exist on
+       the old stack. Don't think anything bad will come from it, but kind of a weird situation.
+       Really, it might be better to manually copy the structs to the new stack, but that
+       seems much more painful */
+
+    let cspace = unsafe {&mut *cspace_ptr};
+    let ut_table = unsafe {&mut *ut_table_ptr};
+
+    let (ipc_ep, ntfn) = ipc_init(cspace, ut_table).expect("Failed to initialize IPC");
+
     sel4::init_thread::slot::TCB.cap().tcb_suspend().expect("Failed to suspend");
+    unreachable!()
 }
 
 #[root_task]

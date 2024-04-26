@@ -110,10 +110,6 @@ impl<'a> CSpace<'a> {
 		todo!();
 	}
 
-	pub fn ensure_new_structures(self: &Self) -> Result<(), sel4::Error> {
-		todo!();
-	}
-
 	pub fn refill_watermark(self: &mut Self, used: usize) -> Result<(), sel4::Error> {
 		for i in 0..WATERMARK_SLOTS {
 			if used & BIT(i) != 0 {

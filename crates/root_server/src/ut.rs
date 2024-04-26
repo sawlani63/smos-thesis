@@ -3,6 +3,8 @@ use crate::cspace::CSpace;
 
 use crate::err_rs;
 use crate::page::PAGE_SIZE_4K;
+use crate::mapping::map_frame;
+use core::mem::size_of;
 
 #[derive(Copy, Clone)]
 #[repr(C)]
@@ -47,7 +49,8 @@ pub struct UTTable {
 	untypeds: Option<*mut UT>,
 	free_untypeds: [Option<*mut UT>; N_UNTYPED_LISTS],
 	n_4k_untyped: usize,
-	free_structures: Option<*mut UT>
+	free_structures: Option<*mut UT>,
+	pub next_free_vaddr: usize,
 }
 
 pub fn push(head: Option<*mut UT>, new: *mut UT) -> Option<*mut UT> {
@@ -97,6 +100,47 @@ impl UTTable {
 		return Ok((self.ut_to_paddr(res.1), UTWrapper{ ut: res.1 }));
 	}
 
+	pub fn map_frame_to_next_free_vaddr(self: &mut Self, cspace: &mut CSpace, frame: sel4::cap::SmallPage)
+		   -> Result<usize, sel4::Error> {
+
+		// @alwin: should the UT table store a vspace and use this instead of harcoding it?
+		map_frame(cspace, self, frame.cast(), sel4::init_thread::slot::VSPACE.cap(), self.next_free_vaddr,
+				  sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT, None)?;
+		let prev = self.next_free_vaddr;
+		self.next_free_vaddr += PAGE_SIZE_4K;
+		return Ok(prev);
+	}
+
+	pub fn ensure_new_structures(self: &mut Self, cspace: &mut CSpace) -> Result<(), sel4::Error> {
+		// @alwin: I wonder if this should be abstracted away to some "next" so there isn't unsightly
+		// unsafe. Maybe if this will clean some other stuff up?
+		if self.free_structures == None || unsafe { (*self.free_structures.unwrap()).next == None } {
+			/* We need to allocate more spare UT objects */
+			let (_, frame_ut) = self.alloc_4k_untyped()?;
+
+	        /* allocate a slot to retype the frame into */
+			let cptr = cspace.alloc_slot()?;
+
+			/* Retype */
+			cspace.untyped_retype(&frame_ut.get_cap(),
+								  sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
+								  cptr)?;
+
+			let frame = CPtr::from_bits(cptr.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
+
+			// Map this page into our vspace
+			let new_uts = self.map_frame_to_next_free_vaddr(cspace, frame)? as *mut UT;
+
+			// Divide this page into however many UTs will fit into it and push these all to the
+			// free structures list
+			for i in 0..(PAGE_SIZE_4K / size_of::<UT>()) {
+				self.free_structures = push(self.free_structures, unsafe {new_uts.wrapping_add(i)});
+			}
+		}
+
+		Ok(())
+	}
+
 	pub fn alloc_4k_device(self: &mut Self, paddr: usize) -> Result<UTWrapper, sel4::Error> {
 		let ut = self.paddr_to_ut(paddr);
 		unsafe {
@@ -132,7 +176,7 @@ impl UTTable {
 		if head.is_none() {
 			let larger = self.alloc(cspace, size_bits + 1)?;
 
-			cspace.ensure_new_structures().map_err(|e| {
+			self.ensure_new_structures(cspace).map_err(|e| {
 				self.free(larger);
 				e
 			})?;
@@ -220,9 +264,10 @@ impl UTTable {
 		return Ok(UTWrapper { ut: res.1 });
 	}
 
-	pub fn new(memory: usize, region: UTRegion) -> UTTable {
+	pub fn new(memory: usize, region: UTRegion, next_free_vaddr: usize) -> UTTable {
 		UTTable { first_paddr: region.start, untypeds: Some(memory as *mut UT),
-				  free_untypeds: [None; N_UNTYPED_LISTS], n_4k_untyped: 0, free_structures: None}
+				  free_untypeds: [None; N_UNTYPED_LISTS], n_4k_untyped: 0, free_structures: None,
+				  next_free_vaddr : next_free_vaddr}
 	}
 
 	fn paddr_to_ut(self: &Self, paddr: usize) -> *mut UT {
