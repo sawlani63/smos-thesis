@@ -6,8 +6,13 @@ const WORD_BITS: usize = size_of::<u64>() * 8;
 pub fn bf_set_bit(bf: &mut [u64], idx: usize) {
 	bf[WORD_INDEX(idx)] |= BIT(BIT_INDEX(idx)) as u64;
 }
+
 pub fn bf_clr_bit(bf: &mut [u64], idx: usize) {
     bf[WORD_INDEX(idx)] &= !(BIT(BIT_INDEX(idx))) as u64;
+}
+
+pub fn bf_get_bit(bf: &mut[u64], idx: usize) -> bool {
+	if (bf[WORD_INDEX(idx)] & <usize as TryInto<u64>>::try_into(BIT(BIT_INDEX(idx))).unwrap()) != 0 { true } else { false }
 }
 
 pub fn bf_first_free(bf: &[u64]) -> usize {
@@ -44,13 +49,13 @@ fn BIT_INDEX(bit : usize) -> usize {
 // compile time. It seems a bit evil? Maybe there is a better way
 macro_rules! bitfield_type {
 	($size:expr) => {
-		[u64; BITFIELD_SIZE($size)]
+		[u64; $crate::bitfield::BITFIELD_SIZE($size)]
 	};
 }
 
 macro_rules! bitfield_init {
 	($size:expr) => {
-		[0; BITFIELD_SIZE($size)]
+		[0; $crate::bitfield::BITFIELD_SIZE($size)]
 	};
 }
 

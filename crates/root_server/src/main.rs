@@ -24,6 +24,8 @@ mod uart;
 mod printing;
 mod vmem_layout;
 mod stack;
+mod frame_table;
+mod tests;
 
 use sel4_root_task::{root_task, Never};
 use crate::debug::debug_print_bootinfo;
@@ -35,6 +37,8 @@ use crate::printing::print_init;
 use crate::page::PAGE_SIZE_4K;
 use crate::util::alloc_retype;
 use crate::mapping::map_frame;
+use crate::tests::run_tests;
+use crate::frame_table::FrameTable;
 
 
 /* Create and endpoint and a bounding notification object. These are never freed so we don't keep
@@ -67,6 +71,11 @@ extern "C" fn main_continued(cspace_ptr : *mut CSpace, ut_table_ptr: *mut UTTabl
     let ut_table = unsafe {&mut *ut_table_ptr};
 
     let (ipc_ep, ntfn) = ipc_init(cspace, ut_table).expect("Failed to initialize IPC");
+    let mut frame_table = FrameTable::init(sel4::init_thread::slot::VSPACE.cap());
+
+    run_tests(cspace, ut_table, &mut frame_table);
+
+    log_rs!("TESTS PASSED!");
 
     sel4::init_thread::slot::TCB.cap().tcb_suspend().expect("Failed to suspend");
     unreachable!()

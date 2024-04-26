@@ -8,7 +8,7 @@ pub const IPC_BUFFER: usize = 			0xD0000000;
 pub const STACK_PAGES: usize = 			100;
 pub const UT_TABLE: usize = 			0x8000000000;
 pub const FRAME_TABLE: usize = 			0x8100000000;
-pub const FRAME_DATE: usize = 			0x8200000000;
+pub const FRAME_DATA: usize = 			0x8200000000;
 
 /* Constants for how SOS will layout the address space of any processes it loads up */
 pub const PROCESS_STACK_TOP: usize = 	0x90000000;
