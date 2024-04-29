@@ -1,7 +1,7 @@
 use crate::bitfield::{bf_first_free, bf_set_bit, bf_get_bit, bf_clr_bit, bitfield_init, bitfield_type};
 use crate::cspace::{CNODE_SLOTS, CNODE_SIZE_BITS, BOT_LVL_PER_NODE, CSpace};
 use crate::bootstrap::INITIAL_TASK_CNODE_SIZE_BITS;
-use crate::frame_table::{FrameTable, FrameRef, NULL_FRAME};
+use crate::frame_table::{FrameTable, FrameRef};
 use crate::page::BIT;
 use crate::ut::UTTable;
 
@@ -84,36 +84,36 @@ fn test_bf() {
 const TEST_FRAMES: usize = 10;
 
 fn test_frame_table(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable) {
-	let mut frames: [FrameRef; TEST_FRAMES] = [0; TEST_FRAMES];
+	let mut frames: [Option<FrameRef>; TEST_FRAMES] = [None; TEST_FRAMES];
 
 	for f in 0..TEST_FRAMES {
-		frames[f] = frame_table.alloc_frame(cspace, ut_table).expect("Failed to allocate frame");
-		assert!(frames[f] != NULL_FRAME);
+		frames[f] = frame_table.alloc_frame(cspace, ut_table);
+		assert!(frames[f].is_some());
 
-		let data = frame_table.frame_data(frames[f]);
+		let data = frame_table.frame_data(frames[f].unwrap());
 		data[0] = f.try_into().unwrap();
 		data[BIT(sel4_sys::seL4_PageBits.try_into().unwrap()) - 1] = f.try_into().unwrap();
 	}
 
 	for f in 0..TEST_FRAMES {
-		let data = frame_table.frame_data(frames[f]);
+		let data = frame_table.frame_data(frames[f].unwrap());
 		assert!(usize::from(data[0]) == f);
 		assert!(usize::from(data[BIT(sel4_sys::seL4_PageBits.try_into().unwrap()) - 1]) == f);
 	}
 
 	for f in 0..TEST_FRAMES {
-		frame_table.free_frame(frames[f]);
+		frame_table.free_frame(frames[f].unwrap());
 	}
 
-	let mut new_frames: [FrameRef; TEST_FRAMES] = [0; TEST_FRAMES];
+	let mut new_frames: [Option<FrameRef>; TEST_FRAMES] = [None; TEST_FRAMES];
 	for f in 0..TEST_FRAMES {
-		new_frames[f] = frame_table.alloc_frame(cspace, ut_table).expect("Failed to allocate frame");
-		assert!(new_frames[f] != NULL_FRAME);
+		new_frames[f] = frame_table.alloc_frame(cspace, ut_table);
+		assert!(new_frames[f].is_some());
 
 		let mut o = 0;
 		while (o < TEST_FRAMES) {
 			if (new_frames[f] == frames[o]) {
-				frames[o] == NULL_FRAME;
+				frames[o] == None;
 				break;
 			}
 			o += 1;
@@ -123,7 +123,7 @@ fn test_frame_table(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &m
 	}
 
 	for f in 0..TEST_FRAMES {
-		frame_table.free_frame(new_frames[f]);
+		frame_table.free_frame(new_frames[f].unwrap());
 	}
 }
 

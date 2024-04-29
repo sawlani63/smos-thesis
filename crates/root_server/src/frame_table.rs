@@ -9,14 +9,13 @@ use crate::mapping::map_frame;
 type FrameData = [u8; BIT(sel4_sys::seL4_PageBits as usize)];
 
 pub type FrameRef = u32;
-pub const NULL_FRAME : FrameRef = 0;
 
 // @alwin: C uses a packed struct but we don't have those in Rust.
 // #[packed]
 pub struct Frame {
 	cap: sel4::cap::SmallPage,
-	prev: FrameRef,
-	next: FrameRef,
+	prev: Option<FrameRef>,
+	next: Option<FrameRef>,
 	list_id: ListID,
 }
 
@@ -26,11 +25,11 @@ pub struct FrameWrapper {
 }
 
 impl FrameWrapper {
-	pub fn get_prev(self: &Self) -> FrameRef {
+	pub fn get_prev(self: &Self) -> Option<FrameRef> {
 		return unsafe {(*self.frame).prev};
 	}
 
-	pub fn set_prev(self: &Self, prev: FrameRef) {
+	pub fn set_prev(self: &Self, prev: Option<FrameRef>) {
 		unsafe {(*self.frame).prev = prev};
 	}
 
@@ -42,11 +41,11 @@ impl FrameWrapper {
 		unsafe {(*self.frame).cap = cap};
 	}
 
-	pub fn get_next(self: &Self) -> FrameRef {
+	pub fn get_next(self: &Self) -> Option<FrameRef> {
 		return unsafe {(*self.frame).next};
 	}
 
-	pub fn set_next(self: &Self, next: FrameRef) {
+	pub fn set_next(self: &Self, next: Option<FrameRef>) {
 		unsafe {(*self.frame).next = next};
 	}
 
@@ -73,8 +72,8 @@ enum ListID {
 #[derive(Copy,Clone)]
 struct FrameList {
 	list_id: ListID,
-	first: FrameRef,
-	last: FrameRef,
+	first: Option<FrameRef>,
+	last: Option<FrameRef>,
 	length: usize,
 }
 
@@ -91,7 +90,6 @@ pub struct FrameTable {
 
 impl FrameTable {
 	fn frame_from_ref(self: &Self, frame_ref: FrameRef) -> FrameWrapper {
-		assert!(frame_ref != NULL_FRAME);
 		assert!(frame_ref < self.capacity.try_into().unwrap());
 		return FrameWrapper {frame: unsafe { self.frames.wrapping_add(frame_ref.try_into().unwrap()) }};
 	}
@@ -103,7 +101,6 @@ impl FrameTable {
 	}
 
 	pub fn frame_data(self: &Self, frame_ref: FrameRef) -> &mut FrameData {
-		assert!(frame_ref != NULL_FRAME);
 		assert!(frame_ref < self.capacity.try_into().unwrap());
 		return unsafe { &mut (*self.frame_data.wrapping_add(frame_ref.try_into().unwrap())) };
 	}
@@ -115,24 +112,24 @@ impl FrameTable {
 			_ => panic!("Invalid list type")
 		};
 
-		if list.first == NULL_FRAME {
+		if list.first.is_none() {
 			return None
 		}
 
-		let head = self.frame_from_ref(list.first);
+		let head = self.frame_from_ref(list.first.unwrap());
 		if list.last == list.first {
-			list.last == NULL_FRAME;
-			assert!(head.get_next() == NULL_FRAME);
+			list.last == None;
+			assert!(head.get_next() == None);
 		} else {
-			let next = self.frame_from_ref(head.get_next());
-			next.set_prev(NULL_FRAME);
+			let next = self.frame_from_ref(head.get_next().unwrap());
+			next.set_prev(None);
 		}
 
 		list.first = head.get_next();
-		assert!(head.get_prev() == NULL_FRAME);
-		head.set_next(NULL_FRAME);
+		assert!(head.get_prev() == None);
+		head.set_next(None);
 		head.set_list_id(ListID::NO_LIST);
-		head.set_prev(NULL_FRAME);
+		head.set_prev(None);
 		list.length -= 1;
 
 		match list_id {
@@ -146,8 +143,8 @@ impl FrameTable {
 
 	fn push_front(self: &mut Self, list_id: ListID, frame: FrameWrapper) {
 		assert!(frame.get_list_id() == ListID::NO_LIST);
-		assert!(frame.get_next() == NULL_FRAME);
-		assert!(frame.get_prev() == NULL_FRAME);
+		assert!(frame.get_next() == None);
+		assert!(frame.get_prev() == None);
 
 		let mut list = match list_id {
 			ListID::FREE_LIST => self.free,
@@ -157,17 +154,17 @@ impl FrameTable {
 
 		let frame_ref = self.ref_from_frame(&frame);
 
-		if list.last == NULL_FRAME {
-			list.last = frame_ref;
+		if list.last == None {
+			list.last = Some(frame_ref);
 		}
 
 		frame.set_next(list.first);
-		if (frame.get_next() != NULL_FRAME) {
-			let next = self.frame_from_ref(frame.get_next());
-			next.set_prev(frame_ref);
+		if let Some(next_ref) = frame.get_next() {
+			let next_frame = self.frame_from_ref(next_ref);
+			next_frame.set_prev(Some(frame_ref));
 		}
 
-		list.first = frame_ref;
+		list.first = Some(frame_ref);
 		list.length += 1;
 		frame.set_list_id(list.list_id);
 
@@ -180,8 +177,8 @@ impl FrameTable {
 
 	fn push_back(self: &mut Self, list_id: ListID, frame: FrameWrapper) {
 		assert!(frame.get_list_id() == ListID::NO_LIST);
-		assert!(frame.get_next() == NULL_FRAME);
-		assert!(frame.get_prev() == NULL_FRAME);
+		assert!(frame.get_next() == None);
+		assert!(frame.get_prev() == None);
 
 		let mut list = match list_id {
 			ListID::FREE_LIST => self.free,
@@ -190,35 +187,33 @@ impl FrameTable {
 		};
 
 		let frame_ref = self.ref_from_frame(&frame);
-		if list.last != NULL_FRAME {
-			let last = self.frame_from_ref(list.last);
-			last.set_next(frame_ref);
+		match list.last {
+			Some(last_ref) => {
+				let last_frame = self.frame_from_ref(last_ref);
+				last_frame.set_next(Some(frame_ref));
 
-			frame.set_prev(list.last);
-			list.last = frame_ref;
+				frame.set_prev(list.last);
+				list.last = Some(frame_ref);
 
-			frame.set_list_id(list.list_id);
-			list.length += 1;
+				frame.set_list_id(list.list_id);
+				list.length += 1;
 
-			match list_id {
-				ListID::FREE_LIST => self.free = list,
-				ListID::ALLOCATED_LIST => self.allocated = list,
-				_ => panic!("Invalid list type")
-			};
-		} else {
-			// This one pushes the list itself
-			self.push_front(list_id, frame);
+				match list_id {
+					ListID::FREE_LIST => self.free = list,
+					ListID::ALLOCATED_LIST => self.allocated = list,
+					_ => panic!("Invalid list type")
+				};
+			},
+			None => self.push_front(list_id, frame) // This one pushes the list itself
 		}
-
-
 	}
 
 	pub fn init(vspace: sel4::cap::VSpace) -> Self {
 		return FrameTable {
 			frames: vmem_layout::FRAME_TABLE as *mut Frame,
 			frame_data: vmem_layout::FRAME_DATA as *mut FrameData,
-			free: FrameList { list_id: ListID::FREE_LIST, first: 0, last: 0, length: 0 },
-			allocated: FrameList { list_id: ListID::ALLOCATED_LIST, first: 0, last: 0, length: 0},
+			free: FrameList { list_id: ListID::FREE_LIST, first: None, last: None, length: 0 },
+			allocated: FrameList { list_id: ListID::ALLOCATED_LIST, first: None, last: None, length: 0},
 			capacity: 0,
 			used: 0,
 			byte_length: 0,
@@ -226,16 +221,16 @@ impl FrameTable {
 		}
 	}
 
-	pub fn alloc_frame(self: &mut Self, cspace: &mut CSpace, ut_table: &mut UTTable) -> Result<FrameRef, sel4::Error> {
+	pub fn alloc_frame(self: &mut Self, cspace: &mut CSpace, ut_table: &mut UTTable) -> Option<FrameRef> {
 		let mut frame = self.pop_front(ListID::FREE_LIST);
 
 		if frame.is_none() {
 			// @alwin: I really don't like this
-			frame = Some(self.alloc_fresh_frame(cspace, ut_table)?);
+			frame = Some(self.alloc_fresh_frame(cspace, ut_table).ok()?);
 		}
 
 		self.push_back(ListID::ALLOCATED_LIST, frame.unwrap());
-		return Ok(self.ref_from_frame(&frame.unwrap()));
+		return Some(self.ref_from_frame(&frame.unwrap()));
 
 	}
 
@@ -248,24 +243,26 @@ impl FrameTable {
 
 		assert!(frame.get_list_id() == list.list_id);
 
-		if (frame.get_prev() != NULL_FRAME) {
-			let prev = self.frame_from_ref(frame.get_prev());
-			prev.set_next(frame.get_next());
-		} else {
-			list.first = frame.get_next();
+		match frame.get_prev() {
+			None => list.first = frame.get_next(),
+			Some(prev_ref) => {
+				let prev_frame = self.frame_from_ref(prev_ref);
+				prev_frame.set_next(frame.get_next());
+			}
 		}
 
-		if (frame.get_next() != NULL_FRAME) {
-			let next = self.frame_from_ref(frame.get_next());
-			next.set_prev(frame.get_prev());
-		} else {
-			list.last = frame.get_prev();
+		match frame.get_next() {
+			None => list.last = frame.get_prev(),
+			Some(next_ref) => {
+				let next_frame = self.frame_from_ref(next_ref);
+				next_frame.set_prev(frame.get_prev());
+			}
 		}
 
 		list.length -= 1;
 		frame.set_list_id(ListID::NO_LIST);
-		frame.set_prev(NULL_FRAME);
-		frame.set_next(NULL_FRAME);
+		frame.set_prev(None);
+		frame.set_next(None);
 
 		// @alwin: This is not nice but I had to do it because of multiple reference problems
 		// Maybe use a refcell?
@@ -345,12 +342,6 @@ impl FrameTable {
 
 		assert!(self.used < self.capacity);
 
-		// @alwin: I don't really think this is necessary with Option types
-		if (self.used == 0) {
-        	/* The first frame is a sentinel NULL frame. */
-			self.used += 1
-		}
-
 		let frame = self.frame_from_ref(self.used.try_into().unwrap());
 		self.used += 1;
 
@@ -360,8 +351,8 @@ impl FrameTable {
 			Ok(frame_cap) => {
 				frame.set_cap(frame_cap);
 				frame.set_list_id(ListID::NO_LIST);
-				frame.set_prev(NULL_FRAME);
-				frame.set_next(NULL_FRAME);
+				frame.set_prev(None);
+				frame.set_next(None);
 				Ok(frame)
 			} Err(e) => {
 				self.used -= 1;
