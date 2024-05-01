@@ -131,5 +131,7 @@ fn test_frame_table(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &m
 pub fn run_tests(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable) {
 	test_bf();
 	test_cspace(cspace);
+
+	// @alwin: C also has some tests for children cspaces
 	test_frame_table(cspace, ut_table, frame_table);
 }

@@ -5,3 +5,8 @@
 #
 
 /build/
+bin/
+seL4/
+target/
+.cargo/
+test.py

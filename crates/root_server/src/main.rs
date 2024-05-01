@@ -26,6 +26,7 @@ mod vmem_layout;
 mod stack;
 mod frame_table;
 mod tests;
+mod clock;
 
 use sel4_root_task::{root_task, Never};
 use crate::debug::debug_print_bootinfo;
@@ -34,12 +35,15 @@ use crate::uart::uart_init;
 use crate::cspace::CSpace;
 use crate::ut::UTTable;
 use crate::printing::print_init;
-use crate::page::PAGE_SIZE_4K;
+use crate::page::{PAGE_SIZE_4K, PAGE_ALIGN_4K};
 use crate::util::alloc_retype;
 use crate::mapping::map_frame;
 use crate::tests::run_tests;
 use crate::frame_table::FrameTable;
+use crate::clock::clock_init;
+use crate::page::BIT;
 
+const IRQ_EP_BADGE: usize = 1 << (sel4_sys::seL4_BadgeBits - 1);
 
 /* Create and endpoint and a bounding notification object. These are never freed so we don't keep
    track of the UTs used to allocate them.  */
@@ -59,7 +63,48 @@ fn ipc_init(cspace: &mut CSpace, ut_table: &mut UTTable)
     return Ok((ep, ntfn));
 }
 
-extern "C" fn main_continued(cspace_ptr : *mut CSpace, ut_table_ptr: *mut UTTable) {
+fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endpoint)
+                -> Result<(), sel4::Error> {
+
+    let (reply_cptr, reply_ut) = alloc_retype(cspace, ut_table, sel4::ObjectBlueprint::Reply)?;
+    let reply = sel4::CPtr::from_bits(reply_cptr.try_into().unwrap()).cast::<sel4::cap_type::Reply>();
+
+    let have_reply = false;
+    let mut reply_msg_info = sel4::MessageInfoBuilder::default().label(0)
+                                                                .caps_unwrapped(0)
+                                                                .extra_caps(0)
+                                                                .length(0)
+                                                                .build();
+    while true {
+        let (msg, badge) = {
+            if have_reply {
+                ep.reply_recv(reply_msg_info, reply)
+            } else {
+                ep.recv(reply)
+            }
+        };
+
+        let label = msg.label();
+
+        if (badge & IRQ_EP_BADGE as u64 != 0) {
+            // Handle IRQ notification
+        } else if (label == sel4_sys::seL4_Fault_tag::seL4_Fault_NullFault) {
+            // IPC message
+        } else {
+            // Some kind of fault
+        }
+
+        reply_msg_info = sel4::MessageInfoBuilder::default().label(0)
+                                                            .caps_unwrapped(0)
+                                                            .extra_caps(0)
+                                                            .length(0)
+                                                            .build();
+    }
+
+    Ok(())
+}
+
+extern "C" fn main_continued(cspace_ptr : *mut CSpace, ut_table_ptr: *mut UTTable) -> ! {
     log_rs!("Switched to new stack...");
 
     /* Get the cspace and ut_table back. This is slightly cursed because these exist on
@@ -76,6 +121,10 @@ extern "C" fn main_continued(cspace_ptr : *mut CSpace, ut_table_ptr: *mut UTTabl
     run_tests(cspace, ut_table, &mut frame_table);
 
     log_rs!("TESTS PASSED!");
+
+    clock_init();
+
+    syscall_loop(cspace, ut_table, ipc_ep);
 
     sel4::init_thread::slot::TCB.cap().tcb_suspend().expect("Failed to suspend");
     unreachable!()

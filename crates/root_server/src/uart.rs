@@ -1,20 +1,23 @@
-mod uart_meson;
-mod uart_pl011;
-
 use core::fmt::Write;
-
 use crate::mapping::map_device;
 use crate::page::{PAGE_SIZE_4K, PAGE_ALIGN_4K};
 use crate::ut::UTTable;
 use crate::util::MASK;
 use crate::cspace::CSpace;
 use sel4::sel4_cfg;
+use sel4_config::sel4_cfg_if;
 
-#[sel4_cfg(PLAT = "qemu-arm-virt")]
-use crate::uart::uart_pl011::{UART, UART_PADDR, plat_uart_init, plat_uart_put_char};
+sel4_cfg_if! {
+	if #[sel4_cfg(PLAT_QEMU_ARM_VIRT)] {
+		#[path = "uart/uart_pl011.rs"]
+		mod imp;
+	} else if #[sel4_cfg(PLAT_ODROIDC2)] {
+		#[path = "uart/uart_meson.rs"]
+		mod imp;
+	}
+}
 
-#[sel4_cfg(PLAT = "odroidc2")]
-use crate::uart::uart_meson::{UART, UART_PADDR, plat_uart_init, plat_uart_put_char};
+use imp::{UART, UART_PADDR, plat_uart_init, plat_uart_put_char};
 
 #[derive(Copy, Clone)]
 pub struct UARTPrinter {

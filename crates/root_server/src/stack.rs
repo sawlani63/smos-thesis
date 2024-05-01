@@ -2,7 +2,7 @@ use core::arch::asm;
 use crate::cspace::CSpace;
 use crate::ut::UTTable;
 
-pub fn utils_run_on_stack(stack_top: usize, func: unsafe extern "C" fn(*mut CSpace, *mut UTTable), cspace: &mut CSpace,
+pub fn utils_run_on_stack(stack_top: usize, func: unsafe extern "C" fn(*mut CSpace, *mut UTTable) -> !, cspace: &mut CSpace,
                           ut_table: &mut UTTable) {
     unsafe {
         asm!(
