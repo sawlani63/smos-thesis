@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use crate::arith::LOG_BASE_2;
 
 pub const fn BIT(n : usize) -> usize {

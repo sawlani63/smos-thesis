@@ -19,7 +19,7 @@ pub const INITIAL_TASK_CNODE_SIZE_BITS: usize = 18;
 pub const INITIAL_TASK_CSPACE_BITS: usize = CNODE_SLOT_BITS(INITIAL_TASK_CNODE_SIZE_BITS) + CNODE_SLOT_BITS(CNODE_SIZE_BITS);
 pub const INITIAL_TASK_CSPACE_SLOTS: usize = BIT(INITIAL_TASK_CSPACE_BITS);
 
-static mut bot_lvl_nodes : [*mut BotLvlNodeT; INITIAL_TASK_CSPACE_SLOTS / BOT_LVL_PER_NODE + 1] =
+static mut BOT_LVL_NODES : [*mut BotLvlNodeT; INITIAL_TASK_CSPACE_SLOTS / BOT_LVL_PER_NODE + 1] =
 					  [core::ptr::null_mut(); INITIAL_TASK_CSPACE_SLOTS / BOT_LVL_PER_NODE + 1];
 
 fn untyped_in_range(untyped: &sel4::UntypedDesc) -> bool {
@@ -164,7 +164,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     let mut lvl1_cnode = CPtr::from_bits(lvl1_cnode_cptr.path().bits()).cast::<sel4::cap_type::CNode>();
 
     /* now create the 2nd level nodes, directly in the node we just created */
-    let mut chunk: usize = 0;
+    let mut chunk: usize;
     let mut total: usize = n_cnodes;
     blueprint = sel4::ObjectBlueprint::CNode{
     	size_bits: CNODE_SLOT_BITS(CNODE_SIZE_BITS),
@@ -241,7 +241,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
 	let mut first_free_slot = bi.empty().start();
 
 	let mut cspace = unsafe {
-    	CSpace::new(lvl1_cnode, true, INITIAL_TASK_CNODE_SIZE_BITS, &mut bot_lvl_nodes, None /* alloc */)
+    	CSpace::new(lvl1_cnode, true, INITIAL_TASK_CNODE_SIZE_BITS, &mut BOT_LVL_NODES, None /* alloc */)
 	};
 
 	/* Allocate the PUD */

@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use core::arch::asm;
 use sel4_config::{sel4_cfg_bool};
 
@@ -33,7 +35,7 @@ fn COPROC_WRITE_WORD(register: TimerRegisters, value: usize) {
 
 fn COPROC_READ_WORD(register: TimerRegisters) -> usize {
 	// @alwin: this is kinda horrible and macros don't help
-	let mut res : usize = 0;
+	let mut res : usize;
 	unsafe {
 		match register {
 			TimerRegisters::CNTP_CTL => {
@@ -65,6 +67,7 @@ fn COPROC_READ_WORD(register: TimerRegisters) -> usize {
 	return res;
 }
 
+#[allow(non_camel_case_types)]
 enum TimerRegisters {
 	CNTP_CTL,
 	CNTP_CVAL,
@@ -137,6 +140,6 @@ pub fn disable_timer() {
 	COPROC_WRITE_WORD(TimerRegisters::CNTP_CTL, ctrl & !TIMER_ENABLE);
 }
 
-pub fn configure_timeout_at(curr_time: usize, deadline: usize) {
+pub fn configure_timeout_at(_curr_time: usize, deadline: usize) {
 	timer_set_compare(ns_and_freq_to_cycles(deadline, timer_get_freq()));
 }

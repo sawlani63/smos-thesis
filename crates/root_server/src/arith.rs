@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use core::mem::size_of;
 use crate::limits::CHAR_BIT;
 

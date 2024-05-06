@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use crate::bitfield::{bf_first_free, bf_set_bit, bf_get_bit, bf_clr_bit, bitfield_init, bitfield_type};
 use crate::cspace::{CNODE_SLOTS, CNODE_SIZE_BITS, BOT_LVL_PER_NODE, CSpace};
 use crate::bootstrap::INITIAL_TASK_CNODE_SIZE_BITS;
@@ -51,7 +53,7 @@ fn test_cspace(cspace: &mut CSpace) {
 
 	for i in 0..NSLOTS {
 		slots[i] = cspace.alloc_slot().unwrap();
-		if (slots[i] == 0) {
+		if slots[i] == 0 {
 			real_nslots = i;
 			break;
 		}
@@ -77,7 +79,7 @@ fn test_bf() {
     	assert!(!bf_get_bit(&mut bf, i));
     	bf_set_bit(&mut bf, i);
     	assert!(bf_get_bit(&mut bf, i));
-    	if (i < 127) {
+    	if i < 127 {
     		assert!(bf_first_free(&mut bf).unwrap() == i + 1);
     	} else {
     		assert!(bf_first_free(&mut bf).is_err());
@@ -115,9 +117,9 @@ fn test_frame_table(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &m
 		assert!(new_frames[f].is_some());
 
 		let mut o = 0;
-		while (o < TEST_FRAMES) {
-			if (new_frames[f] == frames[o]) {
-				frames[o] == None;
+		while o < TEST_FRAMES {
+			if new_frames[f] == frames[o] {
+				frames[o] = None;
 				break;
 			}
 			o += 1;

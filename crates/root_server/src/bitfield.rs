@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use core::mem::size_of;
 use crate::page::BIT;
 
@@ -22,7 +24,7 @@ pub fn bf_first_free(bf: &[u64]) -> Result<usize, sel4::Error> {
 		i += 1;
 	}
 
-	if (i == bf.len()) {
+	if i == bf.len() {
 		return Err(sel4::Error::NotEnoughMemory);
 	}
 

@@ -7,7 +7,7 @@ struct IRQHandlerInfo {
 	irq: usize,
 	irq_handler: sel4::cap::IrqHandler,
 	ntfn: sel4::cap::Notification,
-	callback: irq_callback,
+	callback: IRQCallback,
 	data: *const () // @alwin: This can be done using an enum instead
 }
 
@@ -20,7 +20,7 @@ pub struct IRQDispatch {
 	irq_handlers: [Option<IRQHandlerInfo>; sel4::WORD_SIZE]
 }
 
-type irq_callback = fn(*const (), usize, sel4::cap::IrqHandler) -> i32;
+type IRQCallback = fn(*const (), usize, sel4::cap::IrqHandler) -> i32;
 
 impl IRQDispatch {
 	pub fn new(irq_control: sel4::cap::IrqControl, ntfn: sel4::cap::Notification, flag_bits: usize,
@@ -37,8 +37,25 @@ impl IRQDispatch {
 		}
 	}
 
+	pub fn handle_irq(self: &Self, mut badge: usize) -> sel4::Word {
+		let mut unchecked_bits = badge & self.allocated_bits[0] as usize & self.ident_bits;
+
+		while unchecked_bits != 0 {
+			let bit: usize = unchecked_bits.trailing_zeros().try_into().unwrap();
+
+			(self.irq_handlers[bit].expect("IRQ handler not registered for this IRQ")
+								  .callback)(self.irq_handlers[bit].unwrap().data, self.irq_handlers[bit].unwrap().irq,
+											self.irq_handlers[bit].unwrap().irq_handler);
+
+			badge &= !BIT(bit);
+			unchecked_bits &= !badge;
+		}
+
+		return badge as sel4::Word;
+	}
+
 	pub fn register_irq_handler(self: &mut Self, cspace: &mut CSpace, irq: usize, edge_triggered: bool,
-								callback: irq_callback, data: *const (),
+								callback: IRQCallback, data: *const (),
 								irq_ntfn: sel4::cap::Notification) -> Result<sel4::cap::IrqHandler, sel4::Error> {
 
 		let ident_bit = self.alloc_irq_bit()?;
@@ -73,7 +90,8 @@ impl IRQDispatch {
 								 			  sel4::CapRightsBuilder::none().write(true).build(),
 								 			  badge.try_into().unwrap()).map_err(|e| {
 
-			cspace.delete(handler_cptr);
+			// @alwin: Handling the failure case like this is not clean
+			let _ = cspace.delete(handler_cptr);
 			cspace.free_slot(ntfn_cptr);
 			cspace.free_slot(handler_cptr);
 			self.free_irq_bit(ident_bit);
@@ -82,8 +100,8 @@ impl IRQDispatch {
 
 		// Set the notification for the IRQ
 		handler.irq_handler_set_notification(ntfn).map_err(|e| {
-			cspace.delete(ntfn_cptr);
-			cspace.delete(handler_cptr);
+			let _ = cspace.delete(ntfn_cptr);
+			let _ = cspace.delete(handler_cptr);
 			cspace.free_slot(ntfn_cptr);
 			cspace.free_slot(handler_cptr);
 			self.free_irq_bit(ident_bit);

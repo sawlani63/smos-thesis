@@ -1,5 +1,6 @@
-use sel4::ObjectBlueprint;
+#![allow(non_snake_case)]
 
+use sel4::ObjectBlueprint;
 use crate::err_rs;
 use crate::cspace::CSpace;
 use crate::ut::{UTTable, UTWrapper};

@@ -17,18 +17,18 @@ use imp::{plat_timer_init, TIMEOUT_IRQ, get_time, configure_timeout_at, disable_
 #[derive(Copy, Clone)]
 struct TimeoutNode {
 	deadline: usize,
-	callback: Option<timer_callback>,
+	callback: Option<TimerCallback>,
 	callback_data: *const (),
 	next: Option<u16>,
 	prev: Option<u16>,
 }
 
-type timer_callback = fn(usize, *const ());
+type TimerCallback = fn(usize, *const ());
 
 const MAX_TIMEOUTS: usize = 1024;
-static mut timeouts_head_full: Option<u16> = None;
-static mut timeouts_head_empty: Option<u16> = Some(0);
-static mut timeouts: [TimeoutNode; MAX_TIMEOUTS] = [TimeoutNode { deadline: 0,
+static mut TIMEOUTS_HEAD_FULL: Option<u16> = None;
+static mut TIMEOUTS_HEAD_EMPTY: Option<u16> = Some(0);
+static mut TIMEOUTS: [TimeoutNode; MAX_TIMEOUTS] = [TimeoutNode { deadline: 0,
 															       callback: None,
 															       callback_data: core::ptr::null(),
 															       next: None,
@@ -37,13 +37,13 @@ static mut timeouts: [TimeoutNode; MAX_TIMEOUTS] = [TimeoutNode { deadline: 0,
 
 fn timeouts_empty() -> bool {
 	unsafe {
-		return timeouts_head_full == None;
+		return TIMEOUTS_HEAD_FULL == None;
 	}
 }
 
 fn timeouts_full() -> bool {
 	unsafe {
-		return timeouts_head_empty == None;
+		return TIMEOUTS_HEAD_EMPTY == None;
 	}
 }
 
@@ -53,26 +53,26 @@ fn timeouts_peek() -> Option<usize> {
 	}
 
 	unsafe {
-		return Some(timeouts[timeouts_head_full.unwrap() as usize].deadline);
+		return Some(TIMEOUTS[TIMEOUTS_HEAD_FULL.unwrap() as usize].deadline);
 	}
 }
 
-fn timeouts_remove_min() -> (usize, timer_callback, *const (), usize) {
+fn timeouts_remove_min() -> (usize, TimerCallback, *const (), usize) {
 	unsafe {
-		let rm_index = timeouts_head_full.expect("Head was empty") as usize;
-		timeouts_head_full = timeouts[rm_index].next;
-		if (timeouts_head_full != None) {
-			timeouts[timeouts_head_full.unwrap() as usize].prev = None
+		let rm_index = TIMEOUTS_HEAD_FULL.expect("Head was empty") as usize;
+		TIMEOUTS_HEAD_FULL = TIMEOUTS[rm_index].next;
+		if TIMEOUTS_HEAD_FULL != None {
+			TIMEOUTS[TIMEOUTS_HEAD_FULL.unwrap() as usize].prev = None
 		}
-		timeouts[rm_index].next = timeouts_head_empty;
-		timeouts_head_empty = Some(rm_index.try_into().unwrap());
+		TIMEOUTS[rm_index].next = TIMEOUTS_HEAD_EMPTY;
+		TIMEOUTS_HEAD_EMPTY = Some(rm_index.try_into().unwrap());
 
-		return (timeouts[rm_index].deadline, timeouts[rm_index].callback.unwrap(),
-				timeouts[rm_index].callback_data, rm_index);
+		return (TIMEOUTS[rm_index].deadline, TIMEOUTS[rm_index].callback.unwrap(),
+				TIMEOUTS[rm_index].callback_data, rm_index);
 	}
 }
 
-fn timer_irq(data: *const (), irq: usize, irq_handler: sel4::cap::IrqHandler) -> i32{
+fn timer_irq(_data: *const (), _irq: usize, irq_handler: sel4::cap::IrqHandler) -> i32 {
 
 	// @alwin: should this return something
 	let curr_time = get_time();
@@ -89,91 +89,92 @@ fn timer_irq(data: *const (), irq: usize, irq_handler: sel4::cap::IrqHandler) ->
 		disable_timer();
 	}
 
-	irq_handler.irq_handler_ack();
+	irq_handler.irq_handler_ack().expect("Failed to ack");
 	return 0;
 }
 
 fn timeouts_init() {
 	for i in 0..(MAX_TIMEOUTS - 1) {
 		unsafe {
-			timeouts[i].next = Some((i + 1) as u16);
+			TIMEOUTS[i].next = Some((i + 1) as u16);
 		}
 	}
-	unsafe { timeouts[MAX_TIMEOUTS - 1].next = None; };
+	unsafe { TIMEOUTS[MAX_TIMEOUTS - 1].next = None; };
 }
 
 // @alwin: This file has way too much unsafe everywhere
-unsafe fn timeouts_insert(deadline: usize, callback: timer_callback, data: *const ()) -> Option<usize>{
+unsafe fn timeouts_insert(deadline: usize, callback: TimerCallback, data: *const ()) -> Option<usize>{
 	if timeouts_full() {
 		return None;
 	}
 
 	if timeouts_empty() {
-		timeouts_head_full = timeouts_head_empty;
-		timeouts_head_empty = timeouts[timeouts_head_empty.unwrap() as usize].next;
-		let timeouts_head_idx = timeouts_head_full.unwrap() as usize;
-		timeouts[timeouts_head_idx].deadline = deadline;
-		timeouts[timeouts_head_idx].callback = Some(callback);
-		timeouts[timeouts_head_idx].callback_data = data;
+		TIMEOUTS_HEAD_FULL = TIMEOUTS_HEAD_EMPTY;
+		TIMEOUTS_HEAD_EMPTY = TIMEOUTS[TIMEOUTS_HEAD_EMPTY.unwrap() as usize].next;
+		let timeouts_head_idx = TIMEOUTS_HEAD_FULL.unwrap() as usize;
+		TIMEOUTS[timeouts_head_idx].deadline = deadline;
+		TIMEOUTS[timeouts_head_idx].callback = Some(callback);
+		TIMEOUTS[timeouts_head_idx].callback_data = data;
     	// timeouts[timeouts_head_idx].valid = true; @alwin: necessary?
-    	timeouts[timeouts_head_idx].next = None;
-    	timeouts[timeouts_head_idx].prev = None;
+    	TIMEOUTS[timeouts_head_idx].next = None;
+    	TIMEOUTS[timeouts_head_idx].prev = None;
     	return Some(timeouts_head_idx);
 	}
 
-	if (deadline < timeouts[timeouts_head_full.unwrap() as usize].deadline) {
-    	let insert_index = timeouts_head_empty.unwrap() as usize;
-		timeouts_head_empty = timeouts[insert_index].next;
-    	timeouts[insert_index].next = timeouts_head_full;
-    	timeouts[timeouts_head_full.unwrap() as usize].prev = Some(insert_index.try_into().unwrap());
-    	timeouts_head_full = Some(insert_index.try_into().unwrap());
-        timeouts[insert_index].deadline = deadline;
-        timeouts[insert_index].callback = Some(callback);
-        timeouts[insert_index].callback_data = data;
+	if deadline < TIMEOUTS[TIMEOUTS_HEAD_FULL.unwrap() as usize].deadline {
+    	let insert_index = TIMEOUTS_HEAD_EMPTY.unwrap() as usize;
+		TIMEOUTS_HEAD_EMPTY = TIMEOUTS[insert_index].next;
+    	TIMEOUTS[insert_index].next = TIMEOUTS_HEAD_FULL;
+    	TIMEOUTS[TIMEOUTS_HEAD_FULL.unwrap() as usize].prev = Some(insert_index.try_into().unwrap());
+    	TIMEOUTS_HEAD_FULL = Some(insert_index.try_into().unwrap());
+        TIMEOUTS[insert_index].deadline = deadline;
+        TIMEOUTS[insert_index].callback = Some(callback);
+        TIMEOUTS[insert_index].callback_data = data;
         // timeouts[insert_index].valid = true;
         return Some(insert_index);
 	}
 
-	let mut tmp_index = timeouts_head_full.unwrap() as usize;
-	while timeouts[tmp_index].next.is_some() &&
-		  deadline >= timeouts[timeouts[tmp_index].next.unwrap() as usize].deadline {
+	let mut tmp_index = TIMEOUTS_HEAD_FULL.unwrap() as usize;
+	while TIMEOUTS[tmp_index].next.is_some() &&
+		  deadline >= TIMEOUTS[TIMEOUTS[tmp_index].next.unwrap() as usize].deadline {
 
-		  	tmp_index = timeouts[tmp_index].next.unwrap() as usize;
+		  	tmp_index = TIMEOUTS[tmp_index].next.unwrap() as usize;
 
 	}
 
-	let insert_index = timeouts_head_empty.unwrap() as usize;
-	timeouts[insert_index].next = timeouts[tmp_index].next;
-	timeouts[insert_index].prev = Some(tmp_index.try_into().unwrap());
-	timeouts[tmp_index].next = Some(insert_index.try_into().unwrap());
-	if timeouts[insert_index].next.is_some() {
-		timeouts[timeouts[insert_index].next.unwrap() as usize].prev = Some(insert_index.try_into().unwrap());
+	let insert_index = TIMEOUTS_HEAD_EMPTY.unwrap() as usize;
+	TIMEOUTS[insert_index].next = TIMEOUTS[tmp_index].next;
+	TIMEOUTS[insert_index].prev = Some(tmp_index.try_into().unwrap());
+	TIMEOUTS[tmp_index].next = Some(insert_index.try_into().unwrap());
+	if TIMEOUTS[insert_index].next.is_some() {
+		TIMEOUTS[TIMEOUTS[insert_index].next.unwrap() as usize].prev = Some(insert_index.try_into().unwrap());
 	}
-	timeouts[insert_index].deadline = deadline;
-	timeouts[insert_index].callback = Some(callback);
-	timeouts[insert_index].callback_data = data;
+	TIMEOUTS[insert_index].deadline = deadline;
+	TIMEOUTS[insert_index].callback = Some(callback);
+	TIMEOUTS[insert_index].callback_data = data;
 	// timeouts[insert_index].valid = true;
 	return Some(insert_index.try_into().unwrap());
 }
 
-pub fn register_timer(delay: usize, callback: timer_callback, data: *const ()) -> Result<(), sel4::Error>{
+pub fn register_timer(delay: usize, callback: TimerCallback, data: *const ()) -> Result<(), sel4::Error>{
 	let curr_time = get_time();
 	let deadline = curr_time + delay;
 	let prev_smallest_deadline = timeouts_peek();
 
-	let insert_index = unsafe { timeouts_insert(deadline, callback, data).ok_or(sel4::Error::NotEnoughMemory) }?;
+	unsafe { timeouts_insert(deadline, callback, data).ok_or(sel4::Error::NotEnoughMemory) }?;
 
-	if (prev_smallest_deadline.is_none() || deadline < prev_smallest_deadline.unwrap()) {
+	if prev_smallest_deadline.is_none() || deadline < prev_smallest_deadline.unwrap() {
 		configure_timeout_at(curr_time, deadline);
 	}
 
 	return Ok(())
 }
 
-pub fn clock_init(cspace: &mut CSpace, irq_dispatch: &mut IRQDispatch, ntfn: sel4::cap::Notification) {
+pub fn clock_init(cspace: &mut CSpace, irq_dispatch: &mut IRQDispatch, ntfn: sel4::cap::Notification) -> Result<(), sel4::Error>{
 	plat_timer_init();
-	irq_dispatch.register_irq_handler(cspace, TIMEOUT_IRQ, true, timer_irq, core::ptr::null() as *const (), ntfn);
+	irq_dispatch.register_irq_handler(cspace, TIMEOUT_IRQ, true, timer_irq, core::ptr::null() as *const (), ntfn)?;
 
-	timeouts_init()
+	timeouts_init();
+	Ok(())
 }
 

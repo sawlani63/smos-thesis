@@ -4,8 +4,7 @@ use crate::page::{PAGE_SIZE_4K, PAGE_ALIGN_4K};
 use crate::ut::UTTable;
 use crate::util::MASK;
 use crate::cspace::CSpace;
-use sel4::sel4_cfg;
-use sel4_config::sel4_cfg_if;
+use sel4_config::{sel4_cfg, sel4_cfg_if};
 
 sel4_cfg_if! {
 	if #[sel4_cfg(PLAT_QEMU_ARM_VIRT)] {

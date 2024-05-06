@@ -1,13 +1,15 @@
-use sel4::ObjectBlueprint;
+#![allow(non_snake_case)]
 
+use sel4::ObjectBlueprint;
 use crate::bitfield::{bf_clr_bit, bf_first_free, bf_set_bit};
 use crate::page::{BIT, PAGE_SIZE_4K};
 use core::mem::size_of;
 use crate::bootstrap::{INITIAL_TASK_CNODE_SIZE_BITS};
-use crate::bitfield::{bitfield_type, BITFIELD_SIZE, bitfield_init};
+use crate::bitfield::{bitfield_type, bitfield_init};
 use crate::ut::UTWrapper;
 use crate::util::MASK;
 use crate::warn_rs;
+
 
 pub const fn CNODE_SLOT_BITS(x : usize) -> usize {
 	x - sel4_sys::seL4_SlotBits as usize
@@ -100,14 +102,14 @@ impl<'a> CSpace<'a> {
 
 		// @alwin: Need some way of determining if an IRQ is a PPI or not here to do the right
 		// invocation
-		// irq_control.irq_control_get_trigger(irq.try_into().unwrap(), edge_triggered.try_into().unwrap(),
-		// 										   &self.root_cnode.relative(irq_handler))
-		// 										   .or(Err(sel4::Error::InvalidArgument))?;
+		irq_control.irq_control_get_trigger(irq.try_into().unwrap(), edge_triggered.try_into().unwrap(),
+												   &self.root_cnode.relative(irq_handler))
+												   .or(Err(sel4::Error::InvalidArgument))?;
 
 		// @alwin: Core number is hard-coded here
-		irq_control.irq_control_get_trigger_core(irq.try_into().unwrap(), edge_triggered.try_into().unwrap(),
-												 0, &self.root_cnode.relative(irq_handler))
-												 .or(Err(sel4::Error::InvalidArgument))?;
+		// irq_control.irq_control_get_trigger_core(irq.try_into().unwrap(), edge_triggered.try_into().unwrap(),
+		// 										 0, &self.root_cnode.relative(irq_handler))
+		// 										 .or(Err(sel4::Error::InvalidArgument))?;
 
 		return Ok(irq_handler);
 	}
@@ -218,10 +220,6 @@ impl<'a> CSpace<'a> {
 
 	pub fn get_bot_lvl_node(self: &Self, i : usize) -> &mut BotLvlNodeT {
 		return unsafe{&mut *self.bot_lvl_nodes[i]};
-	}
-
-	pub fn set_bot_lvl_node(self: &mut Self, i : usize, ptr: *mut BotLvlNodeT)  {
-		self.bot_lvl_nodes[i] = ptr;
 	}
 
 	pub fn init_bot_lvl_node(self: &mut Self, i : usize, ptr: *mut BotLvlNodeT) {

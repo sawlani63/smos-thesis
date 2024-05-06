@@ -1,6 +1,7 @@
+#![allow(non_snake_case)]
+
 use sel4::CPtr;
 use crate::cspace::CSpace;
-
 use crate::err_rs;
 use crate::page::PAGE_SIZE_4K;
 use crate::mapping::map_frame;
@@ -134,7 +135,7 @@ impl UTTable {
 			// Divide this page into however many UTs will fit into it and push these all to the
 			// free structures list
 			for i in 0..(PAGE_SIZE_4K / size_of::<UT>()) {
-				self.free_structures = push(self.free_structures, unsafe {new_uts.wrapping_add(i)});
+				self.free_structures = push(self.free_structures, new_uts.wrapping_add(i));
 			}
 		}
 

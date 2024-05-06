@@ -36,13 +36,12 @@ use crate::uart::uart_init;
 use crate::cspace::CSpace;
 use crate::ut::UTTable;
 use crate::printing::print_init;
-use crate::page::{PAGE_SIZE_4K, PAGE_ALIGN_4K};
+use crate::page::PAGE_SIZE_4K;
 use crate::util::alloc_retype;
 use crate::mapping::map_frame;
 use crate::tests::run_tests;
 use crate::frame_table::FrameTable;
 use crate::clock::{clock_init, register_timer};
-use crate::page::BIT;
 use crate::irq::IRQDispatch;
 
 const IRQ_EP_BADGE: usize = 1 << (sel4_sys::seL4_BadgeBits - 1);
@@ -67,27 +66,28 @@ fn ipc_init(cspace: &mut CSpace, ut_table: &mut UTTable)
 }
 
 
-fn callback(idk: usize, idk2: *const ()) {
-    todo!();
+fn callback(_idk: usize, _idk2: *const ()) {
+    log_rs!("hey there!");
 }
 
-fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endpoint)
-                -> Result<(), sel4::Error> {
+fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endpoint, irq_dispatch: &mut IRQDispatch)
+               -> Result<(), sel4::Error> {
 
     let (reply_cptr, reply_ut) = alloc_retype(cspace, ut_table, sel4::ObjectBlueprint::Reply)?;
     let reply = sel4::CPtr::from_bits(reply_cptr.try_into().unwrap()).cast::<sel4::cap_type::Reply>();
 
-    let have_reply = false;
+    let mut have_reply = false;
     let mut reply_msg_info = sel4::MessageInfoBuilder::default().label(0)
                                                                 .caps_unwrapped(0)
                                                                 .extra_caps(0)
                                                                 .length(0)
                                                                 .build();
-    log_rs!("setting timer...");
-    register_timer(5000000000, callback, core::ptr::null());
 
-    while true {
-        let (msg, badge) = {
+    log_rs!("setting timer...");
+    register_timer(5000000000, callback, core::ptr::null())?;
+
+    loop {
+        let (msg, mut badge) = {
             if have_reply {
                 ep.reply_recv(reply_msg_info, reply)
             } else {
@@ -97,10 +97,11 @@ fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endp
 
         let label = msg.label();
 
-        if (badge & IRQ_EP_BADGE as u64 != 0) {
-            log_rs!("hey there");
+        if badge & IRQ_EP_BADGE as u64 != 0 {
+            badge = irq_dispatch.handle_irq(badge as usize);
+            have_reply = false;
             // Handle IRQ notification
-        } else if (label == sel4_sys::seL4_Fault_tag::seL4_Fault_NullFault) {
+        } else if label == sel4_sys::seL4_Fault_tag::seL4_Fault_NullFault {
             // IPC message
         } else {
             // Some kind of fault
@@ -137,9 +138,9 @@ extern "C" fn main_continued(cspace_ptr : *mut CSpace, ut_table_ptr: *mut UTTabl
 
     log_rs!("TESTS PASSED!");
 
-    clock_init(cspace, &mut irq_dispatch, ntfn);
+    clock_init(cspace, &mut irq_dispatch, ntfn).expect("Failed to initialize clock");
 
-    syscall_loop(cspace, ut_table, ipc_ep);
+    syscall_loop(cspace, ut_table, ipc_ep, &mut irq_dispatch).expect("Something went wrong in the syscall loop");
 
     sel4::init_thread::slot::TCB.cap().tcb_suspend().expect("Failed to suspend");
     unreachable!()
