@@ -19,12 +19,18 @@ export SEL4_INSTALL_DIR=$(pwd)/seL4/install
 export SEL4_PREFIX=$SEL4_INSTALL_DIR
 export CC=clang
 
+curl -sSf https://sh.rustup.rs | \
+        bash -s -- -y --no-modify-path \
+            --default-toolchain nightly-2024-05-01 \
+            --component rust-src
+
 cargo install \
     -Z build-std=core,alloc,compiler_builtins \
     -Z build-std-features=compiler-builtins-mem \
     --target aarch64-unknown-none \
     --git https://github.com/seL4/rust-sel4 \
+	--rev "a20aab14c0533d3145a2db75020e60151ce9b78f" \
     --root . \
     sel4-kernel-loader
 
-cargo install --root . sel4-kernel-loader-add-payload --git https://github.com/seL4/rust-sel4
+cargo install --root . sel4-kernel-loader-add-payload --git https://github.com/seL4/rust-sel4 --rev "a20aab14c0533d3145a2db75020e60151ce9b78f"
