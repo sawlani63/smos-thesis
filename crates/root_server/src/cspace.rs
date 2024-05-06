@@ -92,6 +92,26 @@ impl<'a> CSpace<'a> {
 					};
 	}
 
+	pub fn irq_control_get(self: &mut Self, cptr: usize, irq_control: sel4::cap::IrqControl,
+						   irq: usize, edge_triggered : bool) -> Result<sel4::cap::IrqHandler, sel4::Error> {
+		let irq_handler = sel4::CPtr::from_bits(cptr.try_into().unwrap()).cast::<sel4::cap_type::IrqHandler>();
+		// @alwin: Edge triggered is expected to be a word instead of a bool for some reason. Submit a PR
+		// to rust-sel4 to fix this
+
+		// @alwin: Need some way of determining if an IRQ is a PPI or not here to do the right
+		// invocation
+		// irq_control.irq_control_get_trigger(irq.try_into().unwrap(), edge_triggered.try_into().unwrap(),
+		// 										   &self.root_cnode.relative(irq_handler))
+		// 										   .or(Err(sel4::Error::InvalidArgument))?;
+
+		// @alwin: Core number is hard-coded here
+		irq_control.irq_control_get_trigger_core(irq.try_into().unwrap(), edge_triggered.try_into().unwrap(),
+												 0, &self.root_cnode.relative(irq_handler))
+												 .or(Err(sel4::Error::InvalidArgument))?;
+
+		return Ok(irq_handler);
+	}
+
 	pub fn untyped_retype(self: &Self, ut: &sel4::cap::Untyped, blueprint: ObjectBlueprint,
 						  target: usize) -> Result<(), sel4::Error> {
 
@@ -122,7 +142,7 @@ impl<'a> CSpace<'a> {
 	}
 
 	pub fn alloc_slot(self: &mut Self) -> Result<usize, sel4::Error> {
-		let top_index = bf_first_free(&self.top_bf);
+		let top_index = bf_first_free(&self.top_bf)?;
 		if self.two_level && top_index > CNODE_SLOTS(self.top_level_size_bits) ||
 		   top_index >= CNODE_SLOTS(self.top_level_size_bits) {
 		   		return Err(sel4::Error::InvalidCapability);
@@ -142,11 +162,11 @@ impl<'a> CSpace<'a> {
 
 	        /* now allocate a bottom level index */
 		   	let bot_lvl = &mut self.get_bot_lvl_node(NODE_INDEX(cptr)).cnodes[CNODE_INDEX(cptr)];
-		   	let bot_index = bf_first_free(&bot_lvl.bf);
+		   	let bot_index = bf_first_free(&bot_lvl.bf)?;
 		   	bf_set_bit(&mut bot_lvl.bf, bot_index);
 
 	        /* check if there are any free slots left in this cnode */
-		  	if bf_first_free(&bot_lvl.bf) >= CNODE_SLOTS(CNODE_SIZE_BITS) - 1 {
+		  	if bf_first_free(&bot_lvl.bf)? >= CNODE_SLOTS(CNODE_SIZE_BITS) - 1 {
 		  		bf_set_bit(&mut self.top_bf, top_index)
 			}
 

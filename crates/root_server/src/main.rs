@@ -27,6 +27,7 @@ mod stack;
 mod frame_table;
 mod tests;
 mod clock;
+mod irq;
 
 use sel4_root_task::{root_task, Never};
 use crate::debug::debug_print_bootinfo;
@@ -40,10 +41,12 @@ use crate::util::alloc_retype;
 use crate::mapping::map_frame;
 use crate::tests::run_tests;
 use crate::frame_table::FrameTable;
-use crate::clock::clock_init;
+use crate::clock::{clock_init, register_timer};
 use crate::page::BIT;
+use crate::irq::IRQDispatch;
 
 const IRQ_EP_BADGE: usize = 1 << (sel4_sys::seL4_BadgeBits - 1);
+const IRQ_IDENT_BADGE_BITS: usize = IRQ_EP_BADGE - 1;
 
 /* Create and endpoint and a bounding notification object. These are never freed so we don't keep
    track of the UTs used to allocate them.  */
@@ -63,6 +66,11 @@ fn ipc_init(cspace: &mut CSpace, ut_table: &mut UTTable)
     return Ok((ep, ntfn));
 }
 
+
+fn callback(idk: usize, idk2: *const ()) {
+    todo!();
+}
+
 fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endpoint)
                 -> Result<(), sel4::Error> {
 
@@ -75,6 +83,9 @@ fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endp
                                                                 .extra_caps(0)
                                                                 .length(0)
                                                                 .build();
+    log_rs!("setting timer...");
+    register_timer(5000000000, callback, core::ptr::null());
+
     while true {
         let (msg, badge) = {
             if have_reply {
@@ -87,6 +98,7 @@ fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endp
         let label = msg.label();
 
         if (badge & IRQ_EP_BADGE as u64 != 0) {
+            log_rs!("hey there");
             // Handle IRQ notification
         } else if (label == sel4_sys::seL4_Fault_tag::seL4_Fault_NullFault) {
             // IPC message
@@ -118,11 +130,14 @@ extern "C" fn main_continued(cspace_ptr : *mut CSpace, ut_table_ptr: *mut UTTabl
     let (ipc_ep, ntfn) = ipc_init(cspace, ut_table).expect("Failed to initialize IPC");
     let mut frame_table = FrameTable::init(sel4::init_thread::slot::VSPACE.cap());
 
+    let mut irq_dispatch = IRQDispatch::new(sel4::init_thread::slot::IRQ_CONTROL.cap(), ntfn,
+                                            IRQ_EP_BADGE, IRQ_IDENT_BADGE_BITS);
+
     run_tests(cspace, ut_table, &mut frame_table);
 
     log_rs!("TESTS PASSED!");
 
-    clock_init();
+    clock_init(cspace, &mut irq_dispatch, ntfn);
 
     syscall_loop(cspace, ut_table, ipc_ep);
 

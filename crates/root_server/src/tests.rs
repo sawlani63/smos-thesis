@@ -7,12 +7,12 @@ use crate::ut::UTTable;
 
 fn test_bf_bit(bit: usize) {
 	let mut bf : bitfield_type!(128) = bitfield_init!(128);
-	assert!(bf_first_free(&mut bf) == 0);
+	assert!(bf_first_free(&mut bf).unwrap() == 0);
 
 	bf_set_bit(&mut bf, bit);
 	assert!(bf_get_bit(&mut bf, bit));
 	let ff = if bit == 0 { 1 } else { 0 };
-	assert!(bf_first_free(&mut bf) == ff);
+	assert!(bf_first_free(&mut bf).unwrap() == ff);
 
 	bf_clr_bit(&mut bf, bit);
 	assert!(!bf_get_bit(&mut bf, bit));
@@ -77,7 +77,11 @@ fn test_bf() {
     	assert!(!bf_get_bit(&mut bf, i));
     	bf_set_bit(&mut bf, i);
     	assert!(bf_get_bit(&mut bf, i));
-    	assert!(bf_first_free(&mut bf) == i + 1);
+    	if (i < 127) {
+    		assert!(bf_first_free(&mut bf).unwrap() == i + 1);
+    	} else {
+    		assert!(bf_first_free(&mut bf).is_err());
+    	}
     }
 }
 

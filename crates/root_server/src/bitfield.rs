@@ -15,11 +15,15 @@ pub fn bf_get_bit(bf: &mut[u64], idx: usize) -> bool {
 	if (bf[WORD_INDEX(idx)] & <usize as TryInto<u64>>::try_into(BIT(BIT_INDEX(idx))).unwrap()) != 0 { true } else { false }
 }
 
-pub fn bf_first_free(bf: &[u64]) -> usize {
+pub fn bf_first_free(bf: &[u64]) -> Result<usize, sel4::Error> {
     /* find the first free word */
 	let mut i = 0;
 	while i < bf.len() && bf[i] == u64::MAX {
 		i += 1;
+	}
+
+	if (i == bf.len()) {
+		return Err(sel4::Error::NotEnoughMemory);
 	}
 
 	let mut bit = i * WORD_BITS;
@@ -31,7 +35,7 @@ pub fn bf_first_free(bf: &[u64]) -> usize {
 		bit += val.trailing_zeros() as usize;
 	}
 
-	return bit;
+	return Ok(bit);
 }
 pub const fn BITFIELD_SIZE(x: usize) -> usize {
 	x / sel4::WORD_SIZE
