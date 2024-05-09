@@ -2,7 +2,7 @@
 
 use sel4::ObjectBlueprint;
 use crate::err_rs;
-use crate::cspace::CSpace;
+use crate::cspace::{CSpace, CSpaceTrait};
 use crate::ut::{UTTable, UTWrapper};
 
 pub const fn ALIGN_DOWN(x : usize, n : usize) -> usize {
@@ -21,7 +21,7 @@ pub const fn MASK(n: usize) -> usize {
 	BIT(n) - 1
 }
 
-pub fn alloc_retype(cspace: &mut CSpace, ut_table: &mut UTTable, blueprint: ObjectBlueprint) -> Result<(usize, UTWrapper), sel4::Error> {
+pub fn alloc_retype<T: sel4::CapType>(cspace: &mut CSpace, ut_table: &mut UTTable, blueprint: ObjectBlueprint) -> Result<(sel4::Cap<T>, UTWrapper), sel4::Error> {
 	let ut = ut_table.alloc(cspace, blueprint.physical_size_bits()).map_err(|_| {
 		err_rs!("No memory for object of size {}", blueprint.physical_size_bits());
 		sel4::Error::NotEnoughMemory
@@ -40,5 +40,5 @@ pub fn alloc_retype(cspace: &mut CSpace, ut_table: &mut UTTable, blueprint: Obje
 		sel4::Error::IllegalOperation
 	})?;
 
-	return Ok((cptr, ut));
+	return Ok((sel4::CPtr::from_bits(cptr.try_into().unwrap()).cast::<T>(), ut));
 }

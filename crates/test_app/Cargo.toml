@@ -5,9 +5,9 @@
 #
 
 [package]
-name = "root_server"
+name = "test_app"
 version = "0.1.0"
-authors = ["Alwin Joshy <alwin.joshy@unsw.edu.au>"]
+authors = ["Nick Spinale <nick.spinale@coliasgroup.com>"]
 edition = "2021"
 license = "BSD-2-Clause"
 
@@ -15,6 +15,10 @@ license = "BSD-2-Clause"
 sel4 = { git = "https://github.com/seL4/rust-sel4" }
 sel4-sys = { git = "https://github.com/seL4/rust-sel4" }
 sel4-config = { git = "https://github.com/seL4/rust-sel4" }
-sel4-root-task = { git = "https://github.com/seL4/rust-sel4" }
-linked_list_allocator = "0.10.5"
-elf = { git = "https://github.com/alwin-joshy/rust-elf.git", rev="4b93dc6466914c3fd12a15c925f8136e7427f289", features=[]}
+sel4-panicking = { git = "https://github.com/seL4/rust-sel4" }
+
+[profile.dev]
+panic="abort"
+
+[profile.release]
+panic="abort"

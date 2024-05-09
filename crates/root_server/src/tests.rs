@@ -1,11 +1,12 @@
 #![allow(non_snake_case)]
 
 use crate::bitfield::{bf_first_free, bf_set_bit, bf_get_bit, bf_clr_bit, bitfield_init, bitfield_type};
-use crate::cspace::{CNODE_SLOTS, CNODE_SIZE_BITS, BOT_LVL_PER_NODE, CSpace};
+use crate::cspace::{CNODE_SLOTS, CNODE_SIZE_BITS, BOT_LVL_PER_NODE, CSpace, CSpaceTrait};
 use crate::bootstrap::INITIAL_TASK_CNODE_SIZE_BITS;
 use crate::frame_table::{FrameTable, FrameRef};
 use crate::page::BIT;
 use crate::ut::UTTable;
+use alloc::boxed::Box;
 
 fn test_bf_bit(bit: usize) {
 	let mut bf : bitfield_type!(128) = bitfield_init!(128);
@@ -133,6 +134,12 @@ fn test_frame_table(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &m
 	}
 }
 
+fn test_heap() {
+	// Test simple heap allocation and free
+	let t = Box::new(5);
+	drop(t);
+}
+
 
 pub fn run_tests(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable) {
 	test_bf();
@@ -140,4 +147,5 @@ pub fn run_tests(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut 
 
 	// @alwin: C also has some tests for children cspaces
 	test_frame_table(cspace, ut_table, frame_table);
+	test_heap();
 }

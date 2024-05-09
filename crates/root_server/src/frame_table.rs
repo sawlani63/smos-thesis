@@ -1,6 +1,6 @@
 use crate::page::BIT;
 use crate::vmem_layout;
-use crate::cspace::CSpace;
+use crate::cspace::{CSpace, CSpaceTrait};
 use crate::ut::UTTable;
 use sel4::CPtr;
 use core::mem::size_of;

@@ -1,11 +1,11 @@
 use core::mem::size_of;
 use crate::page::{PAGE_SIZE_4K, BIT, BYTES_TO_4K_PAGES, BYTES_TO_SIZE_BITS};
 use crate::cspace::{BotLvlNodeT, CSpace, BOT_LVL_PER_NODE, CNODE_INDEX, CNODE_SIZE_BITS, CNODE_SLOTS,
-					CNODE_SLOT_BITS, NODE_INDEX, TOP_LVL_INDEX, BOT_LVL_INDEX, WATERMARK_SLOTS};
+					CNODE_SLOT_BITS, NODE_INDEX, TOP_LVL_INDEX, BOT_LVL_INDEX, WATERMARK_SLOTS, CSpaceTrait};
 use crate::ut::{UTRegion, UT, UTTable};
 use crate::arith::{ROUND_UP};
 use crate::util::{ALIGN_DOWN, ALIGN_UP};
-use sel4::{CPtr};
+use sel4::CPtr;
 use crate::dma::DMA;
 use crate::bitfield::bf_set_bit;
 use crate::vmem_layout::UT_TABLE;

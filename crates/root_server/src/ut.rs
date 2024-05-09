@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use sel4::CPtr;
-use crate::cspace::CSpace;
+use crate::cspace::{CSpace, CSpaceTrait};
 use crate::err_rs;
 use crate::page::PAGE_SIZE_4K;
 use crate::mapping::map_frame;

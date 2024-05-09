@@ -10,4 +10,5 @@ resolver = "2"
 
 members = [
     "crates/root_server",
+    "crates/test_app"
 ]

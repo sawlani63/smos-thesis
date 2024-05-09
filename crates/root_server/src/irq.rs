@@ -1,5 +1,5 @@
 use crate::bitfield::{bitfield_type, bf_first_free, bf_set_bit, bf_clr_bit};
-use crate::cspace::CSpace;
+use crate::cspace::{CSpace, CSpaceTrait};
 use crate::page::BIT;
 
 #[derive(Copy, Clone)]

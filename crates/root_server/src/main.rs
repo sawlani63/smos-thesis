@@ -28,13 +28,19 @@ mod frame_table;
 mod tests;
 mod clock;
 mod irq;
+mod heap;
+mod elf_load;
+extern crate alloc;
 
+use ::elf::ElfBytes;
+use sel4::cap::VSpace;
+use sel4::{BootInfo, BootInfoPtr};
 use sel4_root_task::{root_task, Never};
 use crate::debug::debug_print_bootinfo;
 use crate::bootstrap::smos_bootstrap;
 use crate::uart::uart_init;
-use crate::cspace::CSpace;
-use crate::ut::UTTable;
+use crate::cspace::{CSpace, UserCSpace, CSpaceTrait};
+use crate::ut::{UTTable, UTWrapper};
 use crate::printing::print_init;
 use crate::page::PAGE_SIZE_4K;
 use crate::util::alloc_retype;
@@ -43,9 +49,14 @@ use crate::tests::run_tests;
 use crate::frame_table::FrameTable;
 use crate::clock::{clock_init, register_timer};
 use crate::irq::IRQDispatch;
+use crate::heap::initialise_heap;
+use crate::elf_load::load_elf;
 
 const IRQ_EP_BADGE: usize = 1 << (sel4_sys::seL4_BadgeBits - 1);
+const APP_EP_BADGE: usize = 101;
 const IRQ_IDENT_BADGE_BITS: usize = IRQ_EP_BADGE - 1;
+
+const TEST_ELF_CONTENTS: &[u8] = include_bytes!(env!("TEST_ELF"));
 
 /* Create and endpoint and a bounding notification object. These are never freed so we don't keep
    track of the UTs used to allocate them.  */
@@ -53,15 +64,13 @@ fn ipc_init(cspace: &mut CSpace, ut_table: &mut UTTable)
             -> Result<(sel4::cap::Endpoint, sel4::cap::Notification), sel4::Error> {
 
     /* Create the notification */
-    let (ntfn_cptr, _) = alloc_retype(cspace, ut_table, sel4::ObjectBlueprint::Notification)?;
-    let ntfn = sel4::CPtr::from_bits(ntfn_cptr.try_into().unwrap()).cast::<sel4::cap_type::Notification>();
+    let (ntfn, _) = alloc_retype::<sel4::cap_type::Notification>(cspace, ut_table, sel4::ObjectBlueprint::Notification)?;
 
     /* Bind it to the TCB */
     sel4::init_thread::slot::TCB.cap().tcb_bind_notification(ntfn)?;
 
     /* Create the endpoint */
-    let (ep_cptr, _) = alloc_retype(cspace, ut_table, sel4::ObjectBlueprint::Endpoint)?;
-    let ep = sel4::CPtr::from_bits(ep_cptr.try_into().unwrap()).cast::<sel4::cap_type::Endpoint>();
+    let (ep, _) = alloc_retype::<sel4::cap_type::Endpoint>(cspace, ut_table, sel4::ObjectBlueprint::Endpoint)?;
     return Ok((ep, ntfn));
 }
 
@@ -73,8 +82,7 @@ fn callback(_idk: usize, _idk2: *const ()) {
 fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endpoint, irq_dispatch: &mut IRQDispatch)
                -> Result<(), sel4::Error> {
 
-    let (reply_cptr, reply_ut) = alloc_retype(cspace, ut_table, sel4::ObjectBlueprint::Reply)?;
-    let reply = sel4::CPtr::from_bits(reply_cptr.try_into().unwrap()).cast::<sel4::cap_type::Reply>();
+    let (reply, reply_ut) = alloc_retype::<sel4::cap_type::Reply>(cspace, ut_table, sel4::ObjectBlueprint::Reply)?;
 
     let mut have_reply = false;
     let mut reply_msg_info = sel4::MessageInfoBuilder::default().label(0)
@@ -117,8 +125,85 @@ fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endp
     Ok(())
 }
 
-extern "C" fn main_continued(cspace_ptr : *mut CSpace, ut_table_ptr: *mut UTTable) -> ! {
+// struct UserProcess {
+//     vspace: (usize, UTWrapper),
+// }
+
+
+// fn create_one_lvl_cspace(cspace: &mut CSpace,ut_table: &mut UTTable) -> Result<CSpace> {
+    
+// }
+
+fn init_process_stack(cspace: &mut CSpace, ut_table: &mut UTTable) {
+    todo!();
+}
+
+
+
+
+// @alwin: this leaks cslots and caps!
+fn start_first_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,
+                       sched_control: sel4::cap::SchedControl, name: &str, ep: sel4::cap::Endpoint) -> Result<(), sel4::Error> {
+
+    /* Create a VSpace */
+    let mut vspace = alloc_retype::<sel4::cap_type::VSpace>(cspace, ut_table, sel4::ObjectBlueprint::Arch(
+                                                        sel4::ObjectBlueprintArch::SeL4Arch(
+                                                        sel4::ObjectBlueprintAArch64::VSpace)))?;
+
+    /* assign the vspace to an asid pool */
+    sel4::init_thread::slot::ASID_POOL.cap().asid_pool_assign(vspace.0)?;
+
+    /* Create a simple 1 level CSpace */
+    let mut proc_cspace = UserCSpace::new(cspace, ut_table, false)?;
+
+    /* Create an IPC buffer */
+    let mut ipc_buffer = alloc_retype::<sel4::cap_type::SmallPage>(cspace, ut_table, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage))?;
+
+    /* allocate a new slot in the target cspace which we will mint a badged endpoint cap into --
+     * the badge is used to identify the process */
+     let mut proc_ep = proc_cspace.alloc_slot()?;
+
+     /* now mutate the cap, thereby setting the badge */
+     proc_cspace.root_cnode().relative_bits_with_depth(proc_ep.try_into().unwrap(), sel4::WORD_SIZE)
+                           .mint(&cspace.root_cnode().relative(ep),
+                                 sel4::CapRightsBuilder::all().build(),
+                                 APP_EP_BADGE.try_into().unwrap())?;
+
+    /* Create a new TCB object */
+    let mut tcb = alloc_retype::<sel4::cap_type::Tcb>(cspace, ut_table, sel4::ObjectBlueprint::Tcb)?;
+
+    /* Configure the TCB */
+    tcb.0.tcb_configure(proc_cspace.root_cnode(), sel4::CNodeCapData::new(0, sel4::WORD_SIZE), vspace.0, vmem_layout::PROCESS_IPC_BUFFER.try_into().unwrap(), ipc_buffer.0)?;
+
+    /* Create scheduling context */
+    let mut sched_context = alloc_retype::<sel4::cap_type::SchedContext>(cspace, ut_table, sel4::ObjectBlueprint::SchedContext{ size_bits: sel4_sys::seL4_MinSchedContextBits.try_into().unwrap()})?;
+
+    /* Configure the scheduling context to use the first core with budget equal to period */
+    sched_control.sched_control_configure_flags(sched_context.0, 1000, 1000, 0, 0, 0);
+
+    tcb.0.tcb_set_sched_params(sel4::init_thread::slot::TCB.cap(), 0, 0, sched_context.0, sel4::CPtr::from_bits(proc_ep.try_into().unwrap()).cast())?;
+
+    tcb.0.debug_name(name.as_bytes());
+
+    // @alwin: cpio stuff here
+
+    let elf = ElfBytes::<elf::endian::AnyEndian>::minimal_parse(TEST_ELF_CONTENTS).or(Err(sel4::Error::InvalidArgument))?;
+
+    init_process_stack(cspace, ut_table);
+
+    load_elf(cspace, ut_table, frame_table, vspace.0, elf);
+
+    // map_frame(cspace, ut_table, frame.0, vspace.0, vmem_layout::PROCESS_IPC_BUFFER,
+    //           sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT)?;
+
+    return Ok(());
+}
+
+extern "C" fn main_continued(bootinfo_raw: *const BootInfo, cspace_ptr : *mut CSpace, ut_table_ptr: *mut UTTable) -> ! {
     log_rs!("Switched to new stack...");
+
+    // Safety: This is reconstructing bootinfo from the ptr passed into main(). Hence, this must be a valid pointer.
+    let bootinfo = unsafe { sel4::BootInfoPtr::new(bootinfo_raw) };
 
     /* Get the cspace and ut_table back. This is slightly cursed because these exist on
        the old stack. Don't think anything bad will come from it, but kind of a weird situation.
@@ -134,11 +219,15 @@ extern "C" fn main_continued(cspace_ptr : *mut CSpace, ut_table_ptr: *mut UTTabl
     let mut irq_dispatch = IRQDispatch::new(sel4::init_thread::slot::IRQ_CONTROL.cap(), ntfn,
                                             IRQ_EP_BADGE, IRQ_IDENT_BADGE_BITS);
 
+    initialise_heap(cspace, ut_table).expect("Failed to initialize heap!");
+
     run_tests(cspace, ut_table, &mut frame_table);
 
     log_rs!("TESTS PASSED!");
 
     clock_init(cspace, &mut irq_dispatch, ntfn).expect("Failed to initialize clock");
+
+    start_first_process(cspace, ut_table, &mut frame_table, bootinfo.sched_control().index(0).cap(), "test_app", ipc_ep).expect("Failed to start first process");
 
     syscall_loop(cspace, ut_table, ipc_ep, &mut irq_dispatch).expect("Something went wrong in the syscall loop");
 
@@ -170,11 +259,10 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
      // Allocate and switch to a bigger stack with a guard page
      let mut vaddr = vmem_layout::STACK;
      for _i in 0..vmem_layout::STACK_PAGES {
-        let (frame_cptr, _) = alloc_retype(&mut cspace, &mut ut_table,
+        let (frame, _) = alloc_retype::<sel4::cap_type::SmallPage>(&mut cspace, &mut ut_table,
                                             sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage))
                                             .expect("Failed to alloc_retype");
 
-        let frame = sel4::CPtr::from_bits(frame_cptr.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
         map_frame(&mut cspace, &mut ut_table, frame.cast(), sel4::init_thread::slot::VSPACE.cap(), vaddr,
                   sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT, None)
                   .expect("Failed to map stack page");
@@ -183,7 +271,7 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
 
     log_rs!("Switching to new stack (stack_top = 0x{:x})...", vaddr);
 
-    stack::utils_run_on_stack(vaddr, main_continued, &mut cspace, &mut ut_table);
+    stack::utils_run_on_stack(vaddr, main_continued, bootinfo, &mut cspace, &mut ut_table);
 
     sel4::init_thread::slot::TCB.cap().tcb_suspend()?;
     unreachable!()
