@@ -1,7 +1,7 @@
 use core::mem::size_of;
 use crate::page::{PAGE_SIZE_4K, BIT, BYTES_TO_4K_PAGES, BYTES_TO_SIZE_BITS};
 use crate::cspace::{BotLvlNodeT, CSpace, BOT_LVL_PER_NODE, CNODE_INDEX, CNODE_SIZE_BITS, CNODE_SLOTS,
-					CNODE_SLOT_BITS, NODE_INDEX, TOP_LVL_INDEX, BOT_LVL_INDEX, WATERMARK_SLOTS, CSpaceTrait};
+                    CNODE_SLOT_BITS, NODE_INDEX, TOP_LVL_INDEX, BOT_LVL_INDEX, WATERMARK_SLOTS, CSpaceTrait};
 use crate::ut::{UTRegion, UT, UTTable};
 use crate::arith::{ROUND_UP};
 use crate::util::{ALIGN_DOWN, ALIGN_UP};
@@ -20,26 +20,26 @@ pub const INITIAL_TASK_CSPACE_BITS: usize = CNODE_SLOT_BITS(INITIAL_TASK_CNODE_S
 pub const INITIAL_TASK_CSPACE_SLOTS: usize = BIT(INITIAL_TASK_CSPACE_BITS);
 
 static mut BOT_LVL_NODES : [*mut BotLvlNodeT; INITIAL_TASK_CSPACE_SLOTS / BOT_LVL_PER_NODE + 1] =
-					  [core::ptr::null_mut(); INITIAL_TASK_CSPACE_SLOTS / BOT_LVL_PER_NODE + 1];
+                      [core::ptr::null_mut(); INITIAL_TASK_CSPACE_SLOTS / BOT_LVL_PER_NODE + 1];
 
 fn untyped_in_range(untyped: &sel4::UntypedDesc) -> bool {
     untyped.paddr() <= PHYSICAL_ADDRESS_LIMIT && untyped.size_bits() <= MAX_PHYSICAL_SIZE_BITS
 }
 
 fn find_memory_bounds(bi: &sel4::BootInfo) -> UTRegion {
-	let mut memory = UTRegion::new(PHYSICAL_ADDRESS_LIMIT, 0);
+    let mut memory = UTRegion::new(PHYSICAL_ADDRESS_LIMIT, 0);
 
-	for untyped in bi.untyped_list() {
-		if !untyped_in_range(untyped) {
-			continue;
-		}
+    for untyped in bi.untyped_list() {
+        if !untyped_in_range(untyped) {
+            continue;
+        }
 
-		memory.start = usize::min(memory.start, untyped.paddr());
-		memory.end = usize::max(memory.end, untyped.paddr() + BIT(untyped.size_bits()));
-	}
+        memory.start = usize::min(memory.start, untyped.paddr());
+        memory.end = usize::max(memory.end, untyped.paddr() + BIT(untyped.size_bits()));
+    }
 
-	assert!(memory.end > memory.start);
-	return memory;
+    assert!(memory.end > memory.start);
+    return memory;
 }
 
 fn ut_pages_for_region(memory: &UTRegion) -> usize {
@@ -47,88 +47,88 @@ fn ut_pages_for_region(memory: &UTRegion) -> usize {
 }
 
 fn calculate_ut_caps(bi : &sel4::BootInfo, size_bits: u32, bootinfo_avail_bytes: &mut [usize]) -> usize {
-	let mut n_caps : usize = 0;
-	for (i, untyped) in bi.untyped_list().iter().enumerate() {
-		if !untyped_in_range(untyped) {
-			continue;
-		}
+    let mut n_caps : usize = 0;
+    for (i, untyped) in bi.untyped_list().iter().enumerate() {
+        if !untyped_in_range(untyped) {
+            continue;
+        }
 
-		if !untyped.is_device() {
-			bootinfo_avail_bytes[i] += BIT(untyped.size_bits());
-		}
+        if !untyped.is_device() {
+            bootinfo_avail_bytes[i] += BIT(untyped.size_bits());
+        }
 
-		if untyped.size_bits() >= size_bits as usize {
-			n_caps += BIT(untyped.size_bits() - size_bits as usize);
-		}
-	}
+        if untyped.size_bits() >= size_bits as usize {
+            n_caps += BIT(untyped.size_bits() - size_bits as usize);
+        }
+    }
 
-	return n_caps;
+    return n_caps;
 }
 
 fn paddr_from_avail_bytes(bi: &sel4::BootInfo, i: usize, size_bits: usize, bootinfo_avail_bytes: &[usize]) -> usize {
-	let mut taken: usize = 0;
-	if !bi.untyped_list()[i].is_device() {
+    let mut taken: usize = 0;
+    if !bi.untyped_list()[i].is_device() {
         taken = BIT(bi.untyped_list()[i].size_bits()) - bootinfo_avail_bytes[i];
-	}
-	// @alwin: Double check this
-	taken = ROUND_UP(taken, size_bits);
-	return bi.untyped_list()[i].paddr() + taken;
+    }
+    // @alwin: Double check this
+    taken = ROUND_UP(taken, size_bits);
+    return bi.untyped_list()[i].paddr() + taken;
 }
 
 fn steal_untyped(bi: &sel4::BootInfo, size_bits: usize, bootinfo_avail_bytes: &mut [usize])
-				-> Option<(sel4::Cap<sel4::cap_type::Untyped>, usize)> {
+                -> Option<(sel4::Cap<sel4::cap_type::Untyped>, usize)> {
 
-	assert!(size_bits >= sel4_sys::seL4_PageBits as usize);
-	assert!(size_bits <= sel4_sys::seL4_MaxUntypedBits as usize);
+    assert!(size_bits >= sel4_sys::seL4_PageBits as usize);
+    assert!(size_bits <= sel4_sys::seL4_MaxUntypedBits as usize);
 
-	for (i, untyped) in bi.untyped_list().iter().enumerate() {
-		if untyped_in_range(untyped) && bootinfo_avail_bytes[i] >= BIT(size_bits) {
-			let paddr = paddr_from_avail_bytes(bi, i, size_bits, bootinfo_avail_bytes);
-			bootinfo_avail_bytes[i] -= BIT(size_bits);
-			return Some((sel4::CPtr::from_bits((i + bi.untyped().start()).try_into().unwrap()).cast::<sel4::cap_type::Untyped>(), paddr));
-		}
-	}
+    for (i, untyped) in bi.untyped_list().iter().enumerate() {
+        if untyped_in_range(untyped) && bootinfo_avail_bytes[i] >= BIT(size_bits) {
+            let paddr = paddr_from_avail_bytes(bi, i, size_bits, bootinfo_avail_bytes);
+            bootinfo_avail_bytes[i] -= BIT(size_bits);
+            return Some((sel4::CPtr::from_bits((i + bi.untyped().start()).try_into().unwrap()).cast::<sel4::cap_type::Untyped>(), paddr));
+        }
+    }
 
-	return None;
+    return None;
 }
 
 struct BootstrapCSpace {
-	next_free_vaddr : usize,
-	vspace : sel4::cap::VSpace
+    next_free_vaddr : usize,
+    vspace : sel4::cap::VSpace
 }
 
 // pub fn smos_bootstrap(bi: &sel4::BootInfo) -> CSpace{
 pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Error>{
-	let mut bootinfo_avail_bytes : [usize; sel4_cfg_usize!(MAX_NUM_BOOTINFO_UNTYPED_CAPS) ] = [0; sel4_cfg_usize!(MAX_NUM_BOOTINFO_UNTYPED_CAPS)];
+    let mut bootinfo_avail_bytes : [usize; sel4_cfg_usize!(MAX_NUM_BOOTINFO_UNTYPED_CAPS) ] = [0; sel4_cfg_usize!(MAX_NUM_BOOTINFO_UNTYPED_CAPS)];
 
     let mut bootstrap_data = BootstrapCSpace {next_free_vaddr: UT_TABLE, vspace: sel4::init_thread::slot::VSPACE.cap()};
 
-	// The initial CNode
-	let mut init_task_cnode_cptr = sel4::init_thread::slot::CNODE.cap().relative_self();
+    // The initial CNode
+    let mut init_task_cnode_cptr = sel4::init_thread::slot::CNODE.cap().relative_self();
     let mut init_task_cnode = sel4::init_thread::slot::CNODE.cap();
 
     /* use three slots from the current boot cspace */
-	assert!(bi.empty().end() - bi.empty().start() >= 2);
+    assert!(bi.empty().end() - bi.empty().start() >= 2);
 
-	// This is where the new level on CNode will go
-	let lvl1_cptr = bi.empty().start();
+    // This is where the new level on CNode will go
+    let lvl1_cptr = bi.empty().start();
     /* We will temporarily store the boot cptr here, and remove it before we finish */
-	let boot_cptr = 0;
+    let boot_cptr = 0;
 
     /* work out the number of slots used by the cspace we are provided on on init */
-	let mut n_slots: usize = bi.empty().start() - 1;
+    let mut n_slots: usize = bi.empty().start() - 1;
 
     /* we need enough memory to create and map the ut table - first all the frames */
-	let memory = find_memory_bounds(bi);
-	let ut_pages = ut_pages_for_region(&memory);
-	n_slots += ut_pages;
+    let memory = find_memory_bounds(bi);
+    let ut_pages = ut_pages_for_region(&memory);
+    n_slots += ut_pages;
     /* track how much memory we need here */
-	let mut size : usize = ut_pages * PAGE_SIZE_4K;
+    let mut size : usize = ut_pages * PAGE_SIZE_4K;
 
     /* account for the number of page tables we need - plus a buffer of 1 */
-	let n_pts = (ut_pages >> sel4_sys::seL4_PageTableIndexBits) + 1;
-	size += n_pts * BIT(sel4_sys::seL4_PageTableBits as usize);
-	n_slots += n_pts;
+    let n_pts = (ut_pages >> sel4_sys::seL4_PageTableIndexBits) + 1;
+    size += n_pts * BIT(sel4_sys::seL4_PageTableBits as usize);
+    n_slots += n_pts;
 
     /* and the other paging structures */
     size += BIT(sel4_sys::seL4_PUDBits as usize);
@@ -156,10 +156,10 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
 
     /* create the new level 1 cnode from the untyped we found */
     let mut blueprint = sel4::ObjectBlueprint::CNode{
-    	size_bits: CNODE_SLOT_BITS(INITIAL_TASK_CNODE_SIZE_BITS)
+        size_bits: CNODE_SLOT_BITS(INITIAL_TASK_CNODE_SIZE_BITS)
     };
     ut.untyped_retype(&blueprint, &sel4::init_thread::slot::CNODE.cap().relative_self(),
-    					   lvl1_cptr, 1).expect("Could not create new top-level CNode");
+                           lvl1_cptr, 1).expect("Could not create new top-level CNode");
     let mut lvl1_cnode_cptr = init_task_cnode.relative_bits_with_depth(lvl1_cptr as u64, sel4::WORD_SIZE);
     let mut lvl1_cnode = CPtr::from_bits(lvl1_cnode_cptr.path().bits()).cast::<sel4::cap_type::CNode>();
 
@@ -167,35 +167,35 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     let mut chunk: usize;
     let mut total: usize = n_cnodes;
     blueprint = sel4::ObjectBlueprint::CNode{
-    	size_bits: CNODE_SLOT_BITS(CNODE_SIZE_BITS),
+        size_bits: CNODE_SLOT_BITS(CNODE_SIZE_BITS),
     };
 
     while total > 0 {
-    	chunk = usize::min(sel4_cfg_usize!(RETYPE_FAN_OUT_LIMIT), total);
-    	ut.untyped_retype(&blueprint, &lvl1_cnode_cptr, n_cnodes - total, chunk)?;
-    	total -= chunk;
+        chunk = usize::min(sel4_cfg_usize!(RETYPE_FAN_OUT_LIMIT), total);
+        ut.untyped_retype(&blueprint, &lvl1_cnode_cptr, n_cnodes - total, chunk)?;
+        total -= chunk;
     }
     let depth : usize = CNODE_SLOT_BITS(INITIAL_TASK_CNODE_SIZE_BITS) + CNODE_SLOT_BITS(CNODE_SIZE_BITS);
 
     /* copy the old root cnode to cptr 0 in the new cspace */
     let init_task_cnode_self = init_task_cnode.relative_bits_with_depth(sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode.into(),
-    																	sel4::WORD_SIZE);
+                                                                        sel4::WORD_SIZE);
     let init_task_cnode_copy = lvl1_cnode.relative_bits_with_depth(boot_cptr, depth);
     init_task_cnode_copy.copy(&init_task_cnode_self, sel4::CapRightsBuilder::all().build())?;
 
     /* mint a cap to our new cnode at seL4_CapInitThreadCnode in the new cspace with the correct guard */
     let cap_data = sel4_sys::seL4_CNode_CapData::new(0, (sel4::WORD_SIZE - depth) as u64);
     let lvl1_self_cptr = lvl1_cnode.relative_bits_with_depth(sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode.into(),
-    														 depth);
+                                                             depth);
     lvl1_self_cptr.mint(&lvl1_cnode_cptr, sel4::CapRightsBuilder::all().build(), cap_data.get_guardSize())?;
 
     /* Set the new CNode as our default top-level CNode */
     // @alwin: Does this really need to be unsafe?
     unsafe {
-    	(*bi.ipc_buffer()).inner_mut().seL4_TCB_SetSpace(sel4::init_thread::slot::TCB.cptr().bits(),
-    															 0, lvl1_cptr.try_into().unwrap(),
-    															 cap_data.get_guardSize(),
-    															 sel4::init_thread::slot::VSPACE.cptr().bits(), 0);
+        (*bi.ipc_buffer()).inner_mut().seL4_TCB_SetSpace(sel4::init_thread::slot::TCB.cptr().bits(),
+                                                                 0, lvl1_cptr.try_into().unwrap(),
+                                                                 cap_data.get_guardSize(),
+                                                                 sel4::init_thread::slot::VSPACE.cptr().bits(), 0);
     }
 
     /* Redefine the CPtrs's relative to the new top-level CSpace */
@@ -206,150 +206,150 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
 
     /* Copy capabilities over from the initial cspace to the new cspace */
     for i in 1..bi.empty().start() {
-    	match i.try_into().unwrap() {
-    	    sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode |
-    	    sel4_sys::seL4_RootCNodeCapSlots::seL4_CapIOPortControl |
-    	    sel4_sys::seL4_RootCNodeCapSlots::seL4_CapIOSpace |
-    	    sel4_sys::seL4_RootCNodeCapSlots::seL4_CapSMMUSIDControl |
-    	    sel4_sys::seL4_RootCNodeCapSlots::seL4_CapSMMUCBControl |
-    	    sel4_sys::seL4_RootCNodeCapSlots::seL4_CapSMC =>
-    	    {
-    	    	continue;
-    	    },
-    	    _ => {}
-    	}
+        match i.try_into().unwrap() {
+            sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode |
+            sel4_sys::seL4_RootCNodeCapSlots::seL4_CapIOPortControl |
+            sel4_sys::seL4_RootCNodeCapSlots::seL4_CapIOSpace |
+            sel4_sys::seL4_RootCNodeCapSlots::seL4_CapSMMUSIDControl |
+            sel4_sys::seL4_RootCNodeCapSlots::seL4_CapSMMUCBControl |
+            sel4_sys::seL4_RootCNodeCapSlots::seL4_CapSMC =>
+            {
+                continue;
+            },
+            _ => {}
+        }
 
-    	if let Err(e) = lvl1_cnode.relative_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE)
-    							  .move_(&init_task_cnode.relative_bits_with_depth(i.try_into().unwrap(),
-    							  												   sel4::WORD_SIZE))
-		{
-    		sel4::debug_println!("When copying capability {} - Encountered error {}", i, e);
-		}
+        if let Err(e) = lvl1_cnode.relative_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE)
+                                  .move_(&init_task_cnode.relative_bits_with_depth(i.try_into().unwrap(),
+                                                                                   sel4::WORD_SIZE))
+        {
+            sel4::debug_println!("When copying capability {} - Encountered error {}", i, e);
+        }
     }
 
 
-   	/* Remove the original cnode -- it's empty and we need slot 0 to be free as it acts
+    /* Remove the original cnode -- it's empty and we need slot 0 to be free as it acts
      * as the NULL capability and should be empty, or any invocation of seL4_CapNull will
      * invoke this cnode.
      */
-  	init_task_cnode_cptr.delete()?;
+    init_task_cnode_cptr.delete()?;
 
     /* Next, allocate and map enough paging structures and frames to create the
      * untyped table */
 
-	/* Get the first free slot in the vspace  */
-	let mut first_free_slot = bi.empty().start();
+    /* Get the first free slot in the vspace  */
+    let mut first_free_slot = bi.empty().start();
 
-	let mut cspace = unsafe {
-    	CSpace::new(lvl1_cnode, true, INITIAL_TASK_CNODE_SIZE_BITS, &mut BOT_LVL_NODES, None /* alloc */)
-	};
+    let mut cspace = unsafe {
+        CSpace::new(lvl1_cnode, true, INITIAL_TASK_CNODE_SIZE_BITS, &mut BOT_LVL_NODES, None /* alloc */)
+    };
 
-	/* Allocate the PUD */
-	cspace.untyped_retype(&ut, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::PT),
-						  first_free_slot)?;
+    /* Allocate the PUD */
+    cspace.untyped_retype(&ut, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::PT),
+                          first_free_slot)?;
 
-	/* Map the PUD */
-	let pud = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::PT>();
-	pud.pt_map(sel4::init_thread::slot::VSPACE.cap(), UT_TABLE, sel4::VmAttributes::DEFAULT)?;
-	first_free_slot += 1;
+    /* Map the PUD */
+    let pud = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::PT>();
+    pud.pt_map(sel4::init_thread::slot::VSPACE.cap(), UT_TABLE, sel4::VmAttributes::DEFAULT)?;
+    first_free_slot += 1;
 
-	/* Now allocate the PD */
-	cspace.untyped_retype(&ut, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::PT),
-						  first_free_slot)?;
+    /* Now allocate the PD */
+    cspace.untyped_retype(&ut, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::PT),
+                          first_free_slot)?;
 
-	/* Map the PD */
-	let pd = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::PT>();
-	pd.pt_map(sel4::init_thread::slot::VSPACE.cap(), UT_TABLE, sel4::VmAttributes::DEFAULT)?;
-	first_free_slot += 1;
+    /* Map the PD */
+    let pd = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::PT>();
+    pd.pt_map(sel4::init_thread::slot::VSPACE.cap(), UT_TABLE, sel4::VmAttributes::DEFAULT)?;
+    first_free_slot += 1;
 
-	/* Now the PTs */
-	for i in 0..((ut_pages >> sel4_sys::seL4_PageTableIndexBits) + 1) {
-		cspace.untyped_retype(&ut, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::PT),
-							  first_free_slot)?;
-		let vaddr = UT_TABLE + i * (BIT((sel4_sys::seL4_PageTableIndexBits + sel4_sys::seL4_PageBits)
-											.try_into().unwrap()));
+    /* Now the PTs */
+    for i in 0..((ut_pages >> sel4_sys::seL4_PageTableIndexBits) + 1) {
+        cspace.untyped_retype(&ut, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::PT),
+                              first_free_slot)?;
+        let vaddr = UT_TABLE + i * (BIT((sel4_sys::seL4_PageTableIndexBits + sel4_sys::seL4_PageBits)
+                                            .try_into().unwrap()));
 
-		let pt = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::PT>();
-		pt.pt_map(sel4::init_thread::slot::VSPACE.cap(), vaddr, sel4::VmAttributes::DEFAULT)?;
-		first_free_slot += 1;
-	}
+        let pt = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::PT>();
+        pt.pt_map(sel4::init_thread::slot::VSPACE.cap(), vaddr, sel4::VmAttributes::DEFAULT)?;
+        first_free_slot += 1;
+    }
 
     /* and pages to cover the UT table */
     let slots_per_cnode = CNODE_SLOTS(CNODE_SIZE_BITS);
     for _i in 0..ut_pages {
-		cspace.untyped_retype(&ut, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
-							  first_free_slot)?;
-		let page = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
-		page.frame_map(sel4::init_thread::slot::VSPACE.cap(), bootstrap_data.next_free_vaddr,
-					   sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT)?;
-		first_free_slot += 1;
-		bootstrap_data.next_free_vaddr += PAGE_SIZE_4K;
+        cspace.untyped_retype(&ut, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
+                              first_free_slot)?;
+        let page = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
+        page.frame_map(sel4::init_thread::slot::VSPACE.cap(), bootstrap_data.next_free_vaddr,
+                       sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT)?;
+        first_free_slot += 1;
+        bootstrap_data.next_free_vaddr += PAGE_SIZE_4K;
     }
 
     /* before we add all the 4k untypeds to the ut table, steal some for DMA */
     // @alwin: understand what this is doing better
     let (dma_ut, dma_paddr) = steal_untyped(bi, SOS_DMA_SIZE_BITS.try_into().unwrap(),
-    										&mut bootinfo_avail_bytes)
-    										.ok_or(sel4::Error::NotEnoughMemory)?;
+                                            &mut bootinfo_avail_bytes)
+                                            .ok_or(sel4::Error::NotEnoughMemory)?;
     cspace.untyped_retype(&dma_ut, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::LargePage),
-    					  first_free_slot)?;
+                          first_free_slot)?;
     let dma_page = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::LargePage>();
     first_free_slot += 1;
 
     let mut ut_table = UTTable::new(UT_TABLE, memory, bootstrap_data.next_free_vaddr);
 
     for (i, untyped) in bi.untyped_list().iter().enumerate() {
-    	if !untyped_in_range(untyped) {
-    		continue;
-    	}
+        if !untyped_in_range(untyped) {
+            continue;
+        }
 
-    	let mut n_caps = BIT(untyped.size_bits()) / PAGE_SIZE_4K;
-    	if !untyped.is_device() {
-    		n_caps = bootinfo_avail_bytes[i] / PAGE_SIZE_4K;
-    	}
+        let mut n_caps = BIT(untyped.size_bits()) / PAGE_SIZE_4K;
+        if !untyped.is_device() {
+            n_caps = bootinfo_avail_bytes[i] / PAGE_SIZE_4K;
+        }
 
-    	let paddr = paddr_from_avail_bytes(bi, i, sel4_sys::seL4_PageBits.try_into().unwrap(),
-    									   &bootinfo_avail_bytes);
-    	if n_caps > 0 {
-    		ut_table.add_untyped_range(paddr, first_free_slot, n_caps, untyped.is_device())
-    	}
-    	while n_caps > 0 {
-    		let cnode = first_free_slot / slots_per_cnode;
+        let paddr = paddr_from_avail_bytes(bi, i, sel4_sys::seL4_PageBits.try_into().unwrap(),
+                                           &bootinfo_avail_bytes);
+        if n_caps > 0 {
+            ut_table.add_untyped_range(paddr, first_free_slot, n_caps, untyped.is_device())
+        }
+        while n_caps > 0 {
+            let cnode = first_free_slot / slots_per_cnode;
         //     /* we can only retype the amount that will fit in a 2nd lvl cnode */
-    		let retype = usize::min(sel4_cfg_usize!(RETYPE_FAN_OUT_LIMIT),
-    								usize::min(n_caps, slots_per_cnode - first_free_slot % slots_per_cnode));
+            let retype = usize::min(sel4_cfg_usize!(RETYPE_FAN_OUT_LIMIT),
+                                    usize::min(n_caps, slots_per_cnode - first_free_slot % slots_per_cnode));
 
-    		let this_ut = CPtr::from_bits((bi.untyped().start() + i).try_into().unwrap()).cast::<sel4::cap_type::Untyped>();
-    		let blueprint = sel4::ObjectBlueprint::Untyped { size_bits: sel4_sys::seL4_PageBits.try_into().unwrap() };
+            let this_ut = CPtr::from_bits((bi.untyped().start() + i).try_into().unwrap()).cast::<sel4::cap_type::Untyped>();
+            let blueprint = sel4::ObjectBlueprint::Untyped { size_bits: sel4_sys::seL4_PageBits.try_into().unwrap() };
 
-			this_ut.untyped_retype(
-				&blueprint,
-				&lvl1_cnode.relative_bits_with_depth(cnode.try_into().unwrap(),
-				sel4::WORD_SIZE - CNODE_SLOT_BITS(CNODE_SIZE_BITS)),
-				first_free_slot % CNODE_SLOTS(CNODE_SIZE_BITS),
-				retype
-			)?;
-			first_free_slot += retype;
-			n_caps -= retype;
-    	}
+            this_ut.untyped_retype(
+                &blueprint,
+                &lvl1_cnode.relative_bits_with_depth(cnode.try_into().unwrap(),
+                sel4::WORD_SIZE - CNODE_SLOT_BITS(CNODE_SIZE_BITS)),
+                first_free_slot % CNODE_SLOTS(CNODE_SIZE_BITS),
+                retype
+            )?;
+            first_free_slot += retype;
+            n_caps -= retype;
+        }
     }
 
     let n_bot_lvl = usize::max(first_free_slot / slots_per_cnode + 1, n_cnodes) / BOT_LVL_PER_NODE + 1;
     for i in 0..n_bot_lvl {
-    	let (_, node_ut) = ut_table.alloc_4k_untyped()?;
-    	cspace.untyped_retype(&node_ut.get_cap(), sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
-    						  first_free_slot)?;
-		let page = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
-		page.frame_map(sel4::init_thread::slot::VSPACE.cap(), ut_table.next_free_vaddr,
-					   sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT)?;
-		cspace.init_bot_lvl_node(i, ut_table.next_free_vaddr as *mut BotLvlNodeT);
-		ut_table.next_free_vaddr += PAGE_SIZE_4K;
+        let (_, node_ut) = ut_table.alloc_4k_untyped()?;
+        cspace.untyped_retype(&node_ut.get_cap(), sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
+                              first_free_slot)?;
+        let page = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
+        page.frame_map(sel4::init_thread::slot::VSPACE.cap(), ut_table.next_free_vaddr,
+                       sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT)?;
+        cspace.init_bot_lvl_node(i, ut_table.next_free_vaddr as *mut BotLvlNodeT);
+        ut_table.next_free_vaddr += PAGE_SIZE_4K;
 
-		let bot_lvl_node = cspace.get_bot_lvl_node(i);
-		bot_lvl_node.untyped = node_ut;
-		bot_lvl_node.frame = page;
-		cspace.n_bot_lvl_nodes += 1;
-		first_free_slot += 1;
+        let bot_lvl_node = cspace.get_bot_lvl_node(i);
+        bot_lvl_node.untyped = node_ut;
+        bot_lvl_node.frame = page;
+        cspace.n_bot_lvl_nodes += 1;
+        first_free_slot += 1;
     }
 
     let dma_vaddr = ALIGN_UP(ut_table.next_free_vaddr + PAGE_SIZE_4K, BIT(sel4_sys::seL4_LargePageBits.try_into().unwrap()));
@@ -358,30 +358,30 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
 
     /* now record all the cptrs we have already used to bootstrap */
     for i in (0..ALIGN_DOWN(first_free_slot, slots_per_cnode)).step_by(slots_per_cnode) {
-    	let bot_lvl_node = cspace.get_bot_lvl_node(NODE_INDEX(i));
-    	/* @alwin: there should be a check here that bot_lvl_node is not NULL */
-    	bot_lvl_node.n_cnodes += 1;
-    	for i in 0..CNODE_SLOTS(CNODE_SIZE_BITS)/sel4::WORD_SIZE {
-    		bot_lvl_node.cnodes[CNODE_INDEX(i)].bf[i] = u64::MAX;
-    	}
+        let bot_lvl_node = cspace.get_bot_lvl_node(NODE_INDEX(i));
+        /* @alwin: there should be a check here that bot_lvl_node is not NULL */
+        bot_lvl_node.n_cnodes += 1;
+        for i in 0..CNODE_SLOTS(CNODE_SIZE_BITS)/sel4::WORD_SIZE {
+            bot_lvl_node.cnodes[CNODE_INDEX(i)].bf[i] = u64::MAX;
+        }
         /* this cnode is full */
-    	bf_set_bit(&mut cspace.top_bf, TOP_LVL_INDEX(i));
+        bf_set_bit(&mut cspace.top_bf, TOP_LVL_INDEX(i));
     }
 
     let bot_lvl_node = cspace.get_bot_lvl_node(first_free_slot / slots_per_cnode / BOT_LVL_PER_NODE);
     bot_lvl_node.n_cnodes += 1;
 
     for i in ALIGN_DOWN(first_free_slot, slots_per_cnode)..first_free_slot {
-    	bf_set_bit(&mut bot_lvl_node.cnodes[CNODE_INDEX(i)].bf, BOT_LVL_INDEX(i));
+        bf_set_bit(&mut bot_lvl_node.cnodes[CNODE_INDEX(i)].bf, BOT_LVL_INDEX(i));
     }
 
     for i in (first_free_slot / slots_per_cnode + 1)..(n_cnodes) {
-    	cspace.get_bot_lvl_node(i / BOT_LVL_PER_NODE).n_cnodes += 1;
+        cspace.get_bot_lvl_node(i / BOT_LVL_PER_NODE).n_cnodes += 1;
     }
 
     for i in 0..WATERMARK_SLOTS {
-    	cspace.watermark[i] = cspace.alloc_slot()?;
+        cspace.watermark[i] = cspace.alloc_slot()?;
     }
 
-	return Ok((cspace, ut_table));
+    return Ok((cspace, ut_table));
 }

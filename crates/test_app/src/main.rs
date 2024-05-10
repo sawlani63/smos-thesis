@@ -7,41 +7,41 @@
 use core::arch::global_asm;
 
 fn main()  -> sel4::Result<Never> {
-	sel4::debug_println!("hi there");
+    sel4::debug_println!("hi there");
 
     unreachable!()
 }
 
 // global_asm! {
-// 	r"
-// 		.extern __rust_entry
-// 		.extern __stack_top
+//  r"
+//      .extern __rust_entry
+//      .extern __stack_top
 
-// 		.section .text
+//      .section .text
 
-// 		.global _start
-// 		_start:
-// 			ldr x9, =__stack_top
-// 			ldr x9, [x9]
-// 			mov sp, x9
-// 			b __rust_entry
+//      .global _start
+//      _start:
+//          ldr x9, =__stack_top
+//          ldr x9, [x9]
+//          mov sp, x9
+//          b __rust_entry
 
-// 			1: b 1b
-// 	"
+//          1: b 1b
+//  "
 // }
 
 global_asm! {
-	r"
-		.extern __rust_entry
+    r"
+        .extern __rust_entry
 
-		.section .text
+        .section .text
 
-		.global _start
-		_start:
-			b __rust_entry
+        .global _start
+        _start:
+            b __rust_entry
 
-			1: b 1b
-	"
+            1: b 1b
+    "
 }
 
 
@@ -49,10 +49,10 @@ enum Never {}
 
 #[no_mangle]
 unsafe extern "C" fn __rust_entry() -> ! {
-	match main() {
+    match main() {
         Ok(absurdity) => match absurdity {},
         Err(err) => panic!("Error: {}", err),
-	}
+    }
 }
 
 #[panic_handler]
