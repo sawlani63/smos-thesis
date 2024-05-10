@@ -36,6 +36,7 @@ use ::elf::ElfBytes;
 use sel4::cap::VSpace;
 use sel4::{BootInfo, BootInfoPtr};
 use sel4_root_task::{root_task, Never};
+use vmem_layout::PROCESS_STACK_TOP;
 use crate::debug::debug_print_bootinfo;
 use crate::bootstrap::smos_bootstrap;
 use crate::uart::uart_init;
@@ -134,8 +135,22 @@ fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endp
     
 // }
 
-fn init_process_stack(cspace: &mut CSpace, ut_table: &mut UTTable) {
-    todo!();
+fn init_process_stack(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable, vspace: sel4::cap::VSpace,) -> Result<usize, sel4::Error> {
+    // @alwin: For now, the stack is one page big
+    let stack_top = vmem_layout::PROCESS_STACK_TOP;
+    let mut stack_bottom = stack_top - PAGE_SIZE_4K;
+
+    for _ in 0..vmem_layout::USER_DEFAULT_STACK_PAGES {
+        // @alwin: fix! this leaks memory
+        let frame = frame_table.alloc_frame(cspace, ut_table).ok_or(sel4::Error::NotEnoughMemory)?;
+        let user_frame = sel4::CPtr::from_bits(cspace.alloc_slot()?.try_into().unwrap()).cast::<sel4::cap_type::UnspecifiedFrame>();
+        cspace.root_cnode().relative(user_frame).copy(&cspace.root_cnode().relative(frame_table.frame_from_ref(frame).get_cap()), sel4::CapRightsBuilder::all().build());
+        map_frame(cspace, ut_table, user_frame, vspace, stack_bottom, sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT, None);
+
+        stack_bottom -= PAGE_SIZE_4K;
+    }
+
+    return Ok(stack_top);
 }
 
 
@@ -157,6 +172,7 @@ fn start_first_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
     let mut proc_cspace = UserCSpace::new(cspace, ut_table, false)?;
 
     /* Create an IPC buffer */
+    // @alwin: THis should really probs be an alloc_frame()
     let mut ipc_buffer = alloc_retype::<sel4::cap_type::SmallPage>(cspace, ut_table, sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage))?;
 
     /* allocate a new slot in the target cspace which we will mint a badged endpoint cap into --
@@ -169,11 +185,15 @@ fn start_first_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
                                  sel4::CapRightsBuilder::all().build(),
                                  APP_EP_BADGE.try_into().unwrap())?;
 
+
     /* Create a new TCB object */
     let mut tcb = alloc_retype::<sel4::cap_type::Tcb>(cspace, ut_table, sel4::ObjectBlueprint::Tcb)?;
 
+
     /* Configure the TCB */
-    tcb.0.tcb_configure(proc_cspace.root_cnode(), sel4::CNodeCapData::new(0, sel4::WORD_SIZE), vspace.0, vmem_layout::PROCESS_IPC_BUFFER.try_into().unwrap(), ipc_buffer.0)?;
+    // @alwin: changing the WORD_SIZE to 64 causes a panic
+    tcb.0.tcb_configure(proc_cspace.root_cnode(), sel4::CNodeCapData::new(0, 0), vspace.0, vmem_layout::PROCESS_IPC_BUFFER.try_into().unwrap(), ipc_buffer.0)?;
+
 
     /* Create scheduling context */
     let mut sched_context = alloc_retype::<sel4::cap_type::SchedContext>(cspace, ut_table, sel4::ObjectBlueprint::SchedContext{ size_bits: sel4_sys::seL4_MinSchedContextBits.try_into().unwrap()})?;
@@ -181,7 +201,8 @@ fn start_first_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
     /* Configure the scheduling context to use the first core with budget equal to period */
     sched_control.sched_control_configure_flags(sched_context.0, 1000, 1000, 0, 0, 0);
 
-    tcb.0.tcb_set_sched_params(sel4::init_thread::slot::TCB.cap(), 0, 0, sched_context.0, sel4::CPtr::from_bits(proc_ep.try_into().unwrap()).cast())?;
+    // @alwin: The endpoint passed in here should actually be badged like the other one
+    tcb.0.tcb_set_sched_params(sel4::init_thread::slot::TCB.cap(), 0, 0, sched_context.0, ep)?;
 
     tcb.0.debug_name(name.as_bytes());
 
@@ -189,12 +210,19 @@ fn start_first_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
 
     let elf = ElfBytes::<elf::endian::AnyEndian>::minimal_parse(TEST_ELF_CONTENTS).or(Err(sel4::Error::InvalidArgument))?;
 
-    init_process_stack(cspace, ut_table);
+    let sp = init_process_stack(cspace, ut_table, frame_table, vspace.0)?;
 
-    load_elf(cspace, ut_table, frame_table, vspace.0, elf);
+    load_elf(cspace, ut_table, frame_table, vspace.0, &elf);
 
-    // map_frame(cspace, ut_table, frame.0, vspace.0, vmem_layout::PROCESS_IPC_BUFFER,
-    //           sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT)?;
+
+    map_frame(cspace, ut_table, ipc_buffer.0.cast(), vspace.0, vmem_layout::PROCESS_IPC_BUFFER,
+          sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT, None)?;
+
+    let mut user_context = sel4::UserContext::default();
+    *user_context.pc_mut() = elf.ehdr.e_entry;
+    *user_context.sp_mut() = sp.try_into().unwrap();
+
+    tcb.0.tcb_write_registers(true, 2, &mut user_context)?;
 
     return Ok(());
 }

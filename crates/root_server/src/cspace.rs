@@ -8,7 +8,7 @@ use crate::bootstrap::{INITIAL_TASK_CNODE_SIZE_BITS};
 use crate::bitfield::{bitfield_type, bitfield_init};
 use crate::ut::{UTWrapper, UTTable};
 use crate::util::{alloc_retype, MASK};
-use crate::warn_rs;
+use crate::{log_rs, warn_rs};
 use alloc::boxed::Box;
 
 
@@ -234,12 +234,18 @@ impl UserCSpace {
 
 		// Mint the cnode cap with that guard and make it the cap to the root_cnode this cspace --
      	// this means that objects in this cspace can be directly invoked with depth seL4_WordBits */
- 	    let depth = sel4::WORD_SIZE - (CNODE_SLOT_BITS(CNODE_SIZE_BITS) * (if two_lvl { 2 } else { 1 }));
+
+     	// @alwin: I think the reason this works is because I increased the size of CNODE_SIZE_BITS from 12 to 13.
+     	// 2^12 is one page, which is what is allocated, while 2^13 is more than this. This design is kind of problematic
+     	// actually, as the maximally sized one level cspace doesn't really have many slots. I guess you could always use
+     	// a multilevel cspace.
+ 	    let depth = sel4::WORD_SIZE - ((CNODE_SLOT_BITS(CNODE_SIZE_BITS - 1)) * (if two_lvl { 2 } else { 1 }));
  	    let guard = CNodeCapData::new(0, depth);
  	    let root_cnode = bootstrap.alloc_slot()?;
  	    bootstrap.root_cnode.relative_bits_with_depth(root_cnode.try_into().unwrap(), sel4::WORD_SIZE)
  	    					.mint(&bootstrap.root_cnode.relative(untyped.0),
  	    						  sel4::CapRightsBuilder::all().build(), guard.into_word());
+
 
  	    bootstrap.delete(untyped.0.bits().try_into().unwrap());
  	    bootstrap.free_slot(untyped.0.bits().try_into().unwrap());

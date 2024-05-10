@@ -13,6 +13,7 @@ pub const FRAME_TABLE: usize = 			0x8100000000;
 pub const FRAME_DATA: usize = 			0x8200000000;
 
 /* Constants for how SOS will layout the address space of any processes it loads up */
-pub const _PROCESS_STACK_TOP: usize = 	0x90000000;
+pub const PROCESS_STACK_TOP: usize = 	0x90000000;
 pub const PROCESS_IPC_BUFFER: usize = 	0xA0000000;
+pub const USER_DEFAULT_STACK_PAGES: usize = 10;
 pub const _PROCESS_VMEM_START: usize = 	0xC0000000;

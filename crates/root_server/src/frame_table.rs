@@ -33,7 +33,7 @@ impl FrameWrapper {
 		unsafe {(*self.frame).prev = prev};
 	}
 
-	fn get_cap(self: &Self) -> sel4::cap::SmallPage {
+	pub fn get_cap(self: &Self) -> sel4::cap::SmallPage {
 		return unsafe {(*self.frame).cap};
 	}
 
@@ -89,7 +89,7 @@ pub struct FrameTable {
 }
 
 impl FrameTable {
-	fn frame_from_ref(self: &Self, frame_ref: FrameRef) -> FrameWrapper {
+	pub fn frame_from_ref(self: &Self, frame_ref: FrameRef) -> FrameWrapper {
 		assert!(frame_ref < self.capacity.try_into().unwrap());
 		return FrameWrapper {frame: self.frames.wrapping_add(frame_ref.try_into().unwrap()) };
 	}
