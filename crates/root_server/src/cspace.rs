@@ -90,13 +90,13 @@ pub trait CSpaceTrait {
 
             /* ensure the bottom level cnode is present */
             if self.n_bot_lvl_nodes() <= NODE_INDEX(cptr) ||
-               self.get_bot_lvl_node(NODE_INDEX(cptr)).n_cnodes <= CNODE_INDEX(cptr) {
+                unsafe { self.get_bot_lvl_node(NODE_INDEX(cptr)).n_cnodes } <= CNODE_INDEX(cptr) {
 
                 used = self.ensure_levels(cptr, MAPPING_SLOTS)?;
             }
 
             /* now allocate a bottom level index */
-            let bot_lvl = &mut self.get_bot_lvl_node(NODE_INDEX(cptr)).cnodes[CNODE_INDEX(cptr)];
+            let bot_lvl = unsafe { &mut self.get_bot_lvl_node(NODE_INDEX(cptr)).cnodes[CNODE_INDEX(cptr)] };
             let bot_index = bf_first_free(&bot_lvl.bf)?;
             bf_set_bit(&mut bot_lvl.bf, bot_index);
 
@@ -140,8 +140,8 @@ pub trait CSpaceTrait {
             let node = NODE_INDEX(cptr);
             if self.n_bot_lvl_nodes() > node {
                 let cnode = CNODE_INDEX(cptr);
-                if self.get_bot_lvl_node(node).n_cnodes > cnode {
-                    bf_clr_bit(&mut self.get_bot_lvl_node(node).cnodes[cnode].bf, BOT_LVL_INDEX(cptr));
+                if unsafe { self.get_bot_lvl_node(node).n_cnodes } > cnode {
+                    bf_clr_bit(unsafe { &mut self.get_bot_lvl_node(node).cnodes[cnode].bf }, BOT_LVL_INDEX(cptr));
                 } else {
                     warn_rs!("Attempting to free unallocated cptr {}", cptr);
                 }
@@ -157,7 +157,7 @@ pub trait CSpaceTrait {
     fn top_lvl_size_bits(&self) -> usize;
     fn n_bot_lvl_nodes(&self) -> usize;
     fn top_bf_mut<'b, 'a : 'b>(&'a mut self) -> &'b mut [u64];
-    fn get_bot_lvl_node<'b, 'a : 'b>(&'a self, i : usize) -> &'b mut BotLvlNodeT;
+    unsafe fn get_bot_lvl_node<'b, 'a : 'b>(&'a self, i : usize) -> &'b mut BotLvlNodeT;
     fn top_bf<'b, 'a : 'b>(&'a self) -> &'b [u64];
 }
 
@@ -216,7 +216,8 @@ impl CSpaceTrait for UserCSpace {
         return &mut self.top_bf;
     }
 
-    fn get_bot_lvl_node<'b, 'a : 'b>(&'a self, i : usize) -> &'b mut BotLvlNodeT {
+    unsafe fn get_bot_lvl_node<'b, 'a : 'b>(&'a self, i : usize) -> &'b mut BotLvlNodeT {
+        assert!((self.bot_lvl_nodes.as_ref().unwrap())[i] != core::ptr::null_mut());
         return unsafe {&mut *(self.bot_lvl_nodes.as_ref().unwrap())[i] };
     }
 
@@ -281,9 +282,6 @@ pub struct CSpace<'a> {
     pub top_bf: bitfield_type!(CNODE_SLOTS(INITIAL_TASK_CNODE_SIZE_BITS)),
     bot_lvl_nodes: &'a mut [*mut BotLvlNodeT],
     pub n_bot_lvl_nodes: usize,
-    // untyped: todo!()/* ?? */, // @alwin: Add this back when I figure out what it should be
-    // pub bootstrap: Option<&'a CSpace<'a>>,
-    // alloc: CSpaceAlloc, // @alwin: Add this back when I figure out what it should be
     pub watermark: [usize; WATERMARK_SLOTS]
 }
 
@@ -321,7 +319,9 @@ impl<'c> CSpaceTrait for CSpace<'c> {
         return &mut self.top_bf;
     }
 
-    fn get_bot_lvl_node<'b, 'a : 'b>(&'a self, i : usize) -> &'b mut BotLvlNodeT {
+    // Safety: bot_lvl_nodes[i] must have been set prior to calling this function
+    unsafe fn get_bot_lvl_node<'b, 'a : 'b>(&'a self, i : usize) -> &'b mut BotLvlNodeT {
+        assert!(self.bot_lvl_nodes[i] != core::ptr::null_mut());
         return unsafe{&mut *self.bot_lvl_nodes[i]};
     }
 
@@ -368,7 +368,6 @@ impl<'a> CSpace<'a> {
     }
 
     pub fn init_bot_lvl_node(self: &mut Self, i : usize, ptr: *mut BotLvlNodeT) {
-        // @alwin: is this the best place for this to happen?
         unsafe {
             // cast to u8 for memset equivalent
             core::ptr::write_bytes(ptr as *mut u8, 0, PAGE_SIZE_4K);

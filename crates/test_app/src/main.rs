@@ -66,7 +66,7 @@ fn eh_personality() -> ! {
     panic!("unexpected call to eh_personality")
 }
 
-// @alwin: idk what's happening here
+// @alwin: idk what's happening here, why do I need this
 #[no_mangle]
 extern "C" fn _Unwind_Resume() -> ! {
     unreachable!("Unwinding not supported");

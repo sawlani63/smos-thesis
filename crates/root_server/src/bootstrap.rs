@@ -70,7 +70,7 @@ fn paddr_from_avail_bytes(bi: &sel4::BootInfo, i: usize, size_bits: usize, booti
     if !bi.untyped_list()[i].is_device() {
         taken = BIT(bi.untyped_list()[i].size_bits()) - bootinfo_avail_bytes[i];
     }
-    // @alwin: Double check this
+
     taken = ROUND_UP(taken, size_bits);
     return bi.untyped_list()[i].paddr() + taken;
 }
@@ -184,19 +184,13 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     init_task_cnode_copy.copy(&init_task_cnode_self, sel4::CapRightsBuilder::all().build())?;
 
     /* mint a cap to our new cnode at seL4_CapInitThreadCnode in the new cspace with the correct guard */
-    let cap_data = sel4_sys::seL4_CNode_CapData::new(0, (sel4::WORD_SIZE - depth) as u64);
+    let cap_data = sel4::CNodeCapData::new(0, sel4::WORD_SIZE - depth);
     let lvl1_self_cptr = lvl1_cnode.relative_bits_with_depth(sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode.into(),
                                                              depth);
-    lvl1_self_cptr.mint(&lvl1_cnode_cptr, sel4::CapRightsBuilder::all().build(), cap_data.get_guardSize())?;
+    lvl1_self_cptr.mint(&lvl1_cnode_cptr, sel4::CapRightsBuilder::all().build(), (sel4::WORD_SIZE - depth).try_into().unwrap())?;
 
     /* Set the new CNode as our default top-level CNode */
-    // @alwin: Does this really need to be unsafe?
-    unsafe {
-        (*bi.ipc_buffer()).inner_mut().seL4_TCB_SetSpace(sel4::init_thread::slot::TCB.cptr().bits(),
-                                                                 0, lvl1_cptr.try_into().unwrap(),
-                                                                 cap_data.get_guardSize(),
-                                                                 sel4::init_thread::slot::VSPACE.cptr().bits(), 0);
-    }
+    sel4::init_thread::slot::TCB.cap().tcb_set_space(CPtr::from_bits(0), lvl1_cnode, cap_data, sel4::init_thread::slot::VSPACE.cap());
 
     /* Redefine the CPtrs's relative to the new top-level CSpace */
     lvl1_cnode_cptr = sel4::init_thread::slot::CNODE.cap().relative_self();
@@ -345,7 +339,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
         cspace.init_bot_lvl_node(i, ut_table.next_free_vaddr as *mut BotLvlNodeT);
         ut_table.next_free_vaddr += PAGE_SIZE_4K;
 
-        let bot_lvl_node = cspace.get_bot_lvl_node(i);
+        let bot_lvl_node = unsafe { cspace.get_bot_lvl_node(i) };
         bot_lvl_node.untyped = node_ut;
         bot_lvl_node.frame = page;
         cspace.n_bot_lvl_nodes += 1;
@@ -358,8 +352,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
 
     /* now record all the cptrs we have already used to bootstrap */
     for i in (0..ALIGN_DOWN(first_free_slot, slots_per_cnode)).step_by(slots_per_cnode) {
-        let bot_lvl_node = cspace.get_bot_lvl_node(NODE_INDEX(i));
-        /* @alwin: there should be a check here that bot_lvl_node is not NULL */
+        let bot_lvl_node = unsafe { cspace.get_bot_lvl_node(NODE_INDEX(i)) };
         bot_lvl_node.n_cnodes += 1;
         for i in 0..CNODE_SLOTS(CNODE_SIZE_BITS)/sel4::WORD_SIZE {
             bot_lvl_node.cnodes[CNODE_INDEX(i)].bf[i] = u64::MAX;
@@ -368,7 +361,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
         bf_set_bit(&mut cspace.top_bf, TOP_LVL_INDEX(i));
     }
 
-    let bot_lvl_node = cspace.get_bot_lvl_node(first_free_slot / slots_per_cnode / BOT_LVL_PER_NODE);
+    let bot_lvl_node = unsafe { cspace.get_bot_lvl_node(first_free_slot / slots_per_cnode / BOT_LVL_PER_NODE) };
     bot_lvl_node.n_cnodes += 1;
 
     for i in ALIGN_DOWN(first_free_slot, slots_per_cnode)..first_free_slot {
@@ -376,7 +369,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     }
 
     for i in (first_free_slot / slots_per_cnode + 1)..(n_cnodes) {
-        cspace.get_bot_lvl_node(i / BOT_LVL_PER_NODE).n_cnodes += 1;
+        unsafe { cspace.get_bot_lvl_node(i / BOT_LVL_PER_NODE).n_cnodes += 1; }
     }
 
     for i in 0..WATERMARK_SLOTS {
