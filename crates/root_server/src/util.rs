@@ -42,3 +42,13 @@ pub fn alloc_retype<T: sel4::CapType>(cspace: &mut CSpace, ut_table: &mut UTTabl
 
     return Ok((sel4::CPtr::from_bits(cptr.try_into().unwrap()).cast::<T>(), ut));
 }
+
+/* We set the top bit to differentiate between messages from notifications (IRQs) and EPs */
+pub const IRQ_EP_BIT: usize = BIT(sel4_sys::seL4_BadgeBits as usize - 1);
+
+/* If we have a notification, we use the remaining 63 bits to differentiate between them */
+pub const IRQ_IDENT_BADGE_BITS: usize = IRQ_EP_BIT - 1;
+
+/* If we have an endpoint, we use the 2nd top bit to determine if it was the result of a
+ * fault or a syscall. */
+pub const FAULT_EP_BIT: usize = BIT(sel4_sys::seL4_BadgeBits as usize - 2);

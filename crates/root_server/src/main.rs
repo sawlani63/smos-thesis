@@ -36,6 +36,7 @@ extern crate alloc;
 use sel4::cap::VSpace;
 use sel4::{BootInfo, BootInfoPtr};
 use sel4_root_task::{root_task, Never};
+use sel4_sys::seL4_Fault_Splayed::{*};
 use vmem_layout::PROCESS_STACK_TOP;
 use crate::debug::debug_print_bootinfo;
 use crate::bootstrap::smos_bootstrap;
@@ -44,17 +45,14 @@ use crate::cspace::{CSpace, UserCSpace, CSpaceTrait};
 use crate::ut::{UTTable, UTWrapper};
 use crate::printing::print_init;
 use crate::page::PAGE_SIZE_4K;
-use crate::util::alloc_retype;
+use crate::util::{alloc_retype, IRQ_EP_BIT, FAULT_EP_BIT, IRQ_IDENT_BADGE_BITS};
 use crate::mapping::map_frame;
 use crate::tests::run_tests;
 use crate::frame_table::FrameTable;
 use crate::clock::{clock_init, register_timer};
 use crate::irq::IRQDispatch;
 use crate::heap::initialise_heap;
-use crate::proc::{start_first_process};
-
-const IRQ_EP_BADGE: usize = 1 << (sel4_sys::seL4_BadgeBits - 1);
-const IRQ_IDENT_BADGE_BITS: usize = IRQ_EP_BADGE - 1;
+use crate::proc::{start_process, MAX_PID};
 
 const TEST_ELF_CONTENTS: &[u8] = include_bytes!(env!("TEST_ELF"));
 
@@ -77,6 +75,14 @@ fn ipc_init(cspace: &mut CSpace, ut_table: &mut UTTable)
 
 fn callback(_idk: usize, _idk2: *const ()) {
     log_rs!("hey there!");
+}
+
+fn handle_vm_fault() {
+    panic!("Handling VM fault");
+}
+
+fn handle_syscall() {
+    todo!();
 }
 
 fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endpoint, irq_dispatch: &mut IRQDispatch)
@@ -105,14 +111,36 @@ fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, ep: sel4::cap::Endp
 
         let label = msg.label();
 
-        if badge & IRQ_EP_BADGE as u64 != 0 {
+        if badge & IRQ_EP_BIT as u64 != 0 {
+            // Handle IRQ notification
             badge = irq_dispatch.handle_irq(badge as usize);
             have_reply = false;
-            // Handle IRQ notification
-        } else if label == sel4_sys::seL4_Fault_tag::seL4_Fault_NullFault {
-            // IPC message
+        } else if badge & FAULT_EP_BIT as u64 == 0 {
+            /* We recieved a syscall from something in the system*/
+            assert!(badge < MAX_PID.try_into().unwrap());
+
+            handle_syscall();
         } else {
-            // Some kind of fault
+            /* We must have recieved a message from a fault handler endpoint */
+            assert!(badge & FAULT_EP_BIT as u64 != 0);
+            badge &= !FAULT_EP_BIT as u64;
+            assert!(badge < MAX_PID as u64);
+
+            match sel4::with_ipc_buffer(|buf| sel4_sys::seL4_Fault::get_from_ipc_buffer(msg.inner(), buf.inner()).splay()) {
+                NullFault(_) |
+                CapFault(_) |
+                UnknownSyscall(_) |
+                UserException(_) |
+                VGICMaintenance(_) |
+                VCPUFault(_) |
+                Timeout(_) |
+                VPPIEvent(_) => {
+                    panic!("Don't know how to handle this kind of fault!")
+                },
+                VMFault(f) => {
+                    handle_vm_fault();
+                },
+            }
         }
 
         reply_msg_info = sel4::MessageInfoBuilder::default().label(0)
@@ -143,7 +171,7 @@ extern "C" fn main_continued(bootinfo_raw: *const BootInfo, cspace_ptr : *mut CS
     let mut frame_table = FrameTable::init(sel4::init_thread::slot::VSPACE.cap());
 
     let mut irq_dispatch = IRQDispatch::new(sel4::init_thread::slot::IRQ_CONTROL.cap(), ntfn,
-                                            IRQ_EP_BADGE, IRQ_IDENT_BADGE_BITS);
+                                            IRQ_EP_BIT, IRQ_IDENT_BADGE_BITS);
 
     initialise_heap(cspace, ut_table).expect("Failed to initialize heap!");
 
@@ -153,9 +181,9 @@ extern "C" fn main_continued(bootinfo_raw: *const BootInfo, cspace_ptr : *mut CS
 
     clock_init(cspace, &mut irq_dispatch, ntfn).expect("Failed to initialize clock");
 
-    let proc = start_first_process(cspace, ut_table, &mut frame_table,
-                                   bootinfo.sched_control().index(0).cap(), "test_app", ipc_ep,
-                                   TEST_ELF_CONTENTS).expect("Failed to start first process");
+    let proc = start_process(cspace, ut_table, &mut frame_table,
+                             bootinfo.sched_control().index(0).cap(), "test_app", ipc_ep,
+                             TEST_ELF_CONTENTS).expect("Failed to start first process");
 
     syscall_loop(cspace, ut_table, ipc_ep, &mut irq_dispatch).expect("Something went wrong in the syscall loop");
 

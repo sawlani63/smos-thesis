@@ -76,6 +76,11 @@ pub trait CSpaceTrait {
         Ok(())
     }
 
+    fn alloc_cap<T: sel4::CapType>(&mut self) -> Result<sel4::Cap<T>, sel4::Error> {
+    	let slot = self.alloc_slot()?;
+    	return Ok(sel4::CPtr::from_bits(slot.try_into().unwrap()).cast::<T>());
+    }
+
     fn alloc_slot(&mut self) -> Result<usize, sel4::Error> {
         let top_index = bf_first_free(self.top_bf())?;
         if self.is_two_level() && top_index > CNODE_SLOTS(self.top_lvl_size_bits()) ||
@@ -178,6 +183,7 @@ struct CSpaceAlloc {
     cookie: usize,
 }
 
+#[derive(Clone)]
 pub struct UserCSpace {
     root_cnode: sel4::cap::CNode,
     pub top_bf: bitfield_type!(CNODE_SLOTS(CNODE_SIZE_BITS)),

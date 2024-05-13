@@ -9,6 +9,10 @@ use core::arch::global_asm;
 fn main()  -> sel4::Result<Never> {
     sel4::debug_println!("hi there");
 
+    unsafe {
+        *(0xdeadbeef as *mut u8) = 1;
+    }
+
     unreachable!()
 }
 

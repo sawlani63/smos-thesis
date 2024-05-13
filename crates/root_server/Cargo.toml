@@ -18,4 +18,3 @@ sel4-config = { git = "https://github.com/seL4/rust-sel4" }
 sel4-root-task = { git = "https://github.com/seL4/rust-sel4" }
 linked_list_allocator = "0.10.5"
 elf = { git = "https://github.com/alwin-joshy/rust-elf.git", rev="4b93dc6466914c3fd12a15c925f8136e7427f289", features=[]}
-array-init = "2.1.0"
