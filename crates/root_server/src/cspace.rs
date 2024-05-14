@@ -124,6 +124,10 @@ pub trait CSpaceTrait {
         self.root_cnode().relative_bits_with_depth(cptr.try_into().unwrap(), sel4::WORD_SIZE).delete()
     }
 
+    fn delete_cap<T: sel4::CapType>(&self, cap: sel4::Cap<T>) -> Result<(), sel4::Error> {
+        self.delete(cap.bits().try_into().unwrap())
+    }
+
     fn free_slot(&mut self, cptr: usize) {
         if cptr == 0 {
             return;
@@ -154,6 +158,10 @@ pub trait CSpaceTrait {
                 warn_rs!("Attempting to free unallocated cptr {}", cptr);
             }
         }
+    }
+
+    fn free_cap<T: sel4::CapType>(&mut self, cap: sel4::Cap<T>) {
+    	self.free_slot(cap.bits().try_into().unwrap());
     }
 
     fn is_two_level(&self) -> bool;

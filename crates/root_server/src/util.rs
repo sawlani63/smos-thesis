@@ -43,6 +43,13 @@ pub fn alloc_retype<T: sel4::CapType>(cspace: &mut CSpace, ut_table: &mut UTTabl
     return Ok((sel4::CPtr::from_bits(cptr.try_into().unwrap()).cast::<T>(), ut));
 }
 
+pub fn dealloc_retyped<T: sel4::CapType>(cspace: &mut CSpace, ut_table: &mut UTTable, alloc: (sel4::Cap<T>, UTWrapper)) {
+    cspace.delete(alloc.0.bits().try_into().unwrap());
+    cspace.free_slot(alloc.0.bits().try_into().unwrap());
+    ut_table.free(alloc.1);
+}
+
+
 /* We set the top bit to differentiate between messages from notifications (IRQs) and EPs */
 pub const IRQ_EP_BIT: usize = BIT(sel4_sys::seL4_BadgeBits as usize - 1);
 
