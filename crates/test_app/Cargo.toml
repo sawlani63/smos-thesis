@@ -12,10 +12,14 @@ edition = "2021"
 license = "BSD-2-Clause"
 
 [dependencies]
-sel4 = { git = "https://github.com/seL4/rust-sel4" }
+sel4 = { git = "https://github.com/seL4/rust-sel4", features = ["state", "thread-local-state"]}
 sel4-sys = { git = "https://github.com/seL4/rust-sel4" }
 sel4-config = { git = "https://github.com/seL4/rust-sel4" }
 sel4-panicking = { git = "https://github.com/seL4/rust-sel4" }
+# sel4-initialize-tls = { git = "https://github.com/seL4/rust-sel4", features = ["on-stack"]}
+# sel4-runtime-common = { git = "https://github.com/alwin-joshy/rust-sel4.git", rev="ed0e7acd43e53fcc97a4eac95d579cd61a3c470e", features = ["start", "tls", "unwinding"]}
+sel4-runtime-common = { git = "https://github.com/seL4/rust-sel4", features = ["tls", "unwinding"]}
+sel4-panicking-env = {git = "https://github.com/seL4/rust-sel4"}
 
 [profile.dev]
 panic="abort"

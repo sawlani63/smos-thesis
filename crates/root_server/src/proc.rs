@@ -324,7 +324,7 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
     map_frame(cspace, ut_table, ipc_buffer.0.cast(), vspace.0, vmem_layout::PROCESS_IPC_BUFFER,
               sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT, None).map_err(|e| {
 
-        err_rs!("Failed to initialize stack");
+        err_rs!("Failed to set IPC buffer");
         cspace.delete_cap(fault_ep);
         cspace.free_cap(fault_ep);
         dealloc_retyped(cspace, ut_table, tcb);

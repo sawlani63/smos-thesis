@@ -79,7 +79,9 @@ fn load_segment_into_vspace(cspace: &mut CSpace, ut_table: &mut UTTable, frame_t
 
 pub fn load_elf(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable, vspace: sel4::cap::VSpace, elf: &elf::ElfBytes<elf::endian::AnyEndian>) -> Result<(), sel4::Error>{
     for segment in elf.segments().ok_or(sel4::Error::InvalidArgument)?.iter() {
-        if segment.p_type != elf::abi::PT_LOAD {
+        if segment.p_type != elf::abi::PT_LOAD && segment.p_type != elf::abi::PT_TLS &&
+           segment.p_type != elf::abi::PT_PHDR {
+
             continue;
         }
 
