@@ -55,6 +55,29 @@ use crate::heap::initialise_heap;
 use crate::proc::{start_process, MAX_PID};
 use crate::fault::handle_fault;
 
+// @alwin: The root server should be able to serve the following images:
+//      * loader
+//      * nfs_server (or whatever components this will eventually become i.e ethernet driver,
+//                    virt?, etc)
+//
+// The root file server should start a loader with the correct arguments to load
+// the NFS server. After this, something (either the root server or the NFS server),
+// should start the login shell.
+//
+// Alternatively - the root server contains images for
+//      * loader
+//      * login_shell
+//      * sosh
+//      * nfs_server
+//      * authentication details?
+//
+// And should start the login shell, which upon successful login will then start sosh, which
+// can then start the NFS server and so on. Another thing, instead of the current approach where
+// the loader tries the NFS server and then the boot file server if that fails, it should instead
+// take in the name of the server to try. I think the first option is cleaner and less backdoory
+// but this has certain consequences on the security state of the system. The NFS server is not
+// started by a client, so where is its security context derived from?
+
 const TEST_ELF_CONTENTS: &[u8] = include_bytes!(env!("TEST_ELF"));
 
 /* Create and endpoint and a bounding notification object. These are never freed so we don't keep

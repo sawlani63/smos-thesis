@@ -1,25 +1,13 @@
-#
-# Copyright 2023, Colias Group, LLC
-#
-# SPDX-License-Identifier: BSD-2-Clause
-#
-
 [package]
-name = "test_app"
+name = "smos-runtime"
 version = "0.1.0"
-authors = ["Nick Spinale <nick.spinale@coliasgroup.com>"]
 edition = "2021"
-license = "BSD-2-Clause"
 
 [dependencies]
 sel4 = { git = "https://github.com/seL4/rust-sel4", features = ["state", "thread-local-state"]}
 sel4-sys = { git = "https://github.com/seL4/rust-sel4" }
 sel4-config = { git = "https://github.com/seL4/rust-sel4" }
 sel4-panicking = { git = "https://github.com/seL4/rust-sel4" }
-smos-runtime = { path = "../smos-runtime"}
-
-[profile.dev]
-panic="abort"
-
-[profile.release]
-panic="abort"
+sel4-runtime-common = { git = "https://github.com/seL4/rust-sel4", features = ["tls", "unwinding"]}
+sel4-panicking-env = {git = "https://github.com/seL4/rust-sel4"}
+smos-macros = { path = "macros" }

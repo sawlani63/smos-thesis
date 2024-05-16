@@ -688,6 +688,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "smos-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "smos-runtime"
+version = "0.1.0"
+dependencies = [
+ "sel4",
+ "sel4-config",
+ "sel4-panicking",
+ "sel4-panicking-env",
+ "sel4-runtime-common",
+ "sel4-sys",
+ "smos-macros",
+]
+
+[[package]]
+name = "smos-server"
+version = "0.1.0"
+dependencies = [
+ "sel4",
+ "sel4-sys",
+]
+
+[[package]]
 name = "spinning_top"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -725,9 +755,8 @@ dependencies = [
  "sel4",
  "sel4-config",
  "sel4-panicking",
- "sel4-panicking-env",
- "sel4-runtime-common",
  "sel4-sys",
+ "smos-runtime",
 ]
 
 [[package]]
