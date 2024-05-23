@@ -1,4 +1,4 @@
-use crate::bitfield::{bitfield_type, bf_first_free, bf_set_bit, bf_clr_bit};
+use bitfield::{bitfield_type, bf_first_free, bf_set_bit, bf_clr_bit};
 use crate::cspace::{CSpace, CSpaceTrait};
 use crate::page::BIT;
 
@@ -120,7 +120,7 @@ impl IRQDispatch {
     }
 
     fn alloc_irq_bit(self: &mut Self) -> Result<usize, sel4::Error> {
-        let bit = bf_first_free(&self.allocated_bits)?;
+        let bit = bf_first_free(&self.allocated_bits).map_err(|_| sel4::Error::NotEnoughMemory)?;
         bf_set_bit(&mut self.allocated_bits, bit);
         return Ok(bit);
     }

@@ -1,5 +1,5 @@
 [package]
-name = "smos-server"
+name = "smos-client"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,4 +7,4 @@ edition = "2021"
 sel4 = { git = "https://github.com/seL4/rust-sel4", features = ["state", "thread-local-state"]}
 sel4-sys = { git = "https://github.com/seL4/rust-sel4" }
 smos-common  = { path = "../smos-common" }
-downcast-rs = { version = "1.2.0", default-features = false }
+smos-cspace = { path = "../smos-cspace" }

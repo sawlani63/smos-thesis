@@ -1,0 +1,8 @@
+[package]
+name = "smos-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sel4 = { git = "https://github.com/seL4/rust-sel4" }
+num_enum = { version = "0.7.2", default-features = false, features = [] }

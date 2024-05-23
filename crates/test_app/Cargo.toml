@@ -16,7 +16,10 @@ sel4 = { git = "https://github.com/seL4/rust-sel4", features = ["state", "thread
 sel4-sys = { git = "https://github.com/seL4/rust-sel4" }
 sel4-config = { git = "https://github.com/seL4/rust-sel4" }
 sel4-panicking = { git = "https://github.com/seL4/rust-sel4" }
-smos-runtime = { path = "../smos-runtime"}
+smos-runtime = { path = "../smos-runtime" }
+smos-client = { path = "../smos-client" }
+smos-cspace = { path = "../smos-cspace" }
+smos-common = { path = "../smos-common"}
 
 [profile.dev]
 panic="abort"

@@ -9,6 +9,6 @@
 resolver = "2"
 
 members = [
-    "crates/root_server", "crates/smos-runtime", "crates/smos-server",
+    "crates/root_server", "crates/smos-client", "crates/smos-runtime", "crates/smos-server", "crates/smos-common",
     "crates/test_app"
-]
+, "crates/smos-cspace", "crates/bitfield"]

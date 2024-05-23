@@ -11,3 +11,6 @@ sel4-panicking = { git = "https://github.com/seL4/rust-sel4" }
 sel4-runtime-common = { git = "https://github.com/seL4/rust-sel4", features = ["tls", "unwinding"]}
 sel4-panicking-env = {git = "https://github.com/seL4/rust-sel4"}
 smos-macros = { path = "macros" }
+smos-cspace = {path = "../smos-cspace"}
+smos-common = {path = "../smos-common"}
+smos-client = {path = "../smos-client"}

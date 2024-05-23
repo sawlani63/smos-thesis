@@ -1,7 +1,11 @@
+#![no_std]
 #![allow(non_snake_case)]
 
 use core::mem::size_of;
-use crate::page::BIT;
+
+const fn BIT(n : usize) -> usize {
+    1 << n
+}
 
 const WORD_BITS: usize = size_of::<u64>() * 8;
 
@@ -17,7 +21,7 @@ pub fn bf_get_bit(bf: &mut[u64], idx: usize) -> bool {
     if (bf[WORD_INDEX(idx)] & <usize as TryInto<u64>>::try_into(BIT(BIT_INDEX(idx))).unwrap()) != 0 { true } else { false }
 }
 
-pub fn bf_first_free(bf: &[u64]) -> Result<usize, sel4::Error> {
+pub fn bf_first_free(bf: &[u64]) -> Result<usize, ()> {
     /* find the first free word */
     let mut i = 0;
     while i < bf.len() && bf[i] == u64::MAX {
@@ -25,7 +29,7 @@ pub fn bf_first_free(bf: &[u64]) -> Result<usize, sel4::Error> {
     }
 
     if i == bf.len() {
-        return Err(sel4::Error::NotEnoughMemory);
+        return Err(());
     }
 
     let mut bit = i * WORD_BITS;
@@ -40,7 +44,7 @@ pub fn bf_first_free(bf: &[u64]) -> Result<usize, sel4::Error> {
     return Ok(bit);
 }
 pub const fn BITFIELD_SIZE(x: usize) -> usize {
-    x / sel4::WORD_SIZE
+    x / (size_of::<u64>() * 8)
 }
 
 fn WORD_INDEX(bit : usize) -> usize {
@@ -53,17 +57,16 @@ fn BIT_INDEX(bit : usize) -> usize {
 
 // @alwin: I had to do these to convince rust that the size of the bitfield was known at
 // compile time. It seems a bit evil? Maybe there is a better way
+#[macro_export]
 macro_rules! bitfield_type {
     ($size:expr) => {
-        [u64; $crate::bitfield::BITFIELD_SIZE($size)]
+        [u64; $crate::BITFIELD_SIZE($size)]
     };
 }
 
+#[macro_export]
 macro_rules! bitfield_init {
     ($size:expr) => {
-        [0; $crate::bitfield::BITFIELD_SIZE($size)]
+        [0; $crate::BITFIELD_SIZE($size)]
     };
 }
-
-pub(crate) use bitfield_type;
-pub(crate) use bitfield_init;

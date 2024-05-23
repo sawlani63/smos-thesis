@@ -41,6 +41,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitfield"
+version = "0.1.0"
+
+[[package]]
 name = "bitflags"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -122,6 +126,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "downcast-rs"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
+
+[[package]]
 name = "either"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -129,8 +139,9 @@ checksum = "a47c1c47d2f5964e29c61246e81db715514cd532db6b5116a25ea3c03d6780a2"
 
 [[package]]
 name = "elf"
-version = "0.8.0-dev"
-source = "git+https://github.com/alwin-joshy/rust-elf.git?rev=4b93dc6466914c3fd12a15c925f8136e7427f289#4b93dc6466914c3fd12a15c925f8136e7427f289"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
 
 [[package]]
 name = "errno"
@@ -267,6 +278,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_enum"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02339744ee7253741199f897151b38e72257d13802d4ee837285cc2990a90845"
+dependencies = [
+ "num_enum_derive",
+]
+
+[[package]]
+name = "num_enum_derive"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "681030a937600a36906c185595136d26abfebb4aa9c65701cefcaf8578bb982b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.63",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -384,12 +415,15 @@ checksum = "adad44e29e4c806119491a7f06f03de4d1af22c3a680dd47f1e6e179439d1f56"
 name = "root_server"
 version = "0.1.0"
 dependencies = [
+ "bitfield",
  "elf",
  "linked_list_allocator",
  "sel4",
  "sel4-config",
  "sel4-root-task",
  "sel4-sys",
+ "smos-common",
+ "smos-server",
 ]
 
 [[package]]
@@ -688,6 +722,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "smos-client"
+version = "0.1.0"
+dependencies = [
+ "sel4",
+ "sel4-sys",
+ "smos-common",
+ "smos-cspace",
+]
+
+[[package]]
+name = "smos-common"
+version = "0.1.0"
+dependencies = [
+ "num_enum",
+ "sel4",
+]
+
+[[package]]
+name = "smos-cspace"
+version = "0.1.0"
+dependencies = [
+ "bitfield",
+ "sel4",
+ "sel4-sys",
+]
+
+[[package]]
 name = "smos-macros"
 version = "0.1.0"
 dependencies = [
@@ -706,6 +767,9 @@ dependencies = [
  "sel4-panicking-env",
  "sel4-runtime-common",
  "sel4-sys",
+ "smos-client",
+ "smos-common",
+ "smos-cspace",
  "smos-macros",
 ]
 
@@ -713,8 +777,10 @@ dependencies = [
 name = "smos-server"
 version = "0.1.0"
 dependencies = [
+ "downcast-rs",
  "sel4",
  "sel4-sys",
+ "smos-common",
 ]
 
 [[package]]
@@ -756,6 +822,9 @@ dependencies = [
  "sel4-config",
  "sel4-panicking",
  "sel4-sys",
+ "smos-client",
+ "smos-common",
+ "smos-cspace",
  "smos-runtime",
 ]
 

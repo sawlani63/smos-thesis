@@ -1,11 +1,10 @@
 #![allow(non_snake_case)]
 
 use sel4::{CNodeCapData, ObjectBlueprint};
-use crate::bitfield::{bf_clr_bit, bf_first_free, bf_set_bit};
+use bitfield::{bf_clr_bit, bf_first_free, bf_set_bit, bitfield_type, bitfield_init};
 use crate::page::{BIT, PAGE_SIZE_4K, BYTES_TO_4K_PAGES};
 use core::mem::size_of;
 use crate::bootstrap::{INITIAL_TASK_CNODE_SIZE_BITS};
-use crate::bitfield::{bitfield_type, bitfield_init};
 use crate::ut::{UTWrapper, UTTable};
 use crate::util::{alloc_retype, MASK};
 use crate::{log_rs, warn_rs};
@@ -82,7 +81,7 @@ pub trait CSpaceTrait {
     }
 
     fn alloc_slot(&mut self) -> Result<usize, sel4::Error> {
-        let top_index = bf_first_free(self.top_bf())?;
+        let top_index = bf_first_free(self.top_bf()).map_err(|_| sel4::Error::NotEnoughMemory)?;
         if self.is_two_level() && top_index > CNODE_SLOTS(self.top_lvl_size_bits()) ||
            top_index >= CNODE_SLOTS(self.top_lvl_size_bits()) {
                 return Err(sel4::Error::InvalidCapability);
@@ -102,11 +101,11 @@ pub trait CSpaceTrait {
 
             /* now allocate a bottom level index */
             let bot_lvl = unsafe { &mut self.get_bot_lvl_node(NODE_INDEX(cptr)).cnodes[CNODE_INDEX(cptr)] };
-            let bot_index = bf_first_free(&bot_lvl.bf)?;
+            let bot_index = bf_first_free(&bot_lvl.bf).map_err(|_| sel4::Error::NotEnoughMemory)?;
             bf_set_bit(&mut bot_lvl.bf, bot_index);
 
             /* check if there are any free slots left in this cnode */
-            if bf_first_free(&bot_lvl.bf)? >= CNODE_SLOTS(CNODE_SIZE_BITS) - 1 {
+            if bf_first_free(&bot_lvl.bf).map_err(|_| sel4::Error::NotEnoughMemory)? >= CNODE_SLOTS(CNODE_SIZE_BITS) - 1 {
                 bf_set_bit(self.top_bf_mut(), top_index)
             }
 

@@ -1,0 +1,9 @@
+[package]
+name = "smos-cspace"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sel4 = { git = "https://github.com/seL4/rust-sel4"}
+sel4-sys = { git = "https://github.com/seL4/rust-sel4" }
+bitfield = { path = "../bitfield" }

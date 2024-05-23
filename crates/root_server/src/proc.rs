@@ -154,7 +154,7 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
 
     /* allocate a new slot in the target cspace which we will mint a badged endpoint cap into --
      * the badge is used to identify the process */
-     let mut proc_ep = proc_cspace.alloc_slot().map_err(|e| {
+     let proc_ep = proc_cspace.alloc_slot().map_err(|e| {
         err_rs!("Failed to allocate slot for user endpoint cap");
         cspace.delete(ipc_buffer_slot);
         cspace.free_slot(ipc_buffer_slot);
@@ -162,6 +162,8 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         dealloc_retyped(cspace, ut_table, vspace);
         e
      })?;
+     // Make sure the slot selected is what the runtime expects
+     assert!(proc_ep == smos_common::init::InitCNodeSlots::SMOS_RootServerEP as usize);
 
      /* now mutate the cap, thereby setting the badge */
      proc_cspace.root_cnode().relative_bits_with_depth(proc_ep.try_into().unwrap(), sel4::WORD_SIZE)
@@ -178,12 +180,44 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         e
     })?;
 
+    /* Allocate a slot for a self-referential cspace cap */
+    let proc_self_cspace = proc_cspace.alloc_slot().map_err(|e| {
+        err_rs!("Failed to allocate slot for self-referential cap");
+        proc_cspace.delete(proc_ep);
+        cspace.free_slot(proc_ep);
+        cspace.delete(ipc_buffer_slot);
+        cspace.free_slot(ipc_buffer_slot);
+        frame_table.free_frame(ipc_buffer_ref);
+        dealloc_retyped(cspace, ut_table, vspace);
+        e
+    })?;
+    // Make sure the slot selected is what the runtime expects
+    assert!(proc_self_cspace == smos_common::init::InitCNodeSlots::SMOS_CNodeSelf as usize);
+
+     /* Copy the CNode cap into the new process cspace*/
+    proc_cspace.root_cnode().relative_bits_with_depth(proc_self_cspace.try_into().unwrap(), sel4::WORD_SIZE)
+                            .copy(&cspace.root_cnode().relative(proc_cspace.root_cnode()),
+                                  sel4::CapRightsBuilder::all().build()).map_err(|e| {
+
+        err_rs!("Failed to copy self-refernetial cnode cap");
+        proc_cspace.free_slot(proc_self_cspace);
+        proc_cspace.delete(proc_ep);
+        cspace.free_slot(proc_ep);
+        cspace.delete(ipc_buffer_slot);
+        cspace.free_slot(ipc_buffer_slot);
+        frame_table.free_frame(ipc_buffer_ref);
+        dealloc_retyped(cspace, ut_table, vspace);
+        e
+    })?;
+
 
     /* Create a new TCB object */
     let mut tcb = alloc_retype::<sel4::cap_type::Tcb>(cspace, ut_table, sel4::ObjectBlueprint::Tcb)
                                                      .map_err(|e| {
 
         err_rs!("Failed to allocate new TCB object");
+        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.free_slot(proc_self_cspace);
         proc_cspace.delete(proc_ep);
         cspace.free_slot(proc_ep);
         cspace.delete(ipc_buffer_slot);
@@ -202,6 +236,8 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
 
         err_rs!("Failed to configure TCB");
         dealloc_retyped(cspace, ut_table, tcb);
+        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.free_slot(proc_self_cspace);
         proc_cspace.delete(proc_ep);
         cspace.free_slot(proc_ep);
         cspace.delete(ipc_buffer_slot);
@@ -218,6 +254,8 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
                                                                          .map_err(|e| {
         err_rs!("Failed to create scheduling context");
         dealloc_retyped(cspace, ut_table, tcb);
+        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.free_slot(proc_self_cspace);
         proc_cspace.delete(proc_ep);
         cspace.free_slot(proc_ep);
         cspace.delete(ipc_buffer_slot);
@@ -231,6 +269,8 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
     sched_control.sched_control_configure_flags(sched_context.0, 1000, 1000, 0, 0, 0).map_err(|e| {
         err_rs!("Failed to configure scheduling context");
         dealloc_retyped(cspace, ut_table, tcb);
+        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.free_slot(proc_self_cspace);
         proc_cspace.delete(proc_ep);
         cspace.free_slot(proc_ep);
         cspace.delete(ipc_buffer_slot);
@@ -244,6 +284,8 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
     let fault_ep = cspace.alloc_cap::<sel4::cap_type::Endpoint>().map_err(|e| {
         err_rs!("Failed to allocate slot for fault endpoint");
         dealloc_retyped(cspace, ut_table, tcb);
+        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.free_slot(proc_self_cspace);
         proc_cspace.delete(proc_ep);
         cspace.free_slot(proc_ep);
         cspace.delete(ipc_buffer_slot);
@@ -253,7 +295,7 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         e
     })?;
 
-
+    /* Mint the badged fault EP capability into the slot */
     cspace.root_cnode().relative(fault_ep).mint(&cspace.root_cnode().relative(ep),
                                                 sel4::CapRightsBuilder::all().build(),
                                                 (pos | FAULT_EP_BIT).try_into().unwrap()).map_err(|e| {
@@ -261,6 +303,8 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         err_rs!("Failed to mint badged fault endpoint");
         cspace.free_cap(fault_ep);
         dealloc_retyped(cspace, ut_table, tcb);
+        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.free_slot(proc_self_cspace);
         proc_cspace.delete(proc_ep);
         cspace.free_slot(proc_ep);
         cspace.delete(ipc_buffer_slot);
@@ -270,6 +314,7 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         e
     })?;
 
+    /* Set up the TCB scheduling parameters */
     tcb.0.tcb_set_sched_params(sel4::init_thread::slot::TCB.cap(), 0, 0, sched_context.0, fault_ep)
          .map_err(|e| {
 
@@ -277,6 +322,8 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         cspace.delete_cap(fault_ep);
         cspace.free_cap(fault_ep);
         dealloc_retyped(cspace, ut_table, tcb);
+        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.free_slot(proc_self_cspace);
         proc_cspace.delete(proc_ep);
         cspace.free_slot(proc_ep);
         cspace.delete(ipc_buffer_slot);
@@ -290,7 +337,6 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
 
     // @alwin: I've just included a bytearray containing the elf contents, which lets me avoid any
     // CPIO archive stuff, but is a bit more rigid.
-
     let elf = ElfBytes::<elf::endian::AnyEndian>::minimal_parse(elf_data)
                                                                .or(Err(sel4::Error::InvalidArgument))
                                                                .map_err(|e| {
@@ -298,6 +344,8 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         cspace.delete_cap(fault_ep);
         cspace.free_cap(fault_ep);
         dealloc_retyped(cspace, ut_table, tcb);
+        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.free_slot(proc_self_cspace);
         proc_cspace.delete(proc_ep);
         cspace.free_slot(proc_ep);
         cspace.delete(ipc_buffer_slot);
@@ -307,11 +355,14 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         e
    })?;
 
+    /* Load the ELF file into the virtual address space */
     load_elf(cspace, ut_table, frame_table, vspace.0, &elf).map_err(|e| {
         err_rs!("Failed to load ELF file");
         cspace.delete_cap(fault_ep);
         cspace.free_cap(fault_ep);
         dealloc_retyped(cspace, ut_table, tcb);
+        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.free_slot(proc_self_cspace);
         proc_cspace.delete(proc_ep);
         cspace.free_slot(proc_ep);
         cspace.delete(ipc_buffer_slot);
@@ -321,6 +372,7 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         e
     })?;
 
+    /* Map the IPC buffer into the virtual address space */
     map_frame(cspace, ut_table, ipc_buffer.0.cast(), vspace.0, vmem_layout::PROCESS_IPC_BUFFER,
               sel4::CapRightsBuilder::all().build(), sel4::VmAttributes::DEFAULT, None).map_err(|e| {
 
@@ -328,6 +380,8 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         cspace.delete_cap(fault_ep);
         cspace.free_cap(fault_ep);
         dealloc_retyped(cspace, ut_table, tcb);
+        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.free_slot(proc_self_cspace);
         proc_cspace.delete(proc_ep);
         cspace.free_slot(proc_ep);
         cspace.delete(ipc_buffer_slot);
@@ -337,11 +391,14 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         e
     })?;
 
+    /* Set up the process stack */
     let (sp, stack_pages) = init_process_stack(cspace, ut_table, frame_table, vspace.0).map_err(|e| {
         err_rs!("Failed to initialize stack");
         cspace.delete_cap(fault_ep);
         cspace.free_cap(fault_ep);
         dealloc_retyped(cspace, ut_table, tcb);
+        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.free_slot(proc_self_cspace);
         proc_cspace.delete(proc_ep);
         cspace.free_slot(proc_ep);
         cspace.delete(ipc_buffer_slot);

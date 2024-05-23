@@ -7,7 +7,7 @@ use crate::arith::{ROUND_UP};
 use crate::util::{ALIGN_DOWN, ALIGN_UP};
 use sel4::CPtr;
 use crate::dma::DMA;
-use crate::bitfield::bf_set_bit;
+use bitfield::bf_set_bit;
 use crate::vmem_layout::UT_TABLE;
 
 use sel4_config::sel4_cfg_usize;
