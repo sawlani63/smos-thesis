@@ -4,14 +4,14 @@ use core::ptr;
 use sel4_panicking::catch_unwind;
 use core::panic::UnwindSafe;
 use smos_cspace::SMOSUserCSpace;
-use smos_client::syscall::ClientConnection;
+use smos_client::connection::ClientConnection;
 use smos_common::connection::RootServerConnection;
 use smos_common::init::InitCNodeSlots::{*};
 
 // @alwin: should this be passed on the stack somehow? I think yes, but I'm not too sure how yet (
 // at least with minimal changes and hackery around the initialize_tls_on_stack thing)
-pub const IPC_BUFFER: *mut sel4::IpcBuffer = 0xA0000000 as *mut sel4::IpcBuffer;
-
+pub const IPC_BUFFER: *mut sel4::IpcBuffer =    0xA0000000 as *mut sel4::IpcBuffer;
+pub const RS_SHARED_BUFFER: *mut u8 =           0xA0001000 as *mut u8;
 
 
 global_asm! {
@@ -77,8 +77,8 @@ pub fn run_main<T>(
     assert!(slot == SMOS_CNodeSelf as usize);
 
     // @alwin: There is no conn_hndl associated with the connection to the root server
-    let conn = RootServerConnection::new(smos_common::init::slot::RS_EP.cap(), 0);
-
+    // @alwin: Use some constant instread for page size
+    let conn = RootServerConnection::new(smos_common::init::slot::RS_EP.cap(), 0, Some((RS_SHARED_BUFFER, 4096)));
 
     // @alwin: Revisit this: I don't really get unwinding
     // match catch_unwind(f, cspace) {

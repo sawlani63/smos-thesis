@@ -8,3 +8,4 @@ sel4 = { git = "https://github.com/seL4/rust-sel4", features = ["state", "thread
 sel4-sys = { git = "https://github.com/seL4/rust-sel4" }
 smos-common  = { path = "../smos-common" }
 downcast-rs = { version = "1.2.0", default-features = false }
+sel4-bitfield-ops = { git = "https://github.com/seL4/rust-sel4"}

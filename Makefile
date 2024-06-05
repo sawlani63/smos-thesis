@@ -80,6 +80,8 @@ qemu_cmd := \
 		-nographic \
 		-kernel $(image)
 
+ #		-s -S 
+
 .PHONY: run
 run: $(image)
 	$(qemu_cmd)

@@ -21,3 +21,4 @@ bitfield = { path = "../bitfield" }
 linked_list_allocator = "0.10.5"
 elf = {version = "0.7.4", default-features = false, features=[]}
 smos-common = { path = "../smos-common" }
+downcast-rs = { version = "1.2.0", default-features = false }

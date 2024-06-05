@@ -11,7 +11,7 @@ pub enum SMOSInvocation {
 	ObjCreate,
 	ObjOpen,
 	ObjClose,
-	ObjView,
+	View,
 	ObjUnview,
 	ObjStat,
 	ConnCreate,

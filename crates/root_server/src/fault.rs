@@ -1,7 +1,7 @@
 use sel4::Fault;
 
 
-fn handle_vm_fault(fault_info: sel4::VmFault, msg : sel4::MessageInfo, badge: sel4::Word) {
+fn handle_vm_fault(fault_info: sel4::VmFault, msg : sel4::MessageInfo, pid: usize) {
     log_rs!("Handling VM fault");
 
     log_rs!("\
@@ -10,7 +10,7 @@ addr: {:x},
 fsr: {:x}", fault_info.ip(), fault_info.addr(), fault_info.fsr());
 }
 
-pub fn handle_fault(msg : sel4::MessageInfo, badge: sel4::Word) -> Option<sel4::MessageInfo> {
+pub fn handle_fault(msg : sel4::MessageInfo, pid: usize) -> Option<sel4::MessageInfo> {
 	let fault = sel4::with_ipc_buffer(|buf| Fault::new(buf, &msg));
     match fault {
         sel4::Fault::NullFault(_) |
@@ -24,7 +24,7 @@ pub fn handle_fault(msg : sel4::MessageInfo, badge: sel4::Word) -> Option<sel4::
             panic!("Don't know how to handle this kind of fault {:?}!", fault)
         },
         sel4::Fault::VmFault(f) => {
-            handle_vm_fault(f, msg, badge);
+            handle_vm_fault(f, msg, pid);
         },
     }
 

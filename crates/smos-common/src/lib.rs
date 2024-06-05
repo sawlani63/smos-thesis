@@ -6,3 +6,4 @@ pub mod error;
 pub mod returns;
 pub mod init;
 pub mod connection;
+pub mod local_handle;
