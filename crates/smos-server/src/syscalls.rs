@@ -84,6 +84,11 @@ pub struct ConnRegister {
 }
 
 #[derive(Debug)]
+pub struct ConnDeregister {
+	pub hndl: ReceivedHandle,
+}
+
+#[derive(Debug)]
 pub struct WindowRegister {
 	pub publish_hndl: ReceivedHandle,
 	pub window_hndl: UnwrappedHandleCap,
@@ -145,6 +150,7 @@ pub enum SMOS_Invocation {
 	ConnClose,
 	ConnPublish(ConnPublish),
 	ConnRegister(ConnRegister),
+	ConnDeregister(ConnDeregister),
 	ReplyCreate,
 	ProcessSpawn(ProcessSpawn),
 	WindowRegister(WindowRegister),
@@ -421,6 +427,17 @@ mod SMOS_Invocation_Raw {
 
 				Ok(SMOS_Invocation::ConnDestroy(
 					ConnDestroy {
+						hndl: ReceivedHandle::new(f_msg(0) as usize)
+					}
+				))
+			},
+			SMOSInvocation::ConnDeregister => {
+				if info.length() != 1 {
+					return Err(InvocationError::InvalidArguments);
+				}
+
+				Ok(SMOS_Invocation::ConnDeregister(
+					ConnDeregister {
 						hndl: ReceivedHandle::new(f_msg(0) as usize)
 					}
 				))

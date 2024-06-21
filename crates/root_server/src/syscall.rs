@@ -64,6 +64,7 @@ pub fn handle_syscall(msg: sel4::MessageInfo, pid: usize, cspace: &mut CSpace, f
         SMOS_Invocation::ConnRegister(t) => handle_conn_register(&mut p, &t),
         SMOS_Invocation::PageMap(t) => handle_page_map(cspace, ut_table, frame_table, &mut p, &t),
         SMOS_Invocation::WindowDeregister(t) => handle_window_deregister(cspace, &mut p, &t),
+        SMOS_Invocation::ConnDeregister(t) => handle_conn_deregister(&mut p, &t),
         _ => todo!()
     };
 

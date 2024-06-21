@@ -139,6 +139,12 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     rs_conn.window_destroy(elf_window_hndl_cap);
 
     /* Clean up the FS connection */
+    // @alwin: This conn_close is not really mandatory, as conn_destroy will notify the
+    // server, but relying on this can result in race conditions unless the server is higher prio
+    // than the client and has a budget/period such that it WILL run before the
+    // client can do anything else. In this particular example, if the client calls obj_destroy
+    // while the server still has the shared buffer mapped in (it hasn't handled the notification
+    // from the RS, the operation will fail.
     fs_conn.conn_close();
     // @alwin: Really only this one should be necessary, as this will result in a ntfn to the server
     rs_conn.conn_destroy(fs_conn);

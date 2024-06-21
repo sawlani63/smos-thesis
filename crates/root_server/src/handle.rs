@@ -38,6 +38,7 @@ pub fn create_handle_cap_table(cspace: &mut CSpace, ep: sel4::cap::Endpoint) -> 
 pub enum RootServerResource {
     Window(Rc<RefCell<Window>>),
     Object(Rc<RefCell<AnonymousMemoryObject>>),
+    ConnRegistration(Rc<RefCell<Connection>>),
     WindowRegistration(Rc<RefCell<View>>),
     View(Rc<RefCell<View>>),
     Connection(Rc<RefCell<Connection>>), // Does this need a refcell?

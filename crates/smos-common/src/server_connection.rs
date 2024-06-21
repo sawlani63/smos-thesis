@@ -3,9 +3,11 @@ use crate::client_connection::{*};
 use crate::connection::{*};
 
 /* @alwin: Figure out how to autogenerate these */
-const ROOT_SERVER_INVOCATIONS: [SMOSInvocation; 12] = 	[ SMOSInvocation::ConnCreate,
+const ROOT_SERVER_INVOCATIONS: [SMOSInvocation; 14] = 	[ SMOSInvocation::ConnCreate,
 												      	  SMOSInvocation::ConnDestroy,
 												      	  SMOSInvocation::ConnPublish,
+												      	  SMOSInvocation::ConnRegister,
+												      	  SMOSInvocation::ConnDeregister,
 												      	  SMOSInvocation::TestSimple,
 												      	  SMOSInvocation::WindowCreate,
 												      	  SMOSInvocation::WindowDestroy,

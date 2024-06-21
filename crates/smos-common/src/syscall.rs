@@ -7,7 +7,7 @@ use crate::connection::{*};
 use crate::error::{*};
 use crate::local_handle::{HandleOrHandleCap, LocalHandle, HandleCap, WindowHandle,
 						  ViewHandle, ObjectHandle, ProcessHandle, ConnRegistrationHandle,
-						  WindowRegistrationHandle, ConnectionHandle};
+						  WindowRegistrationHandle, ConnectionHandle, PublishHandle};
 use core::marker::PhantomData;
 use smos_cspace::SMOSUserCSpace;
 use crate::client_connection::{*};
@@ -58,22 +58,37 @@ pub trait RootServerInterface: ClientConnection {
 		return Ok(T::new(endpoint, LocalHandle::<ConnectionHandle>::new(handle.try_into().unwrap()), None));
 		// @alwin: Should we have a flag to ensure that a connection is opened prior to being used for anything else?
 	}
-	// @alwin: Come back to this when I have a better understanding of what conn_register needs to do
-	fn conn_register<T: ServerConnection>(&self, rcv_conn: &T, id: usize) -> Result<LocalHandle<ConnRegistrationHandle>, InvocationError> {
-		todo!();
-		return sel4::with_ipc_buffer_mut(|ipc_buf| {
-			ipc_buf.msg_regs_mut()[0] = rcv_conn.hndl().idx as u64;
-			ipc_buf.msg_regs_mut()[1] = id as u64;
 
-			let mut msginfo = sel4::MessageInfoBuilder::default()
-													.label(SMOSInvocation::ConnRegister as u64)
-													.length(2)
-													.build();
+	fn conn_register(&self, publish_hndl: &LocalHandle<ConnectionHandle>,
+									 id: usize) -> Result<LocalHandle<ConnRegistrationHandle>, InvocationError> {
+      let mut msginfo = sel4::MessageInfoBuilder::default()
+                                                  .label(SMOSInvocation::ConnRegister as u64)
+                                                  .length(2)
+                                                  .build();
+
+     	return sel4::with_ipc_buffer_mut(|ipc_buf| {
+			ipc_buf.msg_regs_mut()[0] = publish_hndl.idx as u64;
+			ipc_buf.msg_regs_mut()[1] = id as u64;
 
 			msginfo = self.ep().call(msginfo);
 			try_unpack_error(msginfo.label(), ipc_buf)?;
 			Ok(LocalHandle::new(ipc_buf.msg_regs()[0] as usize))
 		});
+	}
+
+	fn conn_deregister(&self, reg_hndl: &LocalHandle<ConnRegistrationHandle>) -> Result<(), InvocationError> {
+		let mut msginfo = sel4::MessageInfoBuilder::default()
+												    .label(SMOSInvocation::ConnDeregister as u64)
+												    .length(1)
+												    .build();
+
+        return sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.msg_regs_mut()[0] = reg_hndl.idx as u64;
+
+            msginfo = self.ep().call(msginfo);
+            try_unpack_error(msginfo.label(), ipc_buf)?;
+            Ok(())
+        });
 	}
 
 	fn conn_publish<T: ServerConnection>(&self, ntfn_buffer: *mut u8, slot: &AbsoluteCPtr, name: &str) -> Result<T, InvocationError> {

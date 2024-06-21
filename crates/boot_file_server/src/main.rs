@@ -18,7 +18,8 @@ use smos_server::event::{decode_entry_type, EntryType};
 use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
 use smos_server::handle::{HandleInner, ServerHandle, HandleAllocater};
 use smos_common::local_handle::{HandleOrHandleCap, WindowHandle, ObjectHandle, ViewHandle,
-                                LocalHandle, WindowRegistrationHandle, ConnectionHandle};
+                                LocalHandle, WindowRegistrationHandle, ConnectionHandle,
+                                ConnRegistrationHandle};
 use core::cell::RefCell;
 extern crate alloc;
 use alloc::rc::Rc;
@@ -72,6 +73,7 @@ struct Client {
     id: usize,
     shared_buffer: Option<(*mut u8, usize, HandleOrHandleCap<WindowHandle>, LocalHandle<ViewHandle>)>,
     handles: [Option<ServerHandle<BFSResource>>; MAX_HANDLES],
+    conn_registration_hndl: LocalHandle<ConnRegistrationHandle>
 }
 
 impl HandleAllocater<BFSResource> for Client {
@@ -289,7 +291,8 @@ fn handle_unview(rs_conn: &RootServerConnection, client: &mut Client, args: &Unv
     return Ok(SMOSReply::Unview);
 }
 
-fn handle_conn_open<T: ServerConnection>(rs_conn: &RootServerConnection, rcv_conn: &T, id: usize, args: ConnOpen) -> Result<SMOSReply, InvocationError> {
+fn handle_conn_open(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<ConnectionHandle>,
+                    id: usize, args: ConnOpen) -> Result<SMOSReply, InvocationError> {
     let slot = find_client_slot().ok_or(InvocationError::InsufficientResources)?;
 
     let shared_buffer: Option<(*mut u8, usize, HandleOrHandleCap<WindowHandle>, LocalHandle<ViewHandle>)>;
@@ -319,8 +322,7 @@ fn handle_conn_open<T: ServerConnection>(rs_conn: &RootServerConnection, rcv_con
         shared_buffer = None;
     }
 
-    // @alwin: Revisit this after deciding if we need conn_open/conn_register. I think we do
-    // let registration_handle = rs_conn.conn_register(rcv_conn, id);
+    let registration_handle = rs_conn.conn_register(publish_hdnl, id).expect("@alwin: CAn this be an assert?");
     const HANDLE_REPEAT_VALUE: Option<ServerHandle<BFSResource>> = None;
     const VIEW_REPEAT_VALUE: Option<Rc<RefCell<ViewData>>> = None;
 
@@ -329,6 +331,7 @@ fn handle_conn_open<T: ServerConnection>(rs_conn: &RootServerConnection, rcv_con
             id: id,
             shared_buffer: shared_buffer,
             handles: [HANDLE_REPEAT_VALUE; MAX_HANDLES],
+            conn_registration_hndl: registration_handle
         }
     );
 
@@ -338,7 +341,8 @@ fn handle_conn_open<T: ServerConnection>(rs_conn: &RootServerConnection, rcv_con
 fn handle_conn_close(rs_conn: &RootServerConnection, client: &mut Client) -> Result<SMOSReply, InvocationError> {
     for handle in client.handle_table() {
         if handle.is_some() {
-            panic!("Not all handles have been cleaned up!");
+            sel4::debug_println!("Not all handles have been cleaned up!");
+            // @alwin: Should probably do some kind of cleanup here
         }
     }
 
@@ -346,6 +350,8 @@ fn handle_conn_close(rs_conn: &RootServerConnection, client: &mut Client) -> Res
         rs_conn.unview(client.shared_buffer.as_ref().unwrap().3.clone()).expect("Failed to unview");
         rs_conn.window_destroy(client.shared_buffer.as_ref().unwrap().2.clone()).expect("Failed to destroy window");
     }
+
+    rs_conn.conn_deregister(&client.conn_registration_hndl);
 
     delete_client(client);
 
@@ -375,10 +381,29 @@ fn handle_vm_fault(rs_conn: &RootServerConnection, args: VMFaultNotification) {
     rs_conn.page_map(&view.borrow().registration_hndl, args.fault_offset, view.borrow().object.borrow().file.data.as_ptr().wrapping_add(pos + view.borrow().obj_offset));
 }
 
+fn handle_conn_destroy_ntfn(rs_conn: &RootServerConnection, args: ConnDestroyNotification) {
+    let client = find_client_from_id(args.conn_id).expect("BFS corruption: Invalid client ID").as_mut().unwrap();
+
+    for handle in client.handle_table() {
+        if handle.is_some() {
+            sel4::debug_println!("Not all handles have been cleaned up!");
+            // @alwin: Should probably do some kind of cleanup here
+        }
+    }
+
+    if client.shared_buffer.is_some() {
+        rs_conn.unview(client.shared_buffer.as_ref().unwrap().3.clone()).expect("Failed to unview");
+        rs_conn.window_destroy(client.shared_buffer.as_ref().unwrap().2.clone()).expect("Failed to destroy window");
+    }
+
+    delete_client(client);
+}
+
 fn handle_notification(rs_conn: &RootServerConnection) {
     while let Some(msg) = unsafe { dequeue_ntfn_buffer_msg(ntfn_buffer) } {
         match msg {
             NotificationType::VMFaultNotification(data) => handle_vm_fault(rs_conn, data),
+            NotificationType::ConnDestroyNotification(data) => handle_conn_destroy_ntfn(rs_conn, data)
         }
     }
 }
@@ -469,7 +494,7 @@ fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: 
                     });
 
                     match invocation.unwrap() {
-                        SMOS_Invocation::ConnOpen(t) => handle_conn_open(&rs_conn, &listen_conn, id, t),
+                        SMOS_Invocation::ConnOpen(t) => handle_conn_open(&rs_conn, listen_conn.hndl(), id, t),
                         _ => panic!("No invocations besides conn_open should be handled here")
                     }
                 } else {

@@ -1,7 +1,7 @@
-use smos_server::syscalls::{ConnCreate, ConnPublish, ConnRegister, ConnDestroy};
+use smos_server::syscalls::{ConnCreate, ConnPublish, ConnRegister, ConnDestroy, ConnDeregister};
 use crate::object::{AnonymousMemoryObject, OBJ_MAX_FRAMES};
 use crate::page::PAGE_SIZE_4K;
-use crate::proc::UserProcess;
+use crate::proc::{UserProcess, procs_get};
 use smos_server::reply::SMOSReply;
 use smos_common::error::InvocationError;
 use alloc::string::String;
@@ -21,9 +21,10 @@ use crate::view::View;
 use alloc::vec::Vec;
 use smos_server::event::{NTFN_SIGNAL_BITS, INVOCATION_EP_BITS};
 use smos_server::handle::HandleAllocater;
-use smos_server::ntfn_buffer::{NtfnBufferData, init_ntfn_buffer};
+use smos_server::ntfn_buffer::{NtfnBufferData, NotificationType, ConnDestroyNotification,
+							   init_ntfn_buffer, enqueue_ntfn_buffer_msg};
 use crate::frame_table::FrameTable;
-
+use smos_common::local_handle::LocalHandle;
 
 #[derive(Debug, Clone)]
 pub struct Server {
@@ -34,12 +35,16 @@ pub struct Server {
 	pub badged_ntfn: sel4::cap::Notification,
 	ntfn_buffer_view: Rc<RefCell<View>>,
 	pub ntfn_buffer_addr: *mut u8, //@alwin: I am unsure if this is the best way to appraoch this, but having something with a lifetime in here is extremely painful
+	pub connections: Vec<Rc<RefCell<Connection>>>
 }
 
 #[derive(Clone, Debug)]
 pub struct Connection {
+	id: usize,
+	client: Rc<RefCell<UserProcess>>, // @alwin: Not 100% sure if this is needed yet
 	server: Rc<RefCell<Server>>,
-	badged_ep: sel4::cap::Endpoint
+	badged_ep: sel4::cap::Endpoint,
+	registered: bool,
 }
 
 const MAX_SERVERS: usize = 10;
@@ -74,11 +79,42 @@ fn find_server_with_name(name: &String) -> Option<Rc<RefCell<Server>>> {
 }
 
 pub fn handle_conn_register(p: &mut UserProcess, args: &ConnRegister) -> Result<SMOSReply, InvocationError> {
-	// @alwin: At this stage, I'm not entirely sure what this should do.
+	let server_ref = p.get_handle_mut(args.publish_hndl.idx).or(Err(InvocationError::InvalidHandle {which_arg: 0}))?;
+	let server: Rc<RefCell<Server>> = match server_ref.as_ref().unwrap().inner() {
+		RootServerResource::Server(sv) => Ok(sv.clone()),
+		_ => Err(InvocationError::InvalidHandle{ which_arg: 0})
+	}?;
 
-	log_rs!("In handle_conn_register!");
+	/* Safety: The server is able to randomly provide a client id, but this only lets them
+	   register to connections with a connection that has that ID in its list of connections.
+	   The only bad thing that I think could happen is that a server could get info about
+	   a client after the call conn_create, but before they call conn_open(), but idk if
+	   this is a big deal */
 
-	return Ok(SMOSReply::ConnRegister);
+	for connection in &server.borrow().connections {
+		if connection.borrow().id == args.client_id {
+			// @alwin: why do I need to do an explicit dereference thing?
+			(**connection).borrow_mut().registered = true;
+    		let (idx, handle_ref) = p.allocate_handle()?;
+		    *handle_ref = Some(ServerHandle::new(RootServerResource::ConnRegistration(connection.clone())));
+    		return Ok(SMOSReply::ConnRegister {hndl: LocalHandle::new(idx)})
+		}
+	}
+
+	return Err(InvocationError::InvalidArguments);
+}
+
+pub fn handle_conn_deregister(p: &mut UserProcess, args: &ConnDeregister) -> Result<SMOSReply, InvocationError> {
+	let conn_reg_ref = p.get_handle_mut(args.hndl.idx).or(Err(InvocationError::InvalidHandle {which_arg: 0}))?;
+	let conn: Rc<RefCell<Connection>> = match conn_reg_ref.as_ref().unwrap().inner() {
+		RootServerResource::ConnRegistration(cr) => Ok(cr.clone()),
+		_ => Err(InvocationError::InvalidHandle {which_arg: 0})
+	}?;
+
+	(*conn).borrow_mut().registered = false;
+	p.cleanup_handle(args.hndl.idx);
+
+	return Ok(SMOSReply::ConnDeregister);
 }
 
 pub fn handle_conn_create(cspace: &mut CSpace, p: &mut UserProcess, args: &ConnCreate) -> Result<SMOSReply, InvocationError> {
@@ -86,7 +122,6 @@ pub fn handle_conn_create(cspace: &mut CSpace, p: &mut UserProcess, args: &ConnC
 
 	let pid = p.pid;
 
-	let (idx, handle_ref) = p.allocate_handle()?;
 
     let server = find_server_with_name(&args.name).ok_or(InvocationError::InvalidArguments)?;
     // @alwin: Ideally we would want to partition the RS cspace to prevent any one process from
@@ -103,13 +138,19 @@ pub fn handle_conn_create(cspace: &mut CSpace, p: &mut UserProcess, args: &ConnC
     	  		((pid | INVOCATION_EP_BITS) as u64).try_into().unwrap()).expect("Why did this fail?");
 
    let connection = Rc::new( RefCell::new( Connection {
-   								server: server,
-   								badged_ep: sel4::CPtr::from_bits(slot.try_into().unwrap()).cast::<sel4::cap_type::Endpoint>()
+   								id: pid,
+   								client: procs_get(p.pid).as_ref().unwrap().clone(),
+   								server: server.clone(),
+   								badged_ep: sel4::CPtr::from_bits(slot.try_into().unwrap()).cast::<sel4::cap_type::Endpoint>(),
+   								registered: false
   	}));
 
+   	(*server).borrow_mut().connections.push(connection.clone());
+
+	let (idx, handle_ref) = p.allocate_handle()?;
    	*handle_ref = Some(ServerHandle::new(RootServerResource::Connection(connection.clone())));
 
-	return Ok(SMOSReply::ConnCreate {hndl: local_handle::LocalHandle::new(idx), ep: connection.borrow().badged_ep});
+	return Ok(SMOSReply::ConnCreate {hndl: LocalHandle::new(idx), ep: connection.borrow().badged_ep});
 }
 
 pub fn handle_conn_destroy(cspace: &mut CSpace, p: &mut UserProcess, args: &ConnDestroy) -> Result<SMOSReply, InvocationError> {
@@ -121,9 +162,16 @@ pub fn handle_conn_destroy(cspace: &mut CSpace, p: &mut UserProcess, args: &Conn
 
 	cspace.root_cnode().relative(conn.borrow().badged_ep).revoke();
 
-	// @alwin: Revist this: When conn_register is implemented, there might be a bound server,
-	// which will require a message via the notification buffer when the connection has been
-	// torn down.
+	/* Forward the connection destroyed notification if necessary */
+	if conn.borrow().registered {
+		let msg = NotificationType::ConnDestroyNotification(ConnDestroyNotification {
+			conn_id: conn.borrow().id
+		});
+
+		unsafe { enqueue_ntfn_buffer_msg(conn.borrow().server.borrow().ntfn_buffer_addr, msg)};
+
+		conn.borrow().server.borrow().badged_ntfn.signal();
+	}
 
 	p.cleanup_handle(args.hndl.idx);
 
@@ -243,7 +291,8 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
     	unbadged_ntfn: ntfn,
     	badged_ntfn: badged_ntfn_cap,
     	ntfn_buffer_view: view.clone(),
-    	ntfn_buffer_addr: frame_table.frame_data(frame_ref).as_mut_ptr()
+    	ntfn_buffer_addr: frame_table.frame_data(frame_ref).as_mut_ptr(),
+    	connections: Vec::new()
     }));
 
     *slot = Some(server.clone());

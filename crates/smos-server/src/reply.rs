@@ -1,6 +1,6 @@
 use smos_common::local_handle::{HandleOrHandleCap, LocalHandle, HandleCap, WindowHandle, ObjectHandle,
 								ConnectionHandle, HandleType, ViewHandle, ReplyHandle, ProcessHandle,
-								WindowRegistrationHandle};
+								WindowRegistrationHandle, ConnRegistrationHandle};
 use smos_common::error::InvocationErrorLabel;
 use smos_common::returns::{*};
 
@@ -10,14 +10,17 @@ pub enum SMOSReply {
 		hndl: HandleOrHandleCap<WindowHandle>
 	},
 	WindowDestroy,
-	ConnRegister,
 	PageMap,
 	Unview,
 	WindowDeregister,
 	ObjClose,
 	ObjDestroy,
 	ConnDestroy,
+	ConnDeregister,
 	LoadComplete,
+	ConnRegister {
+		hndl: LocalHandle<ConnRegistrationHandle>
+	},
 	WindowRegister {
 		hndl: LocalHandle<WindowRegistrationHandle>
 	},
@@ -109,6 +112,10 @@ pub fn handle_reply(ipc_buf: &mut sel4::IpcBuffer, reply_type: SMOSReply) -> sel
 			msginfo = msginfo.length(1);
 			ipc_buf.msg_regs_mut()[0] = hndl.idx as u64;
 		},
+		SMOSReply::ConnRegister{hndl} => {
+			msginfo = msginfo.length(1);
+			ipc_buf.msg_regs_mut()[0] = hndl.idx as u64;
+		},
 		SMOSReply::ProcessSpawn{hndl} => {
 			msginfo = msginfo.length(1);
 			ipc_buf.msg_regs_mut()[0] = hndl.idx as u64;
@@ -118,9 +125,10 @@ pub fn handle_reply(ipc_buf: &mut sel4::IpcBuffer, reply_type: SMOSReply) -> sel
 			ipc_buf.msg_regs_mut()[0] = data.size as u64;
 			// @alwin: it would be nice to do this with serde or something?
 		},
-		SMOSReply::WindowDestroy | SMOSReply::ConnRegister | SMOSReply::ConnOpen | SMOSReply::PageMap |
+		SMOSReply::WindowDestroy | SMOSReply::ConnOpen | SMOSReply::PageMap |
 		SMOSReply::Unview | SMOSReply::WindowDeregister | SMOSReply::ConnClose | SMOSReply::ObjClose |
-		SMOSReply::ObjDestroy | SMOSReply::ConnDestroy | SMOSReply::LoadComplete => {},
+		SMOSReply::ObjDestroy | SMOSReply::ConnDestroy | SMOSReply::LoadComplete |
+		SMOSReply::ConnDeregister => {},
 		_ => panic!("Not handled yet"),
 	}
 

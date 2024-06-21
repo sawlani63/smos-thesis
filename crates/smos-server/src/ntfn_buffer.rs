@@ -22,20 +22,41 @@ impl sel4_shared_ring_buffer::Descriptor for NtfnBufferData {}
 #[repr(usize)]
 pub enum NotificationLabel {
 	VMFaultNotificationLabel = 0,
+	ConnDestroyNotificationLabel = 1,
 }
 
 #[derive(Debug)]
 pub enum NotificationType {
-	VMFaultNotification(VMFaultNotification)
+	VMFaultNotification(VMFaultNotification),
+	ConnDestroyNotification(ConnDestroyNotification)
 }
 
 impl Into<NtfnBufferData> for NotificationType {
 
 	fn into(self) -> NtfnBufferData {
 		match self {
-			NotificationType::VMFaultNotification(x) => x.into()
+			NotificationType::VMFaultNotification(x) => x.into(),
+			NotificationType::ConnDestroyNotification(x) => x.into()
 		}
 	}
+}
+
+impl Into<NotificationType> for NtfnBufferData {
+	fn into(self) -> NotificationType {
+		let label = self.label.try_into().expect("I don't know what this is");
+
+		match label {
+			NotificationLabel::VMFaultNotificationLabel => NotificationType::VMFaultNotification(self.into()),
+			NotificationLabel::ConnDestroyNotificationLabel => NotificationType::ConnDestroyNotification(self.into()),
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct VMFaultNotification {
+	pub client_id: usize,
+	pub reference: usize,
+	pub fault_offset: usize,
 }
 
 // @alwin: Is there a way to automate this?
@@ -49,23 +70,6 @@ impl Into<VMFaultNotification> for NtfnBufferData {
 	}
 }
 
-impl Into<NotificationType> for NtfnBufferData {
-	fn into(self) -> NotificationType {
-		let label = self.label.try_into().expect("I don't know what this is");
-
-		match label {
-			NotificationLabel::VMFaultNotificationLabel => NotificationType::VMFaultNotification(self.into()),
-		}
-	}
-}
-
-#[derive(Debug)]
-pub struct VMFaultNotification {
-	pub client_id: usize,
-	pub reference: usize,
-	pub fault_offset: usize,
-}
-
 impl Into<NtfnBufferData> for VMFaultNotification {
 	fn into(self) -> NtfnBufferData {
 		NtfnBufferData {
@@ -73,6 +77,30 @@ impl Into<NtfnBufferData> for VMFaultNotification {
 			data0: self.client_id,
 			data1: self.reference,
 			data2: self.fault_offset,
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct ConnDestroyNotification {
+	pub conn_id: usize,
+}
+
+impl Into<ConnDestroyNotification> for NtfnBufferData {
+	fn into(self) -> ConnDestroyNotification {
+		ConnDestroyNotification {
+			conn_id: self.data0,
+		}
+	}
+}
+
+impl Into<NtfnBufferData> for ConnDestroyNotification {
+	fn into(self) -> NtfnBufferData {
+		NtfnBufferData {
+			label: NotificationLabel::ConnDestroyNotificationLabel.into(),
+			data0: self.conn_id,
+			data1: 0,
+			data2: 0,
 		}
 	}
 }
