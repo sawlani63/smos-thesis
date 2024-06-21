@@ -1,11 +1,12 @@
-use sel4::cap::Endpoint;
-use smos_common::connection::{*};
 use crate::syscall::{*};
+use crate::local_handle::{LocalHandle, ConnectionHandle};
+use sel4::cap::Endpoint;
+use crate::connection::{*};
 
 pub trait ClientConnection {
 	fn ep(&self) -> Endpoint;
-	fn new(ep: Endpoint, conn_hndl: ConnectionHandle, buf: Option<(*mut u8, usize)>) -> Self;
-	fn hndl(&self) -> ConnectionHandle;
+	fn new(ep: Endpoint, conn_hndl: LocalHandle<ConnectionHandle>, buf: Option<(*mut u8, usize)>) -> Self;
+	fn hndl(&self) -> &LocalHandle<ConnectionHandle>;
 	fn set_buf(&mut self, buf: Option<(*mut u8, usize)>);
 	fn get_buf(&self) -> Option<(*const u8, usize)>;
 	fn get_buf_mut(&self) -> Option<(*mut u8, usize)>;
@@ -18,7 +19,7 @@ macro_rules! generate_connection_impl {
 				self.ep
 			}
 
-			fn new(ep: Endpoint, conn_hndl: ConnectionHandle, buf: Option<(*mut u8, usize)>) -> Self {
+			fn new(ep: Endpoint, conn_hndl: LocalHandle<ConnectionHandle>, buf: Option<(*mut u8, usize)>) -> Self {
 				Self {
 					conn_hndl: conn_hndl,
 					ep: ep,
@@ -41,8 +42,8 @@ macro_rules! generate_connection_impl {
 				self.buf
 			}
 
-			fn hndl(&self) -> ConnectionHandle {
-				self.conn_hndl
+			fn hndl(&self) -> &LocalHandle<ConnectionHandle> {
+				&self.conn_hndl
 			}
 		}
 	};
@@ -53,6 +54,5 @@ impl RootServerInterface for RootServerConnection {}
 impl ObjectServerInterface for RootServerConnection {}
 impl FileServerInterface for RootServerConnection {}
 
-generate_connection_impl!{FileServerConnection}
-impl ObjectServerInterface for FileServerConnection {}
-impl FileServerInterface for FileServerConnection{}
+generate_connection_impl!{ObjectServerConnection}
+impl ObjectServerInterface for ObjectServerConnection {}

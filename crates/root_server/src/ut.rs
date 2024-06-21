@@ -16,7 +16,7 @@ pub struct UT {
     next: Option<*mut UT>
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct UTWrapper {
     ut: *mut UT,
 }

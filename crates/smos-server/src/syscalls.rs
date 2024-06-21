@@ -5,9 +5,11 @@ use downcast_rs::{Downcast, impl_downcast};
 use smos_common::{error::{*}, args::{*}, invocations::SMOSInvocation, connection::{*}};
 use core::marker::PhantomData;
 use smos_common::local_handle::{HandleOrHandleCap, WindowHandle, ObjectHandle};
-use crate::handle_arg::HandleOrUnwrappedHandleCap;
+use smos_common::server_connection::ServerConnection;
+use crate::handle_arg::{ServerReceivedHandleOrHandleCap, ReceivedHandle, UnwrappedHandleCap};
 use core::ffi::CStr;
 use sel4_bitfield_ops::Bitfield;
+use sel4::AbsoluteCPtr;
 
 // Data structs
 #[derive(Debug)]
@@ -19,7 +21,7 @@ pub struct WindowCreate {
 
 #[derive(Debug)]
 pub struct WindowDestroy {
-	pub hndl: HandleOrUnwrappedHandleCap
+	pub hndl: ServerReceivedHandleOrHandleCap
 }
 
 #[derive(Debug)]
@@ -31,10 +33,25 @@ pub struct ObjCreate {
 }
 
 #[derive(Debug)]
+pub struct ObjStat {
+	pub hndl: ServerReceivedHandleOrHandleCap
+}
+
+#[derive(Debug)]
 pub struct ObjOpen {
-	// pub path: &str?
-	// pub attr: ?
-	// pub is_cap: bool
+	pub name: String,
+	pub rights: sel4::CapRights,
+	pub return_cap: bool
+}
+
+#[derive(Debug)]
+pub struct ObjClose {
+	pub hndl: ServerReceivedHandleOrHandleCap
+}
+
+#[derive(Debug)]
+pub struct ObjDestroy {
+	pub hndl: ServerReceivedHandleOrHandleCap
 }
 
 #[derive(Debug)]
@@ -42,17 +59,72 @@ pub struct ConnCreate {
 	pub name: String
 }
 
-// @alwin: I think the raw invocation will have one more argument
-// to determine whetehr the window or object cap was passed in
-// if only one was passed in
+#[derive(Debug)]
+pub struct ConnOpen {
+	pub shared_buf_obj: Option<(ServerReceivedHandleOrHandleCap, usize)>
+}
+
+#[derive(Debug)]
+pub struct ConnPublish {
+	pub ntfn_buffer: usize,
+	pub name: String
+}
+
+#[derive(Debug)]
+pub struct ProcessSpawn {
+	// executable name
+	// file server name
+	// argv
+}
+
+#[derive(Debug)]
+pub struct ConnRegister {
+	pub publish_hndl: ReceivedHandle,
+	pub client_id: usize,
+}
+
+#[derive(Debug)]
+pub struct WindowRegister {
+	pub publish_hndl: ReceivedHandle,
+	pub window_hndl: UnwrappedHandleCap,
+	pub reference: usize
+}
+
+#[derive(Debug)]
+pub struct WindowDeregister {
+	pub hndl: ReceivedHandle
+}
+
 #[derive(Debug)]
 pub struct View {
-	pub window: HandleOrUnwrappedHandleCap,
-	pub object: HandleOrUnwrappedHandleCap,
+	pub window: ServerReceivedHandleOrHandleCap,
+	pub object: ServerReceivedHandleOrHandleCap,
 	pub window_offset: usize,
 	pub obj_offset: usize,
 	pub size: usize,
 	pub rights: sel4::CapRights,
+}
+
+#[derive(Debug)]
+pub struct Unview {
+	pub hndl: ReceivedHandle
+}
+
+#[derive(Debug)]
+pub struct PageMap {
+	pub window_registration_hndl: ReceivedHandle,
+	pub view_offset: usize,
+	pub content_vaddr: usize
+}
+
+#[derive(Debug)]
+pub struct ConnDestroy {
+	pub hndl: ReceivedHandle
+}
+
+#[derive(Debug)]
+pub struct LoadComplete {
+	pub entry_point: usize
 }
 
 // General invocation enum
@@ -62,44 +134,29 @@ pub enum SMOS_Invocation {
 	WindowDestroy(WindowDestroy),
 	ObjCreate(ObjCreate),
 	ObjOpen(ObjOpen),
+	ObjStat(ObjStat),
+	ObjClose(ObjClose),
+	ObjDestroy(ObjDestroy),
 	View(View),
-	ConnCreate(ConnCreate)
+	Unview(Unview),
+	ConnCreate(ConnCreate),
+	ConnDestroy(ConnDestroy),
+	ConnOpen(ConnOpen),
+	ConnClose,
+	ConnPublish(ConnPublish),
+	ConnRegister(ConnRegister),
+	ReplyCreate,
+	ProcessSpawn(ProcessSpawn),
+	WindowRegister(WindowRegister),
+	WindowDeregister(WindowDeregister),
+	PageMap(PageMap),
+	LoadComplete(LoadComplete)
 }
 
-/* @alwin: Figure out how to autogenerate these */
-const ROOT_SERVER_INVOCATIONS: [SMOSInvocation; 5] = 	[ SMOSInvocation::ConnCreate,
-												      	  SMOSInvocation::ConnDestroy,
-												      	  SMOSInvocation::TestSimple,
-												      	  SMOSInvocation::WindowCreate,
-												      	  SMOSInvocation::WindowDestroy];
-const OBJECT_SERVER_INVOCATIONS: [SMOSInvocation; 4] = 	[ SMOSInvocation::ConnOpen,
-													  	  SMOSInvocation::ConnClose,
-													  	  SMOSInvocation::ObjCreate,
-													  	  SMOSInvocation::View];
-const FILE_SERVER_INVOCATION: [SMOSInvocation; 2] =  	[ SMOSInvocation::ObjOpen,
-   												  	  	  SMOSInvocation::ObjClose];
-trait ServerConnection {
-	fn is_supported(inv: SMOSInvocation) -> bool;
-}
-
-impl ServerConnection for RootServerConnection {
-	fn is_supported(inv: SMOSInvocation) -> bool {
-		return ROOT_SERVER_INVOCATIONS.contains(&inv) ||
-		   	   OBJECT_SERVER_INVOCATIONS.contains(&inv) ||
-		   	   FILE_SERVER_INVOCATION.contains(&inv);
-	}
-}
-
-impl ServerConnection for FileServerConnection {
-		fn is_supported(inv: SMOSInvocation) -> bool {
-		return OBJECT_SERVER_INVOCATIONS.contains(&inv) ||
-		   	   FILE_SERVER_INVOCATION.contains(&inv);
-	}
-}
 
 impl<'a> SMOS_Invocation {
-	pub fn new<T: ServerConnection>(ipc_buffer: &sel4::IpcBuffer, info: &sel4::MessageInfo, data_buffer: Option<&[u8]>) -> Result<SMOS_Invocation, InvocationError> {
-		return SMOS_Invocation_Raw::get_from_ipc_buffer::<T>(info, ipc_buffer, data_buffer);
+	pub fn new<T: ServerConnection>(ipc_buffer: &sel4::IpcBuffer, info: &sel4::MessageInfo, data_buffer: Option<&[u8]>, recv_slot: AbsoluteCPtr) -> Result<SMOS_Invocation, InvocationError> {
+		return SMOS_Invocation_Raw::get_from_ipc_buffer::<T>(info, ipc_buffer, data_buffer, recv_slot);
 	}
 }
 
@@ -108,19 +165,20 @@ mod SMOS_Invocation_Raw {
 	use alloc::boxed::Box;
 	use crate::syscalls::{*};
 
-	pub fn get_from_ipc_buffer<T: ServerConnection>(info: &sel4::MessageInfo, ipcbuf: &sel4::IpcBuffer, data_buffer: Option<&[u8]>) -> Result<SMOS_Invocation, InvocationError> {
+	pub fn get_from_ipc_buffer<T: ServerConnection>(info: &sel4::MessageInfo, ipcbuf: &sel4::IpcBuffer, data_buffer: Option<&[u8]>, recv_slot: AbsoluteCPtr) -> Result<SMOS_Invocation, InvocationError> {
 		if !T::is_supported(info.label().try_into().or(Err(InvocationError::InvalidInvocation))?) {
 			return Err(InvocationError::UnsupportedInvocation {label: info.label().try_into().unwrap() });
 		}
 
-		get_with(info, |i| { ipcbuf.msg_regs()[i as usize]}, |i| { ipcbuf.caps_or_badges()[i as usize]}, data_buffer)
+		get_with(info, |i| { ipcbuf.msg_regs()[i as usize]}, |i| { ipcbuf.caps_or_badges()[i as usize]}, data_buffer, recv_slot)
 	}
 
 	// @alwin: This is all kind of very ugly and very manual, but if we want to keep the API minimal, I think this is the only way
 	pub fn get_with(info: &sel4::MessageInfo,
 					f_msg: impl Fn(core::ffi::c_ulong) -> sel4_sys::seL4_Word,
 					f_cap: impl Fn(core::ffi::c_ulong) -> sel4_sys::seL4_Word,
-					data_buffer: Option<&[u8]>) -> Result<SMOS_Invocation, InvocationError> {
+					data_buffer: Option<&[u8]>,
+					recv_slot: AbsoluteCPtr) -> Result<SMOS_Invocation, InvocationError> {
 
 		match info.label().try_into().or(Err(InvocationError::InvalidInvocation))? {
 			SMOSInvocation::WindowCreate => {
@@ -133,9 +191,9 @@ mod SMOS_Invocation_Raw {
 			},
 			SMOSInvocation::WindowDestroy => {
 				let val = if info.extra_caps() == 1 && info.caps_unwrapped() == 1 {
-					Ok(HandleOrUnwrappedHandleCap::UnwrappedHandleCap(f_cap(WindowDestroyArgs::Handle as u64) as usize))
+					Ok(ServerReceivedHandleOrHandleCap::new_unwrapped_handle_cap(f_cap(WindowDestroyArgs::Handle as u64) as usize))
 				} else if info.length() == 1 {
-					Ok(HandleOrUnwrappedHandleCap::Handle(f_msg(WindowDestroyArgs::Handle as u64) as usize))
+					Ok(ServerReceivedHandleOrHandleCap::new_handle(f_msg(WindowDestroyArgs::Handle as u64) as usize))
 				} else {
 					Err(InvocationError::InvalidArguments)
 				}?;
@@ -145,6 +203,69 @@ mod SMOS_Invocation_Raw {
 						hndl: val
 				}))
 			},
+			SMOSInvocation::ObjClose => {
+				let val = if info.extra_caps() == 1 && info.caps_unwrapped() == 1 {
+					Ok(ServerReceivedHandleOrHandleCap::new_unwrapped_handle_cap(f_cap(0) as usize))
+				} else if info.length() == 1 {
+					Ok(ServerReceivedHandleOrHandleCap::new_handle(f_msg(0) as usize))
+				} else {
+					Err(InvocationError::InvalidArguments)
+				}?;
+
+				Ok(SMOS_Invocation::ObjClose(
+					ObjClose {
+						hndl: val
+				}))
+			},
+			SMOSInvocation::ObjDestroy => {
+				let val = if info.extra_caps() == 1 && info.caps_unwrapped() == 1 {
+					Ok(ServerReceivedHandleOrHandleCap::new_unwrapped_handle_cap(f_cap(0) as usize))
+				} else if info.length() == 1 {
+					Ok(ServerReceivedHandleOrHandleCap::new_handle(f_msg(0) as usize))
+				} else {
+					Err(InvocationError::InvalidArguments)
+				}?;
+
+				Ok(SMOS_Invocation::ObjDestroy(
+					ObjDestroy {
+						hndl: val
+				}))
+			},
+			SMOSInvocation::WindowRegister => {
+				if info.extra_caps() != 1 || info.caps_unwrapped() != 1 || info.length() != 2 {
+					return Err(InvocationError::InvalidArguments);
+				}
+
+				Ok(SMOS_Invocation::WindowRegister(
+					WindowRegister {
+						publish_hndl: ReceivedHandle::new(f_msg(0) as usize),
+						window_hndl: UnwrappedHandleCap::new(f_cap(0) as usize),
+						reference: f_msg(1) as usize
+				}))
+			},
+			SMOSInvocation::WindowDeregister => {
+				if info.length() != 1 {
+					return Err(InvocationError::InvalidArguments)?;
+				}
+
+				Ok(SMOS_Invocation::WindowDeregister(
+					WindowDeregister {
+						hndl: ReceivedHandle::new(f_msg(0) as usize)
+				}))
+			}
+			SMOSInvocation::PageMap => {
+				if info.length() != 3 {
+					return Err(InvocationError::InvalidArguments);
+				}
+
+				Ok(SMOS_Invocation::PageMap(
+					PageMap {
+						window_registration_hndl: ReceivedHandle::new(f_msg(0) as usize),
+						view_offset: f_msg(1) as usize,
+						content_vaddr: f_msg(2) as usize
+					}
+				))
+			}
 			SMOSInvocation::ConnCreate => {
 				if data_buffer.is_none() {
 					return Err(InvocationError::DataBufferNotSet);
@@ -159,10 +280,20 @@ mod SMOS_Invocation_Raw {
 					ConnCreate {
 						name: unsafe { CStr::from_ptr(data_buffer.unwrap().as_ptr() as *const i8).to_str().expect("@alwin: This should not be an expect").to_string() },
 				}))
+			},
+			SMOSInvocation::ConnPublish => {
+				if data_buffer.is_none() {
+					return Err(InvocationError::DataBufferNotSet);
+				}
 
+				Ok(SMOS_Invocation::ConnPublish(
+					ConnPublish {
+						ntfn_buffer: f_msg(0) as usize,
+						name: unsafe { CStr::from_ptr(data_buffer.unwrap().as_ptr() as *const i8).to_str().expect("@alwin: This should not be an expect").to_string() },
+				}))
 			}
 			SMOSInvocation::ObjCreate => {
-				let name = if f_msg(ObjCreateArgs::HasName as u64) != 0 { // @alwin: this casting is kind of absurd
+				let name = if f_msg(ObjCreateArgs::HasName as u64) != 0 {
 					if data_buffer.is_none() {
 						return Err(InvocationError::DataBufferNotSet);
 					}
@@ -179,10 +310,45 @@ mod SMOS_Invocation_Raw {
 						rights: sel4::CapRights::from_inner(sel4_sys::seL4_CapRights{ 0: Bitfield::new([f_msg(ObjCreateArgs::Rights as u64)]) }),
 						return_cap: f_msg(ObjCreateArgs::ReturnCap as u64) != 0,
 				}))
+
 			},
-			SMOSInvocation::ObjOpen => todo!(),
+			SMOSInvocation::ObjOpen => {
+				if data_buffer.is_none() {
+					return Err(InvocationError::DataBufferNotSet);
+				}
+
+				let name = unsafe { CStr::from_ptr(data_buffer.unwrap().as_ptr() as *const i8).to_str().expect("@alwin: This should not be an expect").to_string() };
+
+				Ok(SMOS_Invocation::ObjOpen(
+					ObjOpen {
+						name: name,
+						rights: sel4::CapRights::from_inner(sel4_sys::seL4_CapRights{0: Bitfield::new([f_msg(0)])}),
+						return_cap: f_msg(1) != 0,
+					}
+				))
+			},
+			SMOSInvocation::ObjStat => {
+				let hndl = if info.extra_caps() == 1 {
+					if info.caps_unwrapped() != (1 << 0) {
+						/* Obj stat should only be called with objects provided by the server
+						   being called into */
+						return Err(InvocationError::InvalidArguments);
+					}
+
+					Ok(ServerReceivedHandleOrHandleCap::new_unwrapped_handle_cap(f_cap(0) as usize))
+				} else if info.length() == 1 {
+					Ok(ServerReceivedHandleOrHandleCap::new_handle(f_msg(0) as usize))
+				} else {
+					Err(InvocationError::InvalidArguments)
+				}?;
+
+				Ok(SMOS_Invocation::ObjStat(
+					ObjStat {
+						hndl: hndl
+				}))
+			}
 			SMOSInvocation::View => {
-				let window: HandleOrUnwrappedHandleCap;
+				let window: ServerReceivedHandleOrHandleCap;
 
 				let mut cap_arg_counter: u64 = 0;
 
@@ -194,18 +360,18 @@ mod SMOS_Invocation_Raw {
 
 					if info.caps_unwrapped() & (1 << cap_arg_counter) != 0 {
 						/* Capability was unwrapped */
-						window = HandleOrUnwrappedHandleCap::UnwrappedHandleCap(f_cap(cap_arg_counter) as usize);
+						window = ServerReceivedHandleOrHandleCap::new_unwrapped_handle_cap(f_cap(cap_arg_counter) as usize);
 					} else {
 						/* Capability was not unwrapped */
-						// @alwin: Need to extend HandleOrUnwrappedHandleCap to deal with this
-						todo!()
+						// @alwin: Need to extend ServerReceivedHandleOrHandleCap to deal with this
+						window = ServerReceivedHandleOrHandleCap::new_wrapped_handle_cap(recv_slot)
 					}
 					cap_arg_counter += 1;
 				} else {
-					window = HandleOrUnwrappedHandleCap::Handle(window_buf as usize)
+					window = ServerReceivedHandleOrHandleCap::new_handle(window_buf as usize)
 				}
 
-				let object: HandleOrUnwrappedHandleCap;
+				let object: ServerReceivedHandleOrHandleCap;
 
 				let object_buf = f_msg(ViewArgs::Object as u64);
 				if object_buf == u64::MAX {
@@ -215,16 +381,17 @@ mod SMOS_Invocation_Raw {
 
 					if info.caps_unwrapped() & (1 << cap_arg_counter) != 0 {
 						/* Capability was unwrapped */
-						object = HandleOrUnwrappedHandleCap::UnwrappedHandleCap(f_cap(cap_arg_counter) as usize);
+						object = ServerReceivedHandleOrHandleCap::new_unwrapped_handle_cap(f_cap(cap_arg_counter) as usize);
 					} else {
 						/* Capability was not unwrapped */
-						// @alwin: I think this should never happen
-						todo!()
+						// @alwin: Double check that this is invalid
+						return Err(InvocationError::InvalidArguments);
 					}
 					cap_arg_counter += 1;
 				} else {
-					object = HandleOrUnwrappedHandleCap::Handle(object_buf as usize)
+					object = ServerReceivedHandleOrHandleCap::new_handle(object_buf as usize)
 				}
+
 
 				Ok(SMOS_Invocation::View(
 					View {
@@ -236,11 +403,97 @@ mod SMOS_Invocation_Raw {
 						rights: sel4::CapRights::from_inner(sel4_sys::seL4_CapRights{ 0: Bitfield::new([f_msg(ViewArgs::Rights as u64)]) })
 				}))
 			},
+			SMOSInvocation::Unview => {
+				if info.length() != 1 {
+					return Err(InvocationError::InvalidArguments);
+				}
+
+				Ok(SMOS_Invocation::Unview(
+					Unview {
+						hndl: ReceivedHandle::new(f_msg(0) as usize)
+					}
+				))
+			},
+			SMOSInvocation::ConnDestroy => {
+				if info.length() != 1 {
+					return Err(InvocationError::InvalidArguments);
+				}
+
+				Ok(SMOS_Invocation::ConnDestroy(
+					ConnDestroy {
+						hndl: ReceivedHandle::new(f_msg(0) as usize)
+					}
+				))
+			},
+			SMOSInvocation::LoadComplete => {
+				if info.length() != 1 {
+					return Err(InvocationError::InvalidArguments);
+				}
+
+				Ok(SMOS_Invocation::LoadComplete(
+					LoadComplete {
+						entry_point: f_msg(0) as usize
+					}
+				))
+			}
+			SMOSInvocation::ConnOpen => {
+				let object: Option<(ServerReceivedHandleOrHandleCap, usize)>;
+				if info.length() == 0 {
+					object = None;
+				} else if info.extra_caps() == 1 {
+					if info.caps_unwrapped() & 1 != 0 {
+						object = Some((
+								ServerReceivedHandleOrHandleCap::new_unwrapped_handle_cap(f_cap(0) as usize),
+								f_msg(1) as usize
+								));
+
+					} else {
+						object = Some((
+									ServerReceivedHandleOrHandleCap::new_wrapped_handle_cap(recv_slot),
+									f_msg(1) as usize
+									))
+					}
+				} else {
+					object = Some((
+						ServerReceivedHandleOrHandleCap::new_handle(f_msg(0) as usize),
+						f_msg(1) as usize
+						));
+				}
+
+				Ok(SMOS_Invocation::ConnOpen({
+					ConnOpen {
+						shared_buf_obj: object,
+					}
+				}))
+			},
+			SMOSInvocation::ConnClose => {
+				return Ok(SMOS_Invocation::ConnClose);
+			}
+			SMOSInvocation::ConnRegister => {
+				if info.length() != 2 {
+					/* Idk, some kind of error? */
+					todo!()
+				}
+
+				Ok(SMOS_Invocation::ConnRegister(
+					ConnRegister {
+						publish_hndl: ReceivedHandle::new(f_msg(0) as usize),
+						client_id: f_msg(1) as usize,
+					}
+				))
+			},
+			SMOSInvocation::ReplyCreate => {
+				Ok(SMOS_Invocation::ReplyCreate)
+			},
+			SMOSInvocation::ProcSpawn => {
+				// @alwin: Add the argument unmarshalling here
+				Ok(SMOS_Invocation::ProcessSpawn(ProcessSpawn {}))
+			},
 			SMOSInvocation::TestSimple => {
 				panic!("Okay got to test simple");
 			}
 			_ => {
-				panic!("Not handled")
+				panic!("Not handled {:?}", SMOSInvocation::try_from(info.label()));
 			}
 		}
 	}

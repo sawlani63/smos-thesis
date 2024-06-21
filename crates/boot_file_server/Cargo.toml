@@ -1,5 +1,5 @@
 [package]
-name = "smos-runtime"
+name = "boot_file_server"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,9 +8,9 @@ sel4 = { git = "https://github.com/seL4/rust-sel4", features = ["state", "thread
 sel4-sys = { git = "https://github.com/seL4/rust-sel4" }
 sel4-config = { git = "https://github.com/seL4/rust-sel4" }
 sel4-panicking = { git = "https://github.com/seL4/rust-sel4" }
-sel4-runtime-common = { git = "https://github.com/seL4/rust-sel4", features = ["tls", "unwinding"]}
-sel4-panicking-env = {git = "https://github.com/seL4/rust-sel4"}
-smos-macros = { path = "macros" }
-smos-cspace = {path = "../smos-cspace"}
-smos-common = {path = "../smos-common"}
-linked_list_allocator = "0.10.5"
+smos-runtime = { path = "../smos-runtime" }
+smos-server = { path = "../smos-server" }
+smos-cspace = { path = "../smos-cspace" }
+smos-common = { path = "../smos-common"}
+include_bytes_aligned = { version = "0.1.3" }
+elf = {version = "0.7.4", default-features = false, features=[]}

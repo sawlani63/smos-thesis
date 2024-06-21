@@ -1,35 +1,54 @@
-use smos_server::syscalls::{ConnCreate};
+use smos_server::syscalls::{ConnCreate, ConnPublish, ConnRegister, ConnDestroy};
+use crate::object::{AnonymousMemoryObject, OBJ_MAX_FRAMES};
+use crate::page::PAGE_SIZE_4K;
 use crate::proc::UserProcess;
 use smos_server::reply::SMOSReply;
 use smos_common::error::InvocationError;
 use alloc::string::String;
 use crate::cspace::{CSpace, CSpaceTrait};
 use alloc::rc::Rc;
-use crate::handle::{Handle, SMOSObject};
+use crate::handle::{RootServerResource};
+use smos_server::handle::{ServerHandle};
 use crate::alloc::string::ToString;
 use smos_common::local_handle;
-use crate::util::BFS_EP_BITS;
+use crate::util::{alloc_retype, dealloc_retyped};
+use core::borrow::BorrowMut;
 use core::cell::RefCell;
+use crate::page::BIT;
+use crate::ut::{UTTable, UTWrapper};
+use crate::window::Window;
+use crate::view::View;
+use alloc::vec::Vec;
+use smos_server::event::{NTFN_SIGNAL_BITS, INVOCATION_EP_BITS};
+use smos_server::handle::HandleAllocater;
+use smos_server::ntfn_buffer::{NtfnBufferData, init_ntfn_buffer};
+use crate::frame_table::FrameTable;
+
 
 #[derive(Debug, Clone)]
-struct Server {
+pub struct Server {
 	name: String,
-	unbadged_ep: sel4::cap::Endpoint
+	pid: usize,
+	unbadged_ep: (sel4::cap::Endpoint, UTWrapper),
+	unbadged_ntfn: (sel4::cap::Notification, UTWrapper),
+	pub badged_ntfn: sel4::cap::Notification,
+	ntfn_buffer_view: Rc<RefCell<View>>,
+	pub ntfn_buffer_addr: *mut u8, //@alwin: I am unsure if this is the best way to appraoch this, but having something with a lifetime in here is extremely painful
 }
 
 #[derive(Clone, Debug)]
 pub struct Connection {
-	server: &'static Option<Server>,
+	server: Rc<RefCell<Server>>,
 	badged_ep: sel4::cap::Endpoint
 }
 
 const MAX_SERVERS: usize = 10;
 
-const ARRAY_REPEAT_VALUE: Option<Server> = None;
+const ARRAY_REPEAT_VALUE: Option<Rc<RefCell<Server>>> = None;
 // @alwin: This should probably be a hashmap keyed by name instead
-static mut servers: [Option<Server>; MAX_SERVERS] = [ARRAY_REPEAT_VALUE; MAX_SERVERS];
+static mut servers: [Option<Rc<RefCell<Server>>>; MAX_SERVERS] = [ARRAY_REPEAT_VALUE; MAX_SERVERS];
 
-fn find_empty_slot() -> Option<&'static mut Option<Server>> {
+fn find_empty_slot() -> Option<&'static mut Option<Rc<RefCell<Server>>>> {
 	unsafe {
 		for server in servers.iter_mut() {
 			if server.is_none() {
@@ -41,11 +60,11 @@ fn find_empty_slot() -> Option<&'static mut Option<Server>> {
 	return None;
 }
 
-fn find_server_with_name(name: &String) -> Option<&'static mut Option<Server>> {
+fn find_server_with_name(name: &String) -> Option<Rc<RefCell<Server>>> {
 	unsafe {
-		for server in servers.iter_mut() {
+		for server in servers.iter() {
 			match server {
-				Some(server_internal) => if server_internal.name == *name { return Some(server) }
+				Some(server_internal) => if server_internal.borrow().name == *name { return Some(server_internal.clone()) }
 				_ => (),
 			}
 		}
@@ -54,22 +73,20 @@ fn find_server_with_name(name: &String) -> Option<&'static mut Option<Server>> {
 	return None;
 }
 
+pub fn handle_conn_register(p: &mut UserProcess, args: &ConnRegister) -> Result<SMOSReply, InvocationError> {
+	// @alwin: At this stage, I'm not entirely sure what this should do.
+
+	log_rs!("In handle_conn_register!");
+
+	return Ok(SMOSReply::ConnRegister);
+}
+
 pub fn handle_conn_create(cspace: &mut CSpace, p: &mut UserProcess, args: &ConnCreate) -> Result<SMOSReply, InvocationError> {
 	log_rs!("In handle_conn_create! Creating connection to {:?}", args.name);
-	if (args.name != *"BOOT_FS") {
-		// @alwin: Deal with this once publish has been sorted out
-		// log_rs!("{} {}", args.name, )
-		todo!()
-	}
 
 	let pid = p.pid;
 
 	let (idx, handle_ref) = p.allocate_handle()?;
-
-	/* We are the boot file server. We can probably just re-issue the same cap they are
-	   already using to talk to us. Actually, this might be a bad idea because then revoking the
-	   capability used for the connection would sever both connections, which is kind of bad*/
-    // @alwin: Deal with this later
 
     let server = find_server_with_name(&args.name).ok_or(InvocationError::InvalidArguments)?;
     // @alwin: Ideally we would want to partition the RS cspace to prevent any one process from
@@ -82,28 +99,156 @@ pub fn handle_conn_create(cspace: &mut CSpace, p: &mut UserProcess, args: &ConnC
     // so that servers don't get confused.
     let slot = cspace.alloc_slot().or(Err(InvocationError::InsufficientResources))?;
     cspace.root_cnode().relative_bits_with_depth(slot.try_into().unwrap(), sel4::WORD_SIZE)
-    	  .mint(&cspace.root_cnode().relative(server.as_ref().unwrap().unbadged_ep), sel4::CapRightsBuilder::all().build(),
-    	  		(pid | BFS_EP_BITS).try_into().unwrap()).expect("Why did this fail?");
+    	  .mint(&cspace.root_cnode().relative(server.borrow().unbadged_ep.0), sel4::CapRightsBuilder::all().build(),
+    	  		((pid | INVOCATION_EP_BITS) as u64).try_into().unwrap()).expect("Why did this fail?");
 
    let connection = Rc::new( RefCell::new( Connection {
    								server: server,
    								badged_ep: sel4::CPtr::from_bits(slot.try_into().unwrap()).cast::<sel4::cap_type::Endpoint>()
   	}));
 
-   	// p.connections.push(connection.clone());
-   	*handle_ref = Some(Handle::new(SMOSObject::Connection(connection.clone())));
+   	*handle_ref = Some(ServerHandle::new(RootServerResource::Connection(connection.clone())));
 
-	return Ok(SMOSReply::ConnCreate {hndl: local_handle::Handle::new(idx), ep: connection.borrow_mut().badged_ep});
+	return Ok(SMOSReply::ConnCreate {hndl: local_handle::LocalHandle::new(idx), ep: connection.borrow().badged_ep});
 }
 
+pub fn handle_conn_destroy(cspace: &mut CSpace, p: &mut UserProcess, args: &ConnDestroy) -> Result<SMOSReply, InvocationError> {
+	let conn_ref = p.get_handle_mut(args.hndl.idx).or(Err(InvocationError::InvalidHandle {which_arg: 0}))?;
+	let conn = match conn_ref.as_ref().unwrap().inner() {
+		RootServerResource::Connection(conn) => Ok(conn.clone()),
+		_ => Err(InvocationError::InvalidHandle{ which_arg: 0})
+	}?;
 
-pub fn publish_boot_fs(ep: sel4::cap::Endpoint) {
-	let slot = find_empty_slot().expect("Could not publish boot file server for some reason");
+	cspace.root_cnode().relative(conn.borrow().badged_ep).revoke();
 
-	*slot = Some( Server {
-		name: "BOOT_FS".to_string(),
-		unbadged_ep: ep
-	})
+	// @alwin: Revist this: When conn_register is implemented, there might be a bound server,
+	// which will require a message via the notification buffer when the connection has been
+	// torn down.
+
+	p.cleanup_handle(args.hndl.idx);
+
+	return Ok(SMOSReply::ConnDestroy);
 }
 
-pub fn handle_conn_publish(p: &mut UserProcess) {}
+pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,
+						   p: &mut UserProcess, args: ConnPublish) -> Result<SMOSReply, InvocationError> {
+	if find_server_with_name(&args.name).is_some() {
+		return Err(InvocationError::InvalidArguments);
+	}
+
+	let slot = find_empty_slot().ok_or(InvocationError::InsufficientResources)?;
+
+	/* Check that we can create a window at the specified address */
+	if (args.ntfn_buffer % PAGE_SIZE_4K != 0) {
+		return Err(InvocationError::AlignmentError { which_arg: 0 });
+	}
+
+	/* @alwin: Check notification is in user-addressable memory */
+
+	if p.overlapping_window(args.ntfn_buffer, PAGE_SIZE_4K) {
+		return Err(InvocationError::InvalidArguments);
+	}
+
+	/* Create an EP for the server to listen on */
+	let ep = alloc_retype::<sel4::cap_type::Endpoint>(cspace, ut_table, sel4::ObjectBlueprint::Endpoint).map_err(|_| {
+		InvocationError::InsufficientResources
+	})?;
+
+	/* Create a notification to bind to the TCB */
+	let ntfn = alloc_retype(cspace, ut_table, sel4::ObjectBlueprint::Notification).map_err(|_| {
+		dealloc_retyped(cspace, ut_table, ep);
+		InvocationError::InsufficientResources
+	})?;
+
+	/* Bind the notification to the TCB */
+	// @alwin: What to return and how to clean up on failure?
+	p.tcb.0.tcb_bind_notification(ntfn.0).map_err(|_| {
+		dealloc_retyped(cspace, ut_table, ntfn);
+		dealloc_retyped(cspace, ut_table, ep);
+		InvocationError::InsufficientResources
+	})?;
+
+	/* Create a badged notification cap that the RS uses to communicate with the server */
+	let badged_ntfn_cap = cspace.alloc_cap::<sel4::cap_type::Notification>().map_err(|_| {
+		dealloc_retyped(cspace, ut_table, ntfn);
+		dealloc_retyped(cspace, ut_table, ep);
+		InvocationError::InsufficientResources
+	})?;
+
+	cspace.root_cnode().relative(badged_ntfn_cap).mint(&cspace.root_cnode().relative(ntfn.0),
+													   sel4::CapRights::all(),
+													   NTFN_SIGNAL_BITS as u64).map_err(|_| {
+    	cspace.free_cap(badged_ntfn_cap);
+    	dealloc_retyped(cspace, ut_table, ep);
+    	dealloc_retyped(cspace, ut_table, ntfn);
+		InvocationError::InsufficientResources
+   	})?;
+
+    /* Pre-allocate the frame used for the notification buffer */
+    let frame_ref = frame_table.alloc_frame(cspace, ut_table).ok_or_else(|| {
+    	// cspace.delete(badged_ntfn_cap);
+    	cspace.free_cap(badged_ntfn_cap);
+    	dealloc_retyped(cspace, ut_table, ep);
+    	dealloc_retyped(cspace, ut_table, ntfn);
+		InvocationError::InsufficientResources
+    })?;
+	let orig_frame_cap = frame_table.frame_from_ref(frame_ref).get_cap();
+
+    /* Create the notification buffer */
+    let window = Rc::new(RefCell::new (Window {
+    	start: args.ntfn_buffer,
+    	size: PAGE_SIZE_4K,
+    	bound_view: None
+    }));
+
+
+    let object = Rc::new( RefCell::new (AnonymousMemoryObject {
+    	size: PAGE_SIZE_4K,
+    	rights: sel4::CapRights::all(),
+    	frames: [None; OBJ_MAX_FRAMES],
+    	associated_views: Vec::new()
+    }));
+
+    let view = Rc::new(RefCell::new (View {
+    	caps: [None; OBJ_MAX_FRAMES],
+    	bound_window: window.clone(),
+    	bound_object: Some(object.clone()),
+    	managing_server_info: None,
+    	rights: sel4::CapRights::all(),
+    	win_offset: 0,
+    	obj_offset: 0,
+        pending_fault: None
+    }));
+
+    (*window).borrow_mut().bound_view = Some(view.clone());
+    (*object).borrow_mut().associated_views.push(view.clone());
+    (*object).borrow_mut().frames[0] = Some((orig_frame_cap, frame_ref));
+
+    p.add_window_unchecked(window);
+    p.views.push(view.clone());
+
+    /* Initialize the notification buffer */
+    // Safety: The address we use for the notification buffer is that of the root server's mapping
+    // of the frame selected for the ntfn buffer. This will never be reused until the process
+    // deregisters as a server.
+    unsafe { init_ntfn_buffer(frame_table.frame_data(frame_ref).as_mut_ptr()) }
+
+    let pid = p.pid;
+    let (idx, handle_ref) = p.allocate_handle()?;
+
+    let server = Rc::new(RefCell::new(Server {
+    	pid: pid,
+    	name: args.name,
+    	unbadged_ep: ep,
+    	unbadged_ntfn: ntfn,
+    	badged_ntfn: badged_ntfn_cap,
+    	ntfn_buffer_view: view.clone(),
+    	ntfn_buffer_addr: frame_table.frame_data(frame_ref).as_mut_ptr()
+    }));
+
+    *slot = Some(server.clone());
+    *handle_ref = Some(ServerHandle::new(RootServerResource::Server(server)));
+
+    return Ok(SMOSReply::ConnPublish {hndl: local_handle::LocalHandle::new(idx), ep: ep.0});
+
+}

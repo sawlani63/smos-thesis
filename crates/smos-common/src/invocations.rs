@@ -9,10 +9,11 @@ pub enum SMOSInvocation {
 	WindowRegister,
 	WindowDeregister,
 	ObjCreate,
+	ObjDestroy,
 	ObjOpen,
 	ObjClose,
 	View,
-	ObjUnview,
+	Unview,
 	ObjStat,
 	ConnCreate,
 	ConnDestroy,
@@ -24,7 +25,7 @@ pub enum SMOSInvocation {
 	ConnDeregister,
 	TestSimple,
 	Authorise,
-	ProcCreate,
+	ProcSpawn,
 	ProcDestroy,
 	ProcCreateComplete, // @alwin: needed? You can probably just jump to the application from the loader
 	ReplyCreate, // @alwin: This is used for making reply objects, but I think this should be a general function kinda like untyped retype
@@ -35,6 +36,6 @@ pub enum SMOSInvocation {
 	// @alwin: Do we want compound operations like create/open + view in one invocation?
 	PageMap,
 	PageUnmap,
-
+	LoadComplete
 }
 

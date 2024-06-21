@@ -1,63 +1,49 @@
+use crate::cspace::{CSpace, CSpaceTrait};
+use alloc::vec::Vec;
 use alloc::rc::Rc;
-use crate::proc::UserProcess;
-use smos_common::error::InvocationError;
-use crate::handle_capability::allocate_handle_cap;
-use smos_server::handle_arg::HandleOrUnwrappedHandleCap;
-use downcast_rs::{Downcast, impl_downcast};
-use crate::handle_capability::{get_handle_cap_mut, cleanup_handle_cap};
 use core::cell::RefCell;
 use crate::window::Window;
 use crate::object::AnonymousMemoryObject;
 use crate::view::View;
-use crate::connection::Connection;
+use crate::connection::{Connection, Server};
+use crate::proc::UserProcess;
+use crate::ut::UTWrapper;
+use smos_server::handle::HandleInner;
+use smos_server::handle_capability::HandleCapability;
+
+const MAX_HANDLE_CAPS: usize = 256;
+
+pub fn create_handle_cap_table(cspace: &mut CSpace, ep: sel4::cap::Endpoint) -> Result<Vec<HandleCapability<RootServerResource>>, sel4::Error>{
+    let mut vec: Vec<HandleCapability<RootServerResource>> = Vec::new();
+
+    for i in 0..MAX_HANDLE_CAPS {
+        let tmp = cspace.alloc_slot()?;
+
+        // @alwin: Think more about what badge these get. Maybe OR them with some handle cap bit
+        // so they can't be spoofed from normal endpoint caps
+        cspace.root_cnode().relative_bits_with_depth(tmp.try_into().unwrap(), sel4::WORD_SIZE)
+                           .mint(&cspace.root_cnode().relative(ep),
+                                 sel4::CapRightsBuilder::none().build(), i.try_into().unwrap());
+
+        vec.push(HandleCapability {
+            handle: None,
+            root_cap: Some(cspace.root_cnode().relative_bits_with_depth(tmp.try_into().unwrap(), sel4::WORD_SIZE))
+        });
+    }
+
+    Ok(vec)
+}
 
 #[derive(Debug, Clone)]
-pub enum SMOSObject {
+pub enum RootServerResource {
     Window(Rc<RefCell<Window>>),
     Object(Rc<RefCell<AnonymousMemoryObject>>),
+    WindowRegistration(Rc<RefCell<View>>),
     View(Rc<RefCell<View>>),
-    Connection(Rc<RefCell<Connection>>) // Does this need a refcell?
+    Connection(Rc<RefCell<Connection>>), // Does this need a refcell?
+    Server(Rc<RefCell<Server>>),
+    Process(Rc<RefCell<UserProcess>>),
+    Reply((sel4::cap::Reply, UTWrapper))
 }
 
-
-#[derive(Clone)]
-pub struct Handle {
-    inner: SMOSObject
-}
-
-impl Handle {
-    pub fn new(val: SMOSObject) -> Self {
-        Handle {
-            inner: val
-        }
-    }
-
-    pub fn inner(&self) -> &SMOSObject {
-        return &self.inner;
-    }
-}
-
-pub fn generic_allocate_handle<'a>(p: &'a mut UserProcess, return_cap: bool) -> Result<(usize, &'a mut Option<Handle>, Option<sel4::AbsoluteCPtr>), InvocationError> {
-    if return_cap {
-        allocate_handle_cap()
-    } else {
-        let tmp = p.allocate_handle()?;
-        Ok((tmp.0, tmp.1, None))
-    }
-}
-
-
-pub fn generic_get_handle<'a>(p: &'a mut UserProcess, hndl: HandleOrUnwrappedHandleCap, which_arg: usize) -> Result<&'a mut Option<Handle>, InvocationError> {
-    match hndl {
-        HandleOrUnwrappedHandleCap::Handle(x) => p.get_handle_mut(x).map_err(|_| InvocationError::InvalidHandle{ which_arg: which_arg}),
-        HandleOrUnwrappedHandleCap::UnwrappedHandleCap(x) => get_handle_cap_mut(x).map_err(|_| InvocationError::InvalidHandleCapability {which_arg: which_arg}),
-    }
-}
-
-// @alwin: I think it is kinda unnecessary for this to to have error checking because it should only be called after a get
-pub fn generic_cleanup_handle(p: &mut UserProcess, hndl: HandleOrUnwrappedHandleCap, which_arg: usize) -> Result<(), InvocationError> {
-    match hndl {
-        HandleOrUnwrappedHandleCap::Handle(x) => p.cleanup_handle(x).map_err(|_| InvocationError::InvalidHandle{ which_arg: which_arg}),
-        HandleOrUnwrappedHandleCap::UnwrappedHandleCap(x) => cleanup_handle_cap(x).map_err(|_| InvocationError::InvalidHandleCapability {which_arg: which_arg})
-    }
-}
+impl HandleInner for RootServerResource {}

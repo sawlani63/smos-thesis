@@ -10,3 +10,4 @@ seL4/
 target/
 .cargo/
 test.py
+.venv

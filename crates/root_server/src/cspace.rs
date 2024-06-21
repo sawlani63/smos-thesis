@@ -190,7 +190,7 @@ struct CSpaceAlloc {
     cookie: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UserCSpace {
     root_cnode: sel4::cap::CNode,
     pub top_bf: bitfield_type!(CNODE_SLOTS(CNODE_SIZE_BITS)),

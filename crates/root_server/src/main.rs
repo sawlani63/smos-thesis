@@ -33,11 +33,11 @@ mod proc;
 mod fault;
 mod syscall;
 mod handle;
-mod handle_capability;
 mod window;
 mod view;
 mod connection;
 mod object;
+mod vm;
 extern crate alloc;
 
 use sel4::cap::VSpace;
@@ -51,7 +51,7 @@ use crate::cspace::{CSpace, UserCSpace, CSpaceTrait};
 use crate::ut::{UTTable, UTWrapper};
 use crate::printing::print_init;
 use crate::page::PAGE_SIZE_4K;
-use crate::util::{alloc_retype, EntryType, decode_entry_type, IRQ_EP_BIT, IRQ_IDENT_BADGE_BITS};
+use crate::util::{alloc_retype};
 use crate::mapping::map_frame;
 use crate::tests::run_tests;
 use crate::frame_table::FrameTable;
@@ -61,10 +61,15 @@ use crate::heap::initialise_heap;
 use crate::proc::{start_process, MAX_PID};
 use crate::fault::handle_fault;
 use crate::syscall::handle_syscall;
-use crate::handle_capability::initialise_handle_cap_table;
-use crate::connection::publish_boot_fs;
+use crate::handle::create_handle_cap_table;
+use smos_server::event::{*};
+use smos_server::handle_capability::HandleCapabilityTable;
+use crate::handle::RootServerResource;
+// use crate::connection::publish_boot_fs;
 
-const TEST_ELF_CONTENTS: &[u8] = include_bytes!(env!("TEST_ELF"));
+const BFS_CONTENTS: &[u8] = include_bytes!(env!("BOOT_FS_ELF"));
+// const LOADER_CONTENTS: &[u8] = include_bytes!(env!("LOADER_ELF"));
+//const TEST_ELF_CONTENTS: &[u8] = include_bytes!(env!("TEST_ELF"));
 
 /* Create and endpoint and a bounding notification object. These are never freed so we don't keep
    track of the UTs used to allocate them.  */
@@ -87,43 +92,65 @@ fn callback(_idk: usize, _idk2: *const ()) {
     log_rs!("hey there!");
 }
 
-fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable, ep: sel4::cap::Endpoint, irq_dispatch: &mut IRQDispatch)
+pub type ReplyWrapper = (sel4::cap::Reply, UTWrapper);
+
+fn syscall_loop(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,
+                handle_cap_table: &mut HandleCapabilityTable<RootServerResource>, ep: sel4::cap::Endpoint,
+                irq_dispatch: &mut IRQDispatch, sched_control: sel4::cap::SchedControl)
                -> Result<(), sel4::Error> {
 
-    let (reply, reply_ut) = alloc_retype::<sel4::cap_type::Reply>(cspace, ut_table, sel4::ObjectBlueprint::Reply)?;
-
+    let mut reply: ReplyWrapper = alloc_retype::<sel4::cap_type::Reply>(cspace, ut_table, sel4::ObjectBlueprint::Reply)?;
     let mut reply_msg_info = None;
 
     log_rs!("setting timer...");
     register_timer(5000000000, callback, core::ptr::null())?;
 
+    let recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
+    let recv_slot = cspace.root_cnode().relative_bits_with_depth(recv_slot_inner as u64, sel4::WORD_SIZE);
+    sel4::with_ipc_buffer_mut(|ipc_buf| {
+        ipc_buf.set_recv_slot(&recv_slot);
+    });
+
+
     loop {
         let (msg, mut badge) = {
             if reply_msg_info.is_some() {
-                ep.reply_recv(reply_msg_info.unwrap(), reply)
+                ep.reply_recv(reply_msg_info.unwrap(), reply.0)
             } else {
-                ep.recv(reply)
+                ep.recv(reply.0)
             }
         };
 
         let label = msg.label();
 
-        match decode_entry_type(badge.try_into().unwrap()) {
+        reply_msg_info = match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Irq => {
                 badge = irq_dispatch.handle_irq(badge as usize);
-                reply_msg_info = None
+                None
             },
-            EntryType::RSInvocation(pid) => {
+            EntryType::Signal => {
+                panic!("RS shouldn't recieve signals");
+            }
+            EntryType::Invocation(pid) => {
                 /* We recieved a syscall from something in the system*/
-                reply_msg_info = handle_syscall(msg, pid, cspace, frame_table);
+                handle_syscall(msg, pid, cspace, frame_table, ut_table, handle_cap_table,
+                               sched_control, ep, recv_slot)
             },
             EntryType::Fault(pid) => {
                 /* We must have recieved a message from a fault handler endpoint */
-                reply_msg_info = handle_fault(msg, pid);
+                handle_fault(cspace, frame_table, ut_table, reply, msg, pid)
+                /* @alwin: what to actually do when this returns None. This means that the faulting
+                   thread won't be resumed, so what we should we do? First of all, we can't use the
+                   same reply object, so we should destroy it and allocate a new one (otherwise
+                   we get the reply object has an unexecuted reply warning thing, but this might
+                   actually just be benign). We should probably also clean up the process instead of
+                   just leaving it laying around */
             },
-            EntryType::BFSInvocation(pid) => {
-                todo!();
-            }
+        };
+
+        /* Should you always do this if reply_msg_info is none? */
+        if reply_msg_info.is_none() {
+            reply = alloc_retype::<sel4::cap_type::Reply>(cspace, ut_table, sel4::ObjectBlueprint::Reply)?;
         }
     }
 
@@ -148,10 +175,12 @@ extern "C" fn main_continued(bootinfo_raw: *const BootInfo, cspace_ptr : *mut CS
     let mut frame_table = FrameTable::init(sel4::init_thread::slot::VSPACE.cap());
 
     let mut irq_dispatch = IRQDispatch::new(sel4::init_thread::slot::IRQ_CONTROL.cap(), ntfn,
-                                            IRQ_EP_BIT, IRQ_IDENT_BADGE_BITS);
+                                            NTFN_IRQ_BITS, IRQ_IDENT_BADGE_BITS);
 
     initialise_heap(cspace, ut_table).expect("Failed to initialize heap!");
-    initialise_handle_cap_table(cspace, ipc_ep);
+
+    /* Set up the handle capability table*/
+    let mut handle_cap_table = HandleCapabilityTable::new(create_handle_cap_table(cspace, ipc_ep).expect("Failed to set up handle cap table"));
 
     run_tests(cspace, ut_table, &mut frame_table);
 
@@ -159,15 +188,16 @@ extern "C" fn main_continued(bootinfo_raw: *const BootInfo, cspace_ptr : *mut CS
 
     clock_init(cspace, &mut irq_dispatch, ntfn).expect("Failed to initialize clock");
 
-    publish_boot_fs(ipc_ep);
+    // publish_boot_fs(ipc_ep);
 
     let proc = start_process(cspace, ut_table, &mut frame_table,
                              bootinfo.sched_control().index(0).cap(), "test_app", ipc_ep,
-                             TEST_ELF_CONTENTS).expect("Failed to start first process");
+                             BFS_CONTENTS).expect("Failed to start first process");
 
     // @alwin: Consider putting syscall loop in a struct parameterised by the type of the server
     // and using it like this instead of specifying the type of server in SMOSInvocation::new
-    syscall_loop(cspace, ut_table, &mut frame_table, ipc_ep, &mut irq_dispatch).expect("Something went wrong in the syscall loop");
+    syscall_loop(cspace, ut_table, &mut frame_table, &mut handle_cap_table, ipc_ep, &mut irq_dispatch,
+                 bootinfo.sched_control().index(0).cap()).expect("Something went wrong in the syscall loop");
 
     sel4::init_thread::slot::TCB.cap().tcb_suspend().expect("Failed to suspend");
     unreachable!()

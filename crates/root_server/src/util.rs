@@ -50,42 +50,4 @@ pub fn dealloc_retyped<T: sel4::CapType>(cspace: &mut CSpace, ut_table: &mut UTT
 }
 
 
-/* We set the top bit to differentiate between messages from notifications (IRQs) and EPs */
-pub const IRQ_EP_BIT: usize = BIT(sel4_sys::seL4_BadgeBits as usize - 1);
-
-/* If we have a notification, we use the remaining 63 bits to differentiate between them */
-pub const IRQ_IDENT_BADGE_BITS: usize = IRQ_EP_BIT - 1;
-
-/* If we have an endpoint, we use the 2nd and 3rd top bits to determine if it was the result of a
- * fault, a boot file file server invocation, or root server invocation. */
-const INVOCATION_VALUE: usize = 0x0;
-const FAULT_VALUE: usize = 0x1;
-const BFS_VALUE: usize = 0x2;
-
-pub const INVOCATION_EP_BITS: usize = INVOCATION_VALUE << 1;
-pub const FAULT_EP_BITS: usize = FAULT_VALUE << 1;
-pub const BFS_EP_BITS: usize = BFS_VALUE << 1;
-
-pub enum EntryType {
-    RSInvocation(usize),
-    BFSInvocation(usize),
-    Fault(usize),
-    Irq,
-}
-
-pub fn decode_entry_type(badge: usize) -> EntryType {
-    if badge & IRQ_EP_BIT != 0 {
-        return EntryType::Irq;
-    }
-
-    let pid = badge & !(0x7);
-    match ((badge >> 0x1) & 0x3) {
-        INVOCATION_VALUE => EntryType::RSInvocation(pid),
-        FAULT_VALUE => EntryType::Fault(pid),
-        BFS_VALUE => EntryType::BFSInvocation(pid),
-        _ => panic!("An unexpected endpoint was invoked!"),
-    }
-}
-
-
 

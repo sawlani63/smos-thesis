@@ -20,16 +20,19 @@ pub enum ConnectionDestroyArgs {
 #[repr(usize)]
 pub enum ObjCreateArgs {
 	HasName = 0,
-	Size = 1,
-	Rights = 2,
-	ReturnCap = 3,
+	Size,
+	Rights,
+	ReturnCap,
+	Length
 }
 
+#[repr(usize)]
 pub enum ViewArgs {
 	Window = 0,
-	Object = 1,
-	WinOffset = 2,
-	ObjOffset = 3,
-	Size = 4,
-	Rights = 5,
+	Object,
+	WinOffset,
+	ObjOffset,
+	Size,
+	Rights,
+	Length
 }

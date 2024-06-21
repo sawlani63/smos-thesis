@@ -1,15 +1,23 @@
 use alloc::rc::Rc;
 use crate::view::View;
-use crate::handle::{SMOSObject, generic_allocate_handle, generic_get_handle, generic_cleanup_handle, Handle};
+use crate::handle::RootServerResource;
+use smos_server::handle::{generic_allocate_handle, generic_get_handle, generic_cleanup_handle,
+                          ServerHandle, HandleAllocater};
+use smos_server::handle_capability::HandleCapabilityTable;
 use crate::proc::UserProcess;
 use smos_server::syscalls::{WindowCreate, WindowDestroy};
 use smos_server::reply::SMOSReply;
 use smos_common::error::InvocationError;
 use crate::PAGE_SIZE_4K;
 use smos_common::args::{WindowCreateArgs, WindowDestroyArgs};
-use smos_common::local_handle::{HandleOrHandleCap, WindowHandle};
-use smos_server::handle_arg::HandleOrUnwrappedHandleCap;
+use smos_common::local_handle::{HandleOrHandleCap, WindowHandle, LocalHandle, WindowRegistrationHandle};
+use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
 use core::cell::RefCell;
+use crate::object::OBJ_MAX_FRAMES;
+use crate::connection::Server;
+use crate::object::AnonymousMemoryObject;
+use smos_server::syscalls::{WindowRegister, WindowDeregister};
+use crate::cspace::{CSpace, CSpaceTrait};
 
 #[derive(Clone, Debug)]
 pub struct Window {
@@ -18,19 +26,20 @@ pub struct Window {
     pub bound_view: Option<Rc<RefCell<View>>>
 }
 
-pub fn handle_window_create(p: &mut UserProcess, args: &WindowCreate) -> Result<SMOSReply, InvocationError> {
+pub fn handle_window_create(p: &mut UserProcess, handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
+                            args: &WindowCreate) -> Result<SMOSReply, InvocationError> {
     if args.base_vaddr as usize % PAGE_SIZE_4K != 0 {
-        err_rs!("Window base address should be aligned");
+        warn_rs!("Window base address should be aligned");
         return Err(InvocationError::AlignmentError{ which_arg: WindowCreateArgs::Base_Vaddr as usize})
     }
 
     /* Ensure that the window does not overlap with any other windows */
     if p.overlapping_window(args.base_vaddr.try_into().unwrap(), args.size) {
-        err_rs!("Window overlaps with an existing window");
+        warn_rs!("Window overlaps with an existing window");
         return Err(InvocationError::InvalidArguments);
     }
 
-    let (idx, handle_ref, cptr) = generic_allocate_handle(p, args.return_cap)?;
+    let (idx, handle_ref, cptr) = generic_allocate_handle(p, handle_cap_table, args.return_cap)?;
 
     // @alwin: Check that window size is in user addressable vspace?
 
@@ -42,7 +51,7 @@ pub fn handle_window_create(p: &mut UserProcess, args: &WindowCreate) -> Result<
         bound_view: None
     }));
 
-    *handle_ref = Some(Handle::new(SMOSObject::Window(window.clone())));
+    *handle_ref = Some(ServerHandle::new(RootServerResource::Window(window.clone())));
     p.add_window_unchecked(window);
 
     let ret_value = if args.return_cap {
@@ -54,17 +63,86 @@ pub fn handle_window_create(p: &mut UserProcess, args: &WindowCreate) -> Result<
     return Ok(SMOSReply::WindowCreate{hndl: ret_value})
 }
 
-pub fn handle_window_destroy(p: &mut UserProcess, args: &WindowDestroy) -> Result<SMOSReply, InvocationError> {
+pub fn handle_window_register(p: &mut UserProcess, handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
+                              args: &WindowRegister) -> Result<SMOSReply, InvocationError> {
+
+    let publish_hndl_ref = p.get_handle(args.publish_hndl.idx).or(Err(InvocationError::InvalidHandle {which_arg: 0}))?;
+
+    let server = match publish_hndl_ref.as_ref().unwrap().inner() {
+        RootServerResource::Server(x) => Ok(x.clone()),
+        _ => Err(InvocationError::InvalidHandle {which_arg: 0})
+    }?;
+
     /* Check that the passed in handle/cap is within bounds */
-    let handle_ref = generic_get_handle(p, args.hndl, WindowDestroyArgs::Handle as usize)?;
+    let window_handle_ref = handle_cap_table.get_handle_cap_mut(args.window_hndl.idx).or(Err(InvocationError::InvalidHandleCapability {which_arg:01}))?;
+
+    /* Check that the object it refers to is a window */
+    let window = match window_handle_ref.as_ref().unwrap().inner() {
+        RootServerResource::Window(win) => Ok(win.clone()),
+        _ => Err(InvocationError::InvalidHandleCapability {which_arg: 0})
+    }?;
+
+    let (idx, handle_ref) = p.allocate_handle()?;
+
+    let view = Rc::new( RefCell::new( View {
+        caps: [None; OBJ_MAX_FRAMES],
+        bound_window: window.clone(),
+        bound_object: None,
+        managing_server_info: Some((server.clone(), args.reference)),
+        rights: sel4::CapRights::all(), // @alwin: what are these meant to be? The permissions of the view don't really make
+                                        // sense with an externally managed object, which the server might choose to map in
+                                        // with any set of rights, with different ones for each page
+        win_offset: 0, // @alwin: These aren't really necessary for externally managed
+        obj_offset: 0, // '''
+        pending_fault: None
+    }));
+
+    window.borrow_mut().bound_view = Some(view.clone());
+
+    *handle_ref = Some(ServerHandle::new(RootServerResource::WindowRegistration(view.clone())));
+
+    return Ok(SMOSReply::WindowRegister {hndl: LocalHandle::new(idx)});
+}
+
+pub fn handle_window_deregister(cspace: &mut CSpace, p: &mut UserProcess, args: &WindowDeregister)
+    -> Result<SMOSReply, InvocationError> {
+
+    let reg_hndl_ref = p.get_handle_mut(args.hndl.idx).or(Err(InvocationError::InvalidHandle {which_arg: 0}))?;
+    let view = match reg_hndl_ref.as_ref().unwrap().inner() {
+        RootServerResource::WindowRegistration(view) => Ok(view.clone()),
+        _ => Err(InvocationError::InvalidHandle{which_arg: 0})
+    }?;
+
+    // @alwin: This fn is kinda the same as handle_unview, what to do abt this?
+    for cap in view.borrow_mut().caps {
+        if let Some(frame_cap) = cap {
+            cspace.delete_cap(frame_cap);
+            cspace.free_cap(frame_cap);
+        }
+    }
+
+    // @alwin: There should probs be some checks about pending fault or something here?
+    view.borrow_mut().bound_window.borrow_mut().bound_view = None;
+    assert!(view.borrow_mut().bound_object.is_none());
+
+    p.cleanup_handle(args.hndl.idx);
+
+    return Ok(SMOSReply::WindowDeregister);
+}
+
+pub fn handle_window_destroy(p: &mut UserProcess, handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
+                             args: &WindowDestroy) -> Result<SMOSReply, InvocationError> {
+    /* Check that the passed in handle/cap is within bounds */
+    let handle_ref = generic_get_handle(p, handle_cap_table, args.hndl, WindowDestroyArgs::Handle as usize)?;
 
     /* Check that the object it refers to is a window */
     let window = match handle_ref.as_ref().unwrap().inner() {
-        SMOSObject::Window(win) => Ok(win.clone()),
+        RootServerResource::Window(win) => Ok(win.clone()),
         _ => {
             match args.hndl {
-                HandleOrUnwrappedHandleCap::Handle(x) => Err(InvocationError::InvalidHandle {which_arg: WindowDestroyArgs::Handle as usize}),
-                HandleOrUnwrappedHandleCap::UnwrappedHandleCap(x) => Err(InvocationError::InvalidHandleCapability {which_arg: WindowDestroyArgs::Handle as usize}),
+                ServerReceivedHandleOrHandleCap::Handle(x) => Err(InvocationError::InvalidHandle {which_arg: WindowDestroyArgs::Handle as usize}),
+                ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(x) => Err(InvocationError::InvalidHandleCapability {which_arg: WindowDestroyArgs::Handle as usize}),
+                _ => panic!("We should not get an unwrapped handle cap here")
             }
         }
     }?;
@@ -74,7 +152,7 @@ pub fn handle_window_destroy(p: &mut UserProcess, args: &WindowDestroy) -> Resul
         todo!()
     }
 
-    generic_cleanup_handle(p, args.hndl, WindowDestroyArgs::Handle as usize)?;
+    generic_cleanup_handle(p, handle_cap_table, args.hndl, WindowDestroyArgs::Handle as usize)?;
 
     return Ok(SMOSReply::WindowDestroy{})
 }

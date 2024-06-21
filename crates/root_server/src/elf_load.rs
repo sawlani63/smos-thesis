@@ -3,13 +3,13 @@ use crate::mapping::map_frame;
 use crate::page::PAGE_SIZE_4K;
 use crate::ut::UTTable;
 use crate::frame_table::{FrameTable};
-use crate::arith::ROUND_DOWN;
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use crate::window::Window;
 use crate::view::View;
 use crate::object::{AnonymousMemoryObject, OBJ_MAX_FRAMES};
 use core::cell::RefCell;
+use smos_common::util::ROUND_DOWN;
 
 fn rights_from_elf_flags(flags: u32) -> sel4::CapRights {
     let mut builder = sel4::CapRightsBuilder::none();
@@ -95,15 +95,19 @@ fn load_segment_into_vspace(cspace: &mut CSpace, ut_table: &mut UTTable, frame_t
     let mut view = Rc::new( RefCell::new( View {
         caps: [None; OBJ_MAX_FRAMES],
         bound_window: window.clone(),
-        bound_object: object.clone(),
-        rights: rights_from_elf_flags(segment.p_flags)
+        bound_object: Some(object.clone()),
+        managing_server_info: None,
+        rights: rights_from_elf_flags(segment.p_flags),
+        win_offset: 0,
+        obj_offset: 0,
+        pending_fault: None
     }));
 
     window.borrow_mut().bound_view = Some(view.clone());
     object.borrow_mut().associated_views.push(view.clone());
 
     /* This counter keeps track of the index into the memory object */
-    let i: usize = 0;
+    let mut i: usize = 0;
 
     while pos < segment.p_memsz.try_into().unwrap() {
         let loadee_vaddr = ROUND_DOWN(curr_vaddr.try_into().unwrap(), sel4_sys::seL4_PageBits.try_into().unwrap());
@@ -154,6 +158,7 @@ fn load_segment_into_vspace(cspace: &mut CSpace, ut_table: &mut UTTable, frame_t
         pos += segment_bytes;
         curr_vaddr += segment_bytes;
         curr_offset += segment_bytes;
+        i += 1
     }
 
     /* Add the window to the vector */

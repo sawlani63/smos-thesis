@@ -3,44 +3,52 @@ use crate::frame_table::{FrameTable, FrameRef};
 use crate::cspace::{CSpace, UserCSpace, CSpaceTrait};
 use crate::vmem_layout;
 use crate::page::{PAGE_SIZE_4K, BIT};
-use crate::util::{alloc_retype,  INVOCATION_EP_BITS, FAULT_EP_BITS, dealloc_retyped};
+use crate::util::{alloc_retype, dealloc_retyped};
 use crate::elf_load::load_elf;
 use crate::mapping::map_frame;
-use crate::handle::Handle;
-use crate::connection::Connection;
+use crate::connection::{Connection, Server};
 use elf::ElfBytes;
 use smos_common::error::InvocationError;
-use smos_server::handle_arg::HandleOrUnwrappedHandleCap;
+use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
 use alloc::vec::Vec;
 use alloc::rc::Rc;
 use crate::window::Window;
 use crate::view::View;
 use core::cell::RefCell;
-use crate::handle::SMOSObject;
+use crate::handle::RootServerResource;
+use smos_server::syscalls::{ProcessSpawn, LoadComplete};
+use smos_server::reply::SMOSReply;
+use smos_common::local_handle;
+use crate::object::AnonymousMemoryObject;
+use smos_server::event::{INVOCATION_EP_BITS, FAULT_EP_BITS};
+use smos_server::handle::{HandleInner, ServerHandle, HandleAllocater};
+
+
+const LOADER_CONTENTS: &[u8] = include_bytes!(env!("LOADER_ELF"));
 
 // @alwin: This should probably be unbounded
 const MAX_PROCS: usize = 64;
 pub const MAX_PID: usize = 1024;
 const MAX_HANDLES: usize = 256;
 
-const ARRAY_REPEAT_VALUE: Option<UserProcess> = None;
-static mut procs : [Option<UserProcess>; MAX_PROCS] = [ARRAY_REPEAT_VALUE; MAX_PROCS];
+const ARRAY_REPEAT_VALUE: Option<Rc<RefCell<UserProcess>>> = None;
+static mut procs : [Option<Rc<RefCell<UserProcess>>>; MAX_PROCS] = [ARRAY_REPEAT_VALUE; MAX_PROCS];
 
-pub fn procs_get(i: usize) -> &'static Option<UserProcess> {
+pub fn procs_get(i: usize) -> &'static Option<Rc<RefCell<UserProcess>>> {
     unsafe {
         assert!(i < procs.len());
         return &procs[i];
     }
 }
 
-pub fn procs_get_mut(i: usize) -> &'static mut Option<UserProcess> {
+pub fn procs_get_mut(i: usize) -> &'static mut Option<Rc<RefCell<UserProcess>>>{
     unsafe {
         assert!(i < procs.len());
         return &mut procs[i];
     }
 }
 
-pub fn procs_set(i: usize, proc: Option<UserProcess>) {
+pub fn procs_set(i: usize, proc: Option<Rc<RefCell<UserProcess>>>) {
     unsafe {
         assert!(i < procs.len());
         procs[i] = proc;
@@ -57,22 +65,36 @@ pub fn find_free_proc() -> Option<usize> {
     return None;
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct UserProcess {
-    tcb: (sel4::cap::Tcb, UTWrapper),
+    pub tcb: (sel4::cap::Tcb, UTWrapper),
     pub pid: usize,
-    vspace: (sel4::cap::VSpace, UTWrapper),
-    ipc_buffer: (sel4::cap::SmallPage, FrameRef),
-    pub shared_buffer: (sel4::cap::SmallPage, FrameRef),
+    pub vspace: (sel4::cap::VSpace, UTWrapper),
+    ipc_buffer: (sel4::cap::SmallPage, FrameRef), // @alwin: Maybe make this a window/object/view
+    pub shared_buffer: (sel4::cap::SmallPage, FrameRef), // @alwin: Maybe make this a window/object/view
     sched_context: (sel4::cap::SchedContext, UTWrapper),
     cspace: UserCSpace,
-    stack: [(sel4::cap::SmallPage, FrameRef); vmem_layout::USER_DEFAULT_STACK_PAGES],
+    stack: [(sel4::cap::SmallPage, FrameRef); vmem_layout::USER_DEFAULT_STACK_PAGES], // @alwin: Maybe make this a window/object/view
     fault_ep: sel4::cap::Endpoint,
-    handle_table: [Option<Handle>; 256],
+    handle_table: [Option<ServerHandle<RootServerResource>>; 256],
     initial_windows: Vec<Rc<RefCell<Window>>>,
     windows: Vec<Rc<RefCell<Window>>>,
     pub views: Vec<Rc<RefCell<View>>>,
     // pub connections: Vec<Rc<Connection>> // @alwin: This stores outgoing conns. Do we need to store incoming conns too?
+}
+
+impl HandleAllocater<RootServerResource> for UserProcess {
+    fn handle_table_size(&self) -> usize {
+        return self.handle_table.len();
+    }
+
+    fn handle_table(&self) -> &[Option<ServerHandle<RootServerResource>>] {
+        return &self.handle_table
+    }
+
+    fn handle_table_mut(&mut self) -> &mut [Option<ServerHandle<RootServerResource>>] {
+        return &mut self.handle_table
+    }
 }
 
 impl UserProcess {
@@ -89,13 +111,13 @@ impl UserProcess {
         initial_windows: Vec<Rc<RefCell<Window>>>,
     )  -> UserProcess {
 
-        const ARRAY_REPEAT_VALUE: Option<Handle> = None;
+        const ARRAY_REPEAT_VALUE: Option<ServerHandle<RootServerResource>> = None;
         return UserProcess {
             tcb: tcb, pid: pid, vspace: vspace, ipc_buffer: ipc_buffer,
             sched_context: sched_context, cspace: cspace,
             stack: stack, fault_ep: fault_ep, handle_table: [ARRAY_REPEAT_VALUE; 256],
-            shared_buffer: shared_buffer, initial_windows: initial_windows, windows: Vec::new(),
-            views: Vec::new()
+            shared_buffer: shared_buffer, /* bfs_shared_buffer: None, */ initial_windows: initial_windows,
+            windows: Vec::new(), views: Vec::new()
             /* connections: Vec::new() */
         };
     }
@@ -114,37 +136,27 @@ impl UserProcess {
         return false;
     }
 
-    // @alwin: How can I make this more type-safe?
-    pub fn add_window_unchecked(&mut self, window: Rc<RefCell<Window>>) {
-        self.windows.push(window);
-    }
-
-    pub fn allocate_handle<'a>(&'a mut self) -> Result<(usize, &'a mut Option<Handle>), InvocationError> {
-        // @alwin: This can be made more efficient with bitmaps or some smarter allocation strategy
-        // but I don't really care for now.
-        for (i, handle) in self.handle_table.iter_mut().enumerate() {
-            if (handle.is_none()) {
-                return Ok((i, handle));
+    pub fn find_window_containing(&self, vaddr: usize) -> Option<Rc<RefCell<Window>>> {
+        /* Do we need to check initial windows? */
+        /* @ I think in most cases no but for the boot file server to forward vm faults, yes */
+        for window in &self.initial_windows {
+            if vaddr >= window.borrow().start && vaddr < window.borrow().start + window.borrow().size {
+                return Some(window.clone());
             }
         }
 
-        return Err(InvocationError::OutOfHandles);
+        for window in &self.windows {
+            if vaddr >= window.borrow().start && vaddr < window.borrow().start + window.borrow().size {
+                return Some(window.clone());
+            }
+        }
+
+        return None;
     }
 
-    pub fn get_handle_mut<'a>(&'a mut self, idx: usize) -> Result<&'a mut Option<Handle>, ()> {
-        // @alwin: const value here instead
-        if idx >= 256 {
-            return Err(())
-        }
-        return Ok(&mut self.handle_table[idx]);
-    }
-
-    pub fn cleanup_handle(&mut self, idx: usize) -> Result<(), ()> {
-        if idx >= 256 {
-            return Err(());
-        }
-        self.handle_table[idx] = None;
-        Ok(())
+    // @alwin: How can I make this more type-safe?
+    pub fn add_window_unchecked(&mut self, window: Rc<RefCell<Window>>) {
+        self.windows.push(window);
     }
 }
 
@@ -182,9 +194,9 @@ fn init_process_stack(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: 
 // @alwin: this leaks cslots and caps!
 pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,
                        sched_control: sel4::cap::SchedControl, name: &str, ep: sel4::cap::Endpoint,
-                       elf_data: &[u8]) -> Result<usize, sel4::Error> {
+                       elf_data: &[u8]) -> Result<Rc<RefCell<UserProcess>>, sel4::Error> {
 
-    /* We essentially use the position in the table as the pid. Don't think this is the right way to 
+    /* We essentially use the position in the table as the pid. Don't think this is the right way to
        do it properly */
     let pos = find_free_proc().ok_or(sel4::Error::NotEnoughMemory)?;
 
@@ -559,6 +571,7 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
     })?;
 
     /* Set up the process stack */
+
     let (sp, stack_pages) = init_process_stack(cspace, ut_table, frame_table, vspace.0).map_err(|e| {
         err_rs!("Failed to initialize stack");
         cspace.delete_cap(fault_ep);
@@ -582,8 +595,71 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
     // @alwin: Clean up the stack if this fails
     tcb.0.tcb_write_registers(true, 2, &mut user_context)?;
 
-    procs_set(pos, Some(UserProcess::new(tcb, pos, vspace, ipc_buffer, sched_context,
-                                         proc_cspace, stack_pages, fault_ep, shared_buffer, initial_windows)));
+    let proc = Rc::new( RefCell::new( UserProcess::new(tcb, pos, vspace, ipc_buffer,
+                                                                sched_context, proc_cspace,
+                                                                stack_pages, fault_ep,
+                                                                shared_buffer, initial_windows)));
+    procs_set(pos, Some(proc.clone()));
 
-    return Ok(pos);
+    return Ok(proc);
+}
+
+
+pub fn handle_process_spawn(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,
+                            sched_control: sel4::cap::SchedControl, ep: sel4::cap::Endpoint,
+                            p: &mut UserProcess, args: ProcessSpawn)
+                            -> Result<SMOSReply, InvocationError> {
+
+    let (idx, handle_ref) = p.allocate_handle()?;
+
+    let proc = start_process(cspace, ut_table, frame_table, sched_control,
+                             "@alwin: replace me when string args work", ep, LOADER_CONTENTS)
+                            .map_err(|_| InvocationError::InsufficientResources)?; // @alwin: This is lazy
+
+    *handle_ref = Some(ServerHandle::new(RootServerResource::Process(proc)));
+
+    return Ok(SMOSReply::ProcessSpawn{hndl: local_handle::LocalHandle::new(idx)});
+}
+
+pub fn handle_load_complete(cspace: &mut CSpace, frame_table: &mut FrameTable, p: &mut UserProcess,
+                            args: LoadComplete) -> Result<SMOSReply, InvocationError> {
+
+    for window in &p.initial_windows {
+        /* Clean up the memory object by freeing the frames in it */
+        for frame in window.borrow_mut().bound_view.as_ref().unwrap()
+                  .borrow_mut().bound_object.as_ref().unwrap()
+                  .borrow_mut().frames
+        {
+            if frame.is_some() {
+                cspace.root_cnode.relative(frame.as_ref().unwrap().0).revoke();
+                frame_table.free_frame(frame.as_ref().unwrap().1);
+            }
+        }
+
+        /* The revoke above should delete these caps, just need to free the slots */
+        for cap in window.borrow_mut().bound_view.as_ref().unwrap().borrow_mut().caps {
+            if cap.is_some() {
+                cspace.free_cap(cap.unwrap());
+            }
+        }
+    }
+
+    // The objects and the views should be cleaned up by doing this since they are RCs that should
+    // not be referenced anywhere else.
+    p.initial_windows.clear();
+
+    /* Reset the stack */
+    for stack_page in p.stack {
+        let frame_data = frame_table.frame_data(stack_page.1);
+        frame_data[0..4096].fill(0);
+    }
+
+    let mut user_context = sel4::UserContext::default();
+    *user_context.pc_mut() = args.entry_point as u64;
+    *user_context.sp_mut() = vmem_layout::PROCESS_STACK_TOP as u64;
+
+    // @alwin: deal with error case properly here
+    p.tcb.0.tcb_write_registers(true, 2, &mut user_context).expect("@alwin: This shouldn't be an assert");
+
+    return Ok(SMOSReply::LoadComplete);
 }

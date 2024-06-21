@@ -4,15 +4,24 @@ use core::ptr;
 use sel4_panicking::catch_unwind;
 use core::panic::UnwindSafe;
 use smos_cspace::SMOSUserCSpace;
-use smos_client::connection::ClientConnection;
+use smos_common::client_connection::ClientConnection;
 use smos_common::connection::RootServerConnection;
 use smos_common::init::InitCNodeSlots::{*};
+use smos_common::local_handle::{LocalHandle, ConnectionHandle};
+use linked_list_allocator::LockedHeap;
+
 
 // @alwin: should this be passed on the stack somehow? I think yes, but I'm not too sure how yet (
 // at least with minimal changes and hackery around the initialize_tls_on_stack thing)
 pub const IPC_BUFFER: *mut sel4::IpcBuffer =    0xA0000000 as *mut sel4::IpcBuffer;
 pub const RS_SHARED_BUFFER: *mut u8 =           0xA0001000 as *mut u8;
 
+// @alwin: Do this more properly. Map in a heap from the root server and initialize this
+// instead
+#[global_allocator]
+static ALLOCATOR: LockedHeap = LockedHeap::empty();
+
+static mut heap: [u8; 4096] = [0; 4096];
 
 global_asm! {
     r"
@@ -76,9 +85,15 @@ pub fn run_main<T>(
     slot = cspace.alloc_slot().expect("Failed to allocate RS ep slot");
     assert!(slot == SMOS_CNodeSelf as usize);
 
+    unsafe {
+        ALLOCATOR.lock().init(heap.as_mut_ptr(), heap.len());
+    }
+
     // @alwin: There is no conn_hndl associated with the connection to the root server
     // @alwin: Use some constant instread for page size
-    let conn = RootServerConnection::new(smos_common::init::slot::RS_EP.cap(), 0, Some((RS_SHARED_BUFFER, 4096)));
+    let conn = RootServerConnection::new(smos_common::init::slot::RS_EP.cap(),
+                                         LocalHandle::<ConnectionHandle>::new(0),
+                                         Some((RS_SHARED_BUFFER, 4096)));
 
     // @alwin: Revisit this: I don't really get unwinding
     // match catch_unwind(f, cspace) {
