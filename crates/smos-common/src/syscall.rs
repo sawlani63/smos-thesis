@@ -177,18 +177,19 @@ pub trait RootServerInterface: ClientConnection {
 
 
 	fn window_register(&self, publish_hndl: &LocalHandle<ConnectionHandle>, window_hndl_cap: &HandleCap<WindowHandle>,
-					   reference: usize) -> Result<LocalHandle<WindowRegistrationHandle>, InvocationError> {
+					   client_id: usize, reference: usize) -> Result<LocalHandle<WindowRegistrationHandle>, InvocationError> {
 		// reference is just a number that is returned to the server when a fault occurs
 
 		let mut msginfo = sel4::MessageInfoBuilder::default()
 													.label(SMOSInvocation::WindowRegister as u64)
-													.length(2)
+													.length(3)
 													.extra_caps(1)
 													.build();
 
 		return sel4::with_ipc_buffer_mut(|ipc_buf| {
 			ipc_buf.msg_regs_mut()[0] = publish_hndl.idx.try_into().unwrap();
-			ipc_buf.msg_regs_mut()[1] = reference.try_into().unwrap();
+            ipc_buf.msg_regs_mut()[1] = client_id.try_into().unwrap();
+			ipc_buf.msg_regs_mut()[2] = reference.try_into().unwrap();
 			ipc_buf.caps_or_badges_mut()[0] = window_hndl_cap.cptr.path().bits();
 
 			msginfo = self.ep().call(msginfo);

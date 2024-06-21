@@ -22,13 +22,15 @@ impl sel4_shared_ring_buffer::Descriptor for NtfnBufferData {}
 #[repr(usize)]
 pub enum NotificationLabel {
 	VMFaultNotificationLabel = 0,
-	ConnDestroyNotificationLabel = 1,
+	ConnDestroyNotificationLabel,
+	WindowDestroyNotificationLabel,
 }
 
 #[derive(Debug)]
 pub enum NotificationType {
 	VMFaultNotification(VMFaultNotification),
-	ConnDestroyNotification(ConnDestroyNotification)
+	ConnDestroyNotification(ConnDestroyNotification),
+	WindowDestroyNotification(WindowDestroyNotification)
 }
 
 impl Into<NtfnBufferData> for NotificationType {
@@ -36,7 +38,8 @@ impl Into<NtfnBufferData> for NotificationType {
 	fn into(self) -> NtfnBufferData {
 		match self {
 			NotificationType::VMFaultNotification(x) => x.into(),
-			NotificationType::ConnDestroyNotification(x) => x.into()
+			NotificationType::ConnDestroyNotification(x) => x.into(),
+			NotificationType::WindowDestroyNotification(x) => x.into()
 		}
 	}
 }
@@ -48,9 +51,12 @@ impl Into<NotificationType> for NtfnBufferData {
 		match label {
 			NotificationLabel::VMFaultNotificationLabel => NotificationType::VMFaultNotification(self.into()),
 			NotificationLabel::ConnDestroyNotificationLabel => NotificationType::ConnDestroyNotification(self.into()),
+			NotificationLabel::WindowDestroyNotificationLabel => NotificationType::WindowDestroyNotification(self.into())
 		}
 	}
 }
+
+/* Related to VM fault forwarding */
 
 #[derive(Debug)]
 pub struct VMFaultNotification {
@@ -81,6 +87,8 @@ impl Into<NtfnBufferData> for VMFaultNotification {
 	}
 }
 
+/* Related to conn_destroy */
+
 #[derive(Debug)]
 pub struct ConnDestroyNotification {
 	pub conn_id: usize,
@@ -104,6 +112,36 @@ impl Into<NtfnBufferData> for ConnDestroyNotification {
 		}
 	}
 }
+
+/* Related to window_destroy */
+
+#[derive(Debug)]
+pub struct WindowDestroyNotification {
+	pub client_id: usize,
+	pub reference: usize,
+}
+
+impl Into<WindowDestroyNotification> for NtfnBufferData {
+	fn into(self) -> WindowDestroyNotification {
+		WindowDestroyNotification {
+			client_id: self.data0,
+			reference: self.data1,
+		}
+	}
+}
+
+impl Into<NtfnBufferData> for WindowDestroyNotification {
+	fn into(self) -> NtfnBufferData {
+		NtfnBufferData {
+			label: NotificationLabel::WindowDestroyNotificationLabel.into(),
+			data0: self.client_id,
+			data1: self.reference,
+			data2: 0,
+		}
+	}
+}
+
+/* Methods */
 
 pub unsafe fn init_ntfn_buffer(raw_ntfn_buffer_addr: *mut u8) {
 	let ntfn_buffer_addr = NonNull::new_unchecked(raw_ntfn_buffer_addr as *mut RawRingBuffer<NtfnBufferData>);

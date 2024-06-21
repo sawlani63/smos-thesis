@@ -18,6 +18,7 @@ use crate::connection::Server;
 use crate::object::AnonymousMemoryObject;
 use smos_server::syscalls::{WindowRegister, WindowDeregister};
 use crate::cspace::{CSpace, CSpaceTrait};
+use smos_server::ntfn_buffer::{NotificationType, WindowDestroyNotification, enqueue_ntfn_buffer_msg};
 
 #[derive(Clone, Debug)]
 pub struct Window {
@@ -88,7 +89,7 @@ pub fn handle_window_register(p: &mut UserProcess, handle_cap_table: &mut Handle
         caps: [None; OBJ_MAX_FRAMES],
         bound_window: window.clone(),
         bound_object: None,
-        managing_server_info: Some((server.clone(), args.reference)),
+        managing_server_info: Some((server.clone(), args.client_id, args.reference)),
         rights: sel4::CapRights::all(), // @alwin: what are these meant to be? The permissions of the view don't really make
                                         // sense with an externally managed object, which the server might choose to map in
                                         // with any set of rights, with different ones for each page
@@ -130,7 +131,7 @@ pub fn handle_window_deregister(cspace: &mut CSpace, p: &mut UserProcess, args: 
     return Ok(SMOSReply::WindowDeregister);
 }
 
-pub fn handle_window_destroy(p: &mut UserProcess, handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
+pub fn handle_window_destroy(cspace: &mut CSpace, p: &mut UserProcess, handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
                              args: &WindowDestroy) -> Result<SMOSReply, InvocationError> {
     /* Check that the passed in handle/cap is within bounds */
     let handle_ref = generic_get_handle(p, handle_cap_table, args.hndl, WindowDestroyArgs::Handle as usize)?;
@@ -147,9 +148,34 @@ pub fn handle_window_destroy(p: &mut UserProcess, handle_cap_table: &mut HandleC
         }
     }?;
 
-
+    /* if there is a view inside the window, destroy that too? */
     if let Some(bv) = &window.borrow_mut().bound_view {
-        todo!()
+        if let Some((server, client_id, reference)) = &bv.borrow_mut().managing_server_info {
+            let msg = NotificationType::WindowDestroyNotification(
+                WindowDestroyNotification {
+                    client_id: *client_id,
+                    reference: *reference
+                }
+            );
+
+            unsafe { enqueue_ntfn_buffer_msg(server.borrow().ntfn_buffer_addr, msg)};
+            server.borrow().badged_ntfn.signal();
+        } else {
+            // @alwin: kinda iffy regarding this case, how should we clean up the handle associated with the view?
+            // Should we demand that this isn't allowed to happen and return an error if it does?
+            // Either way we should have probs have conisistent semantics between normal and
+            // externally managed objects
+            todo!();
+            let pos = bv.borrow_mut().bound_object.as_ref().unwrap().borrow_mut().associated_views.iter().position(|x| Rc::ptr_eq(x, &bv)).unwrap();
+            bv.borrow_mut().bound_object.as_ref().unwrap().borrow_mut().associated_views.swap_remove(pos);
+        }
+
+        for cap in bv.borrow_mut().caps {
+           if let Some(frame_cap) = cap {
+                cspace.delete_cap(frame_cap);
+                cspace.free_cap(frame_cap);
+            }
+        }
     }
 
     generic_cleanup_handle(p, handle_cap_table, args.hndl, WindowDestroyArgs::Handle as usize)?;

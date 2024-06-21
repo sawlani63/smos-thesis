@@ -23,7 +23,7 @@ pub struct View {
 	pub caps: [Option<sel4::cap::UnspecifiedFrame>; OBJ_MAX_FRAMES],
 	pub bound_window: Rc<RefCell<Window>>,
 	pub bound_object: Option<Rc<RefCell<AnonymousMemoryObject>>>,
-	pub managing_server_info:  Option<(Rc<RefCell<Server>>, usize)>, // @alwin: Does this need the window registration handle?
+	pub managing_server_info:  Option<(Rc<RefCell<Server>>, usize, usize)>, // @alwin: Does this need the window registration handle?
 	pub rights: sel4::CapRights,
 	pub win_offset: usize,
 	pub obj_offset: usize,

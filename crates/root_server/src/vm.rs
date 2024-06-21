@@ -25,8 +25,8 @@ fn forward_vm_fault(p: &mut UserProcess, view: Rc<RefCell<View>>,
 	let server = server_info.0.clone();
 
 	let msg = NotificationType::VMFaultNotification(VMFaultNotification {
-		client_id: p.pid,
-		reference: server_info.1,
+		client_id: server_info.1,
+		reference: server_info.2,
 		fault_offset: offset
 	});
 
@@ -53,7 +53,7 @@ pub fn handle_page_map(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
 
 	let dst_view = match window_reg_ref.as_ref().unwrap().inner() {
 		RootServerResource::WindowRegistration(view) => Ok(view.clone()),
-		_ => Err(InvocationError::InvalidHandle{ which_arg: 0}),
+		_ => Err(InvocationError::InvalidHandle{ which_arg: 0 }),
 	}?;
 
 	/* Check if there is already a mapping in the view at the offset */

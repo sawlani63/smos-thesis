@@ -92,6 +92,7 @@ pub struct ConnDeregister {
 pub struct WindowRegister {
 	pub publish_hndl: ReceivedHandle,
 	pub window_hndl: UnwrappedHandleCap,
+	pub client_id: usize,
 	pub reference: usize
 }
 
@@ -238,7 +239,7 @@ mod SMOS_Invocation_Raw {
 				}))
 			},
 			SMOSInvocation::WindowRegister => {
-				if info.extra_caps() != 1 || info.caps_unwrapped() != 1 || info.length() != 2 {
+				if info.extra_caps() != 1 || info.caps_unwrapped() != 1 || info.length() != 3 {
 					return Err(InvocationError::InvalidArguments);
 				}
 
@@ -246,7 +247,8 @@ mod SMOS_Invocation_Raw {
 					WindowRegister {
 						publish_hndl: ReceivedHandle::new(f_msg(0) as usize),
 						window_hndl: UnwrappedHandleCap::new(f_cap(0) as usize),
-						reference: f_msg(1) as usize
+						client_id: f_msg(1) as usize,
+						reference: f_msg(2) as usize
 				}))
 			},
 			SMOSInvocation::WindowDeregister => {

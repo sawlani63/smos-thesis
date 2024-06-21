@@ -247,9 +247,10 @@ fn handle_view(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<Connec
         _ => Err(InvocationError::InvalidArguments)
     }?;
 
+    let client_id = client.id;
     let (idx, handle_ref) = client.allocate_handle()?;
 
-    let reg_hndl = rs_conn.window_register(publish_hdnl, &window, idx)?;
+    let reg_hndl = rs_conn.window_register(publish_hdnl, &window, client_id, idx)?;
 
     let view = Rc::new( RefCell::new(
         ViewData {
@@ -399,11 +400,28 @@ fn handle_conn_destroy_ntfn(rs_conn: &RootServerConnection, args: ConnDestroyNot
     delete_client(client);
 }
 
+fn handle_win_destroy_ntfn(rs_conn: &RootServerConnection, args: WindowDestroyNotification) {
+    let client = find_client_from_id(args.client_id).expect("BFS corruption: Invalid client ID");
+
+    let view_ref = client.as_mut().unwrap().get_handle_mut(args.reference).expect("BFS corruption: Invalid handle from vm fault");
+    let view = match view_ref.as_ref().unwrap().inner() {
+        BFSResource::View(data) => data.clone(),
+        _ => panic!("BFS corruption: Invalid handle type from vm fault"),
+    };
+
+    /* Remove reference to the view from object*/
+    let pos = view.borrow_mut().object.borrow_mut().associated_views.iter().position(|x| Rc::ptr_eq(x, &view)).unwrap();
+    view.borrow_mut().object.borrow_mut().associated_views.swap_remove(pos);
+
+    *view_ref = None;
+}
+
 fn handle_notification(rs_conn: &RootServerConnection) {
     while let Some(msg) = unsafe { dequeue_ntfn_buffer_msg(ntfn_buffer) } {
         match msg {
             NotificationType::VMFaultNotification(data) => handle_vm_fault(rs_conn, data),
-            NotificationType::ConnDestroyNotification(data) => handle_conn_destroy_ntfn(rs_conn, data)
+            NotificationType::ConnDestroyNotification(data) => handle_conn_destroy_ntfn(rs_conn, data),
+            NotificationType::WindowDestroyNotification(data) => handle_win_destroy_ntfn(rs_conn, data),
         }
     }
 }
