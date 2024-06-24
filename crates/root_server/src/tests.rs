@@ -4,7 +4,7 @@ use bitfield::{bf_first_free, bf_set_bit, bf_get_bit, bf_clr_bit, bitfield_init,
 use crate::cspace::{CNODE_SLOTS, CNODE_SIZE_BITS, BOT_LVL_PER_NODE, CSpace, CSpaceTrait};
 use crate::bootstrap::INITIAL_TASK_CNODE_SIZE_BITS;
 use crate::frame_table::{FrameTable, FrameRef};
-use crate::page::BIT;
+use smos_common::util::BIT;
 use crate::ut::UTTable;
 use alloc::boxed::Box;
 

@@ -14,7 +14,7 @@ use smos_common::local_handle;
 use crate::util::{alloc_retype, dealloc_retyped};
 use core::borrow::BorrowMut;
 use core::cell::RefCell;
-use crate::page::BIT;
+use smos_common::util::BIT;
 use crate::ut::{UTTable, UTWrapper};
 use crate::window::Window;
 use crate::view::View;

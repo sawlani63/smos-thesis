@@ -1,7 +1,8 @@
 use sel4::CPtr;
 
 use crate::cspace::{CSpace, CSpaceTrait, MAPPING_SLOTS};
-use crate::page::{BIT, PAGE_SIZE_4K};
+use crate::page::{PAGE_SIZE_4K};
+use smos_common::util::BIT;
 use crate::ut::UTTable;
 
 fn retype_map_pt(cspace: &CSpace, vspace: sel4::cap::VSpace, vaddr: usize, ut: sel4::cap::Untyped, pt_slot: usize) -> Result<(), sel4::Error> {

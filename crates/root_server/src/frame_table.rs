@@ -1,4 +1,4 @@
-use crate::page::BIT;
+use smos_common::util::BIT;
 use crate::vmem_layout;
 use crate::cspace::{CSpace, CSpaceTrait};
 use crate::ut::UTTable;

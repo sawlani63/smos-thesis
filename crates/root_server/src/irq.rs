@@ -1,6 +1,6 @@
 use bitfield::{bitfield_type, bf_first_free, bf_set_bit, bf_clr_bit};
 use crate::cspace::{CSpace, CSpaceTrait};
-use crate::page::BIT;
+use smos_common::util::BIT;
 
 #[derive(Copy, Clone)]
 struct IRQHandlerInfo {

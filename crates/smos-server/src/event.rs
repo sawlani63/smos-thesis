@@ -1,6 +1,4 @@
-const fn BIT(n : usize) -> usize {
-    1 << n
-}
+use smos_common::util::BIT;
 
 /* We set the top bit to differentiate between messages from notifications  and EPs */
 // pub const IRQ_EP_BIT: usize = BIT(sel4_sys::seL4_BadgeBits as usize - 1);

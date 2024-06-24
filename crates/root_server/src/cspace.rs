@@ -2,7 +2,8 @@
 
 use sel4::{CNodeCapData, ObjectBlueprint};
 use bitfield::{bf_clr_bit, bf_first_free, bf_set_bit, bitfield_type, bitfield_init};
-use crate::page::{BIT, PAGE_SIZE_4K, BYTES_TO_4K_PAGES};
+use crate::page::{PAGE_SIZE_4K, BYTES_TO_4K_PAGES};
+use smos_common::util::BIT;
 use core::mem::size_of;
 use crate::bootstrap::{INITIAL_TASK_CNODE_SIZE_BITS};
 use crate::ut::{UTWrapper, UTTable};

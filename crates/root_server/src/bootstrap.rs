@@ -1,5 +1,6 @@
 use core::mem::size_of;
-use crate::page::{PAGE_SIZE_4K, BIT, BYTES_TO_4K_PAGES, BYTES_TO_SIZE_BITS};
+use crate::page::{PAGE_SIZE_4K, BYTES_TO_4K_PAGES, BYTES_TO_SIZE_BITS};
+use smos_common::util::BIT;
 use crate::cspace::{BotLvlNodeT, CSpace, BOT_LVL_PER_NODE, CNODE_INDEX, CNODE_SIZE_BITS, CNODE_SLOTS,
                     CNODE_SLOT_BITS, NODE_INDEX, TOP_LVL_INDEX, BOT_LVL_INDEX, WATERMARK_SLOTS, CSpaceTrait};
 use crate::ut::{UTRegion, UT, UTTable};

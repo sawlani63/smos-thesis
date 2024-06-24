@@ -11,3 +11,7 @@ pub fn ROUND_DOWN(n: usize, b: usize) -> usize {
     return (((n) >> (b)) << (b));
 
 }
+
+pub const fn BIT(n : usize) -> usize {
+    1 << n
+}

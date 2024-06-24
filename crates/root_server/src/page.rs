@@ -1,10 +1,8 @@
 #![allow(non_snake_case)]
 
 use crate::arith::LOG_BASE_2;
+use smos_common::util::BIT;
 
-pub const fn BIT(n : usize) -> usize {
-    1 << n
-}
 pub const fn BYTES_TO_SIZE_BITS(bytes: usize) -> usize {
     LOG_BASE_2(bytes)
 }

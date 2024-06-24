@@ -1,4 +1,4 @@
-use crate::page::BIT;
+use smos_common::util::BIT;
 use sel4::sel4_cfg;
 
 #[sel4_cfg(PLAT = "odroidc2")]

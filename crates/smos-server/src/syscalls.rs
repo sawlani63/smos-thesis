@@ -6,6 +6,7 @@ use smos_common::{error::{*}, args::{*}, invocations::SMOSInvocation, connection
 use core::marker::PhantomData;
 use smos_common::local_handle::{HandleOrHandleCap, WindowHandle, ObjectHandle};
 use smos_common::server_connection::ServerConnection;
+use smos_common::util::BIT;
 use crate::handle_arg::{ServerReceivedHandleOrHandleCap, ReceivedHandle, UnwrappedHandleCap};
 use core::ffi::CStr;
 use sel4_bitfield_ops::Bitfield;

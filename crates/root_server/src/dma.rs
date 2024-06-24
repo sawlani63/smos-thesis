@@ -1,7 +1,7 @@
 use crate::mapping::map_frame;
 use crate::cspace::CSpace;
 use crate::ut::UTTable;
-use crate::page::BIT;
+use smos_common::util::BIT;
 
 pub struct DMA {
     vstart: usize,
