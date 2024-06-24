@@ -163,7 +163,9 @@ pub enum SMOS_Invocation {
 
 
 impl<'a> SMOS_Invocation {
-	pub fn new<T: ServerConnection>(ipc_buffer: &sel4::IpcBuffer, info: &sel4::MessageInfo, data_buffer: Option<&[u8]>, recv_slot: AbsoluteCPtr) -> Result<SMOS_Invocation, InvocationError> {
+	pub fn new<T: ServerConnection>(ipc_buffer: &sel4::IpcBuffer, info: &sel4::MessageInfo,
+									data_buffer: Option<&[u8]>, recv_slot: AbsoluteCPtr) -> (Result<SMOS_Invocation, InvocationError>, bool) {
+
 		return SMOS_Invocation_Raw::get_from_ipc_buffer::<T>(info, ipc_buffer, data_buffer, recv_slot);
 	}
 }
@@ -173,20 +175,44 @@ mod SMOS_Invocation_Raw {
 	use alloc::boxed::Box;
 	use crate::syscalls::{*};
 
-	pub fn get_from_ipc_buffer<T: ServerConnection>(info: &sel4::MessageInfo, ipcbuf: &sel4::IpcBuffer, data_buffer: Option<&[u8]>, recv_slot: AbsoluteCPtr) -> Result<SMOS_Invocation, InvocationError> {
-		if !T::is_supported(info.label().try_into().or(Err(InvocationError::InvalidInvocation))?) {
-			return Err(InvocationError::UnsupportedInvocation {label: info.label().try_into().unwrap() });
+	pub fn get_from_ipc_buffer<T: ServerConnection>(info: &sel4::MessageInfo, ipcbuf: &sel4::IpcBuffer,
+													data_buffer: Option<&[u8]>, recv_slot: AbsoluteCPtr) ->(Result<SMOS_Invocation, InvocationError>, bool) {
+
+
+		/* We check if we recieved a capability in the recv slot. We return this to the caller.
+		   It is up to them to decide what to do with the cap and whether they reuse the same recv
+		   slot or allocate a new one */
+
+		let mut consumed_recv_slot = false;
+		/* Did we recieve a capability? */
+		if info.extra_caps() > 0 {
+			// @alwin: Double check the correctness of this
+			if info.caps_unwrapped() & (BIT(info.extra_caps() + 1) - 1) != BIT(info.extra_caps() + 1) - 1 {
+				/* This means there was a capability that was transferred as opposed to being unwrapped */
+				consumed_recv_slot = true;
+			}
 		}
 
-		get_with(info, |i| { ipcbuf.msg_regs()[i as usize]}, |i| { ipcbuf.caps_or_badges()[i as usize]}, data_buffer, recv_slot)
+		if SMOSInvocation::try_from(info.label()).is_err() {
+			return (Err(InvocationError::InvalidInvocation), consumed_recv_slot);
+		}
+
+		if !T::is_supported(info.label().try_into().unwrap()) {
+			return (Err(InvocationError::UnsupportedInvocation {label: info.label().try_into().unwrap() }), consumed_recv_slot);
+		}
+
+		let ret = get_with(info, |i| { ipcbuf.msg_regs()[i as usize]},
+				 		  |i| { ipcbuf.caps_or_badges()[i as usize]}, data_buffer, recv_slot, &mut consumed_recv_slot);
+
+		return (ret, consumed_recv_slot);
 	}
 
 	// @alwin: This is all kind of very ugly and very manual, but if we want to keep the API minimal, I think this is the only way
-	pub fn get_with(info: &sel4::MessageInfo,
-					f_msg: impl Fn(core::ffi::c_ulong) -> sel4_sys::seL4_Word,
-					f_cap: impl Fn(core::ffi::c_ulong) -> sel4_sys::seL4_Word,
-					data_buffer: Option<&[u8]>,
-					recv_slot: AbsoluteCPtr) -> Result<SMOS_Invocation, InvocationError> {
+	fn get_with(info: &sel4::MessageInfo,
+					  f_msg: impl Fn(core::ffi::c_ulong) -> sel4_sys::seL4_Word,
+					  f_cap: impl Fn(core::ffi::c_ulong) -> sel4_sys::seL4_Word,
+					  data_buffer: Option<&[u8]>, recv_slot: AbsoluteCPtr,
+					  consumed_recv_slot: &mut bool) -> Result<SMOS_Invocation, InvocationError> {
 
 		match info.label().try_into().or(Err(InvocationError::InvalidInvocation))? {
 			SMOSInvocation::WindowCreate => {

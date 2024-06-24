@@ -252,6 +252,9 @@ fn handle_view(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<Connec
 
     let reg_hndl = rs_conn.window_register(publish_hdnl, &window, client_id, idx)?;
 
+/* @alwin: This might fail because the cap given was not a valid window handle cap. In this case,
+       we should delete the cap and free the slot (actually, we should probably do this regardless) */
+
     let view = Rc::new( RefCell::new(
         ViewData {
             object: object.clone(),
@@ -317,6 +320,8 @@ fn handle_conn_open(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<C
 
         /* Create a view for the shared buffer*/
         let view_hndl = rs_conn.view(&window_hndl, &sb.0.try_into().or(Err(InvocationError::InvalidArguments))?, 0, 0, 4096, sel4::CapRights::all())?;
+        /* @alwin: This might fail because the cap given was not a valid window handle cap. In this case,
+           we should delete the cap and free the slot (actually, we should probably do this regardless) */
 
         shared_buffer = Some((SHARED_BUFFER_BASE, sb.1, window_hndl, view_hndl));
     } else {
@@ -479,10 +484,13 @@ fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: 
                     }
                 };
 
-                let invocation = sel4::with_ipc_buffer(|buf| SMOS_Invocation::new::<ObjectServerConnection>(buf, &msg, shared_buf, recv_slot));
+                let (invocation, consumed_cap) = sel4::with_ipc_buffer(|buf| SMOS_Invocation::new::<ObjectServerConnection>(buf, &msg, shared_buf, recv_slot));
 
                 /* Deal with the case where an invalid invocation was done*/
                 if invocation.is_err() {
+                    if consumed_cap {
+                       recv_slot.delete();
+                    }
                     reply_msg_info = Some(sel4::with_ipc_buffer_mut(|buf| handle_error(buf, invocation.unwrap_err())));
                     continue;
                 }
@@ -503,14 +511,6 @@ fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: 
 
                 // @alwin: I think this is rather ugly
                 let ret = if matches!(invocation, Ok(SMOS_Invocation::ConnOpen(ref t))) {
-                    // @alwin: this is a HACK! Figure out a better way of dealing with reallocation
-                    // of recv cap slot.
-                    recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
-                    recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
-                    sel4::with_ipc_buffer_mut(|ipc_buf| {
-                        ipc_buf.set_recv_slot(&recv_slot);
-                    });
-
                     match invocation.unwrap() {
                         SMOS_Invocation::ConnOpen(t) => handle_conn_open(&rs_conn, listen_conn.hndl(), id, t),
                         _ => panic!("No invocations besides conn_open should be handled here")
@@ -531,6 +531,11 @@ fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: 
                         _ => todo!()
                     }
                 };
+
+                // @alwin: I'm pretty sure the BFS never needs to hold on to any caps it recieves
+                if consumed_cap {
+                    recv_slot.delete();
+                }
 
                 reply_msg_info = match ret {
                     Ok(x) => Some(sel4::with_ipc_buffer_mut(|buf| handle_reply(buf, x))),

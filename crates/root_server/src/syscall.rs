@@ -8,7 +8,7 @@ use crate::view::{*};
 use crate::connection::{*};
 use crate::vm::handle_page_map;
 use crate::frame_table::FrameTable;
-use crate::cspace::CSpace;
+use crate::cspace::{CSpace, CSpaceTrait};
 use smos_server::reply::SMOSReply;
 use crate::util::alloc_retype;
 use crate::handle::RootServerResource;
@@ -39,11 +39,13 @@ pub fn handle_syscall(msg: sel4::MessageInfo, pid: usize, cspace: &mut CSpace, f
 
     let mut p = procs_get_mut(pid).as_mut().expect("Was called with invalid badge").borrow_mut();
 
-    let invocation = sel4::with_ipc_buffer(|buf| SMOS_Invocation::new::<RootServerConnection>(buf, &msg, Some(frame_table.frame_data(p.shared_buffer.1)), recv_slot));
+    let (invocation, consumed_cap) = sel4::with_ipc_buffer(|buf| SMOS_Invocation::new::<RootServerConnection>(buf, &msg, Some(frame_table.frame_data(p.shared_buffer.1)), recv_slot));
 
     // The user provided an invalid argument
     if invocation.is_err() {
-        warn_rs!("Got an error {:?}", invocation);
+        if consumed_cap {
+            recv_slot.delete();
+        }
         return Some(sel4::with_ipc_buffer_mut(|buf| handle_error(buf, invocation.unwrap_err())));
     }
 
@@ -67,6 +69,13 @@ pub fn handle_syscall(msg: sel4::MessageInfo, pid: usize, cspace: &mut CSpace, f
         SMOS_Invocation::ConnDeregister(t) => handle_conn_deregister(&mut p, &t),
         _ => todo!()
     };
+
+    // Have to be careful here, make sure this is always before the next bit or the ipc buffer of
+    // the response will become corrupted
+    // @alwin: I'm pretty sure there is never any reason for the root server to recieve capabilities
+    if (consumed_cap) {
+        recv_slot.delete();
+    }
 
     let msginfo = match ret {
         Ok(x) => sel4::with_ipc_buffer_mut(|buf| handle_reply(buf, x)),
