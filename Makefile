@@ -80,6 +80,7 @@ $(smos_loader): $(smos_loader).intermediate
 .INTERMDIATE: $(smos_loader).intermediate
 $(smos_loader).intermediate:
 	SEL4_PREFIX=$(sel4_prefix) \
+	LINKER_SCRIPT=$(shell pwd)/crates/smos-loader/custom.ld \
 		cargo build \
 			-Z build-std=core,alloc,compiler_builtins \
 			-Z build-std-features=compiler-builtins-mem \
