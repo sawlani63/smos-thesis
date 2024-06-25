@@ -274,16 +274,32 @@ pub trait RootServerInterface: ClientConnection {
 		});
 	}
 
-	fn process_spawn(&self, executable_name: &str, fs_name: &str/*, argv: Option<Vec<&str>> */) -> Result<LocalHandle<ProcessHandle>, InvocationError> {
-		let mut msginfo_builder = sel4::MessageInfoBuilder::default().label(SMOSInvocation::ProcSpawn as u64);
+	fn process_spawn(&self, executable_name: &str, fs_name: &str, argv: Option<&[&str]>) -> Result<LocalHandle<ProcessHandle>, InvocationError> {
+		let mut msginfo = sel4::MessageInfoBuilder::default().label(SMOSInvocation::ProcSpawn as u64).length(1).build();
 
 		let shared_buf_raw = self.get_buf_mut().ok_or(InvocationError::DataBufferNotSet)?;
-		let shared_buf = unsafe {slice::from_raw_parts_mut(shared_buf_raw.0, shared_buf_raw.1)};
-		copy_terminated_rust_string_to_buffer(shared_buf, executable_name)?;
+		let mut shared_buf = unsafe {slice::from_raw_parts_mut(shared_buf_raw.0, shared_buf_raw.1)};
 
-		/* @alwin: Deal with argv */
+		/* Copy the executable name into the shared buffer */
+		shared_buf = copy_terminated_rust_string_to_buffer(shared_buf, executable_name)?;
+
+		/* Copy the file server name into the shared buffer */
+		shared_buf = copy_terminated_rust_string_to_buffer(shared_buf, fs_name)?;
+
+		/* Copy the args for the application into the shared buffer */
+		if argv.is_some() {
+				for arg in argv.unwrap() {
+					shared_buf = copy_terminated_rust_string_to_buffer(shared_buf, arg)?;
+				}
+		}
+
 		return sel4::with_ipc_buffer_mut(|ipc_buf| {
-			let msginfo = self.ep().call(msginfo_builder.build());
+
+			ipc_buf.msg_regs_mut()[0] = match argv {
+				None => 0,
+				Some(v) => v.len() as u64,
+			};
+			msginfo = self.ep().call(msginfo);
 			try_unpack_error(msginfo.label(), ipc_buf)?;
 
 			Ok(LocalHandle::new((ipc_buf.msg_regs()[0] as usize)))

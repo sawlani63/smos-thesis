@@ -192,7 +192,7 @@ extern "C" fn main_continued(bootinfo_raw: *const BootInfo, cspace_ptr : *mut CS
 
     let proc = start_process(cspace, ut_table, &mut frame_table,
                              bootinfo.sched_control().index(0).cap(), "test_app", ipc_ep,
-                             BFS_CONTENTS).expect("Failed to start first process");
+                             BFS_CONTENTS, None).expect("Failed to start first process");
 
     // @alwin: Consider putting syscall loop in a struct parameterised by the type of the server
     // and using it like this instead of specifying the type of server in SMOSInvocation::new

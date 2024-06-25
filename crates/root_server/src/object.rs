@@ -17,7 +17,8 @@ use smos_server::handle::{generic_allocate_handle, generic_get_handle, generic_c
 use smos_server::handle_capability::HandleCapabilityTable;
 use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
 
-pub const OBJ_MAX_FRAMES: usize = 1024;
+// @alwin: Just increasing this is eventually going to be problematic
+pub const OBJ_MAX_FRAMES: usize = 1096;
 
 #[derive(Debug)]
 pub struct AnonymousMemoryObject {

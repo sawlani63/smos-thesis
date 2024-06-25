@@ -12,7 +12,7 @@ pub fn copy_terminated_rust_string_to_buffer<'a>(buffer: &'a mut [u8], string: &
 	return Ok(&mut buffer[string.len() + 1..length]);
 }
 
-pub fn copy_rust_string_from_buffer<'a>(buffer: &'a [u8]) -> Result<(&'a str, &'a [u8]), InvocationError> {
+pub fn rust_str_from_buffer<'a>(buffer: &'a [u8]) -> Result<(&'a str, &'a [u8]), InvocationError> {
 	let index = buffer.iter().position(|&x| x == 0).ok_or(InvocationError::InvalidArguments)?;
 	let length = buffer.len();
 

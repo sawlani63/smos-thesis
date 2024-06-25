@@ -9,7 +9,8 @@ use smos_common::connection::RootServerConnection;
 use smos_common::init::InitCNodeSlots::{*};
 use smos_common::local_handle::{LocalHandle, ConnectionHandle};
 use linked_list_allocator::LockedHeap;
-
+use smos_common::string::rust_str_from_buffer;
+use crate::args::init_args;
 
 // @alwin: should this be passed on the stack somehow? I think yes, but I'm not too sure how yet (
 // at least with minimal changes and hackery around the initialize_tls_on_stack thing)
@@ -31,6 +32,8 @@ global_asm! {
 
         .global _start
         _start:
+            ldrsw x0, [sp]
+            ldr x1, [sp, #4]
             b sel4_runtime_rust_entry
 
             1: b 1b
@@ -46,11 +49,12 @@ sel4_panicking_env::register_debug_put_char!(sel4::debug_put_char);
 enum Never {}
 
 #[no_mangle]
-unsafe extern "C" fn sel4_runtime_rust_entry() -> ! {
+unsafe extern "C" fn sel4_runtime_rust_entry(argc: u32, argv: *const u8) -> ! {
     unsafe extern "C" fn cont_fn(_cont_arg: *mut sel4_runtime_common::ContArg) -> ! {
         inner_entry()
     }
 
+    unsafe { init_args(argc as usize, argv) };
     sel4_runtime_common::initialize_tls_on_stack_and_continue(cont_fn, ptr::null_mut())
 }
 
@@ -101,7 +105,6 @@ pub fn run_main<T>(
     //     Err(_) => abort!("main() panicked"),
     // };
 
-    // @alwin: HACK
     f(conn, cspace);
 
     loop {}

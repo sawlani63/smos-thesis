@@ -564,10 +564,10 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
 
     init_file_table();
 
-    sel4::debug_println!("Boot file server published... Waiting on endpoint {:?}...", listen_connection);
+    sel4::debug_println!("Boot file server published...");
 
     /* Start the other relavant processes */
-    rs_conn.process_spawn("test_app", "BOOT_FS");
+    rs_conn.process_spawn("test_app", "BOOT_FS", None);
 
     /* @alwin: Idk if this is the best way to do this */
     let reply_cptr = cspace.alloc_slot().expect("Could not get a slot");

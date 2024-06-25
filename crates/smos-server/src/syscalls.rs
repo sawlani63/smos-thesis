@@ -6,12 +6,13 @@ use smos_common::{error::{*}, args::{*}, invocations::SMOSInvocation, connection
 use core::marker::PhantomData;
 use smos_common::local_handle::{HandleOrHandleCap, WindowHandle, ObjectHandle};
 use smos_common::server_connection::ServerConnection;
-use smos_common::string::copy_rust_string_from_buffer;
+use smos_common::string::rust_str_from_buffer;
 use smos_common::util::BIT;
 use crate::handle_arg::{ServerReceivedHandleOrHandleCap, ReceivedHandle, UnwrappedHandleCap};
 use core::ffi::CStr;
 use sel4_bitfield_ops::Bitfield;
 use sel4::AbsoluteCPtr;
+use alloc::vec::Vec;
 
 // Data structs
 #[derive(Debug)]
@@ -74,9 +75,9 @@ pub struct ConnPublish {
 
 #[derive(Debug)]
 pub struct ProcessSpawn {
-	// executable name
-	// file server name
-	// argv
+	pub exec_name: String,
+	pub fs_name: String,
+	pub args: Option<Vec<String>>
 }
 
 #[derive(Debug)]
@@ -314,7 +315,7 @@ mod SMOS_Invocation_Raw {
 				// @alwin: idk about this, let's see
 				Ok(SMOS_Invocation::ConnCreate(
 					ConnCreate {
-						name: copy_rust_string_from_buffer(data_buffer.unwrap())?.0.to_string(),
+						name: rust_str_from_buffer(data_buffer.unwrap())?.0.to_string(),
 				}))
 			},
 			SMOSInvocation::ConnPublish => {
@@ -325,7 +326,7 @@ mod SMOS_Invocation_Raw {
 				Ok(SMOS_Invocation::ConnPublish(
 					ConnPublish {
 						ntfn_buffer: f_msg(0) as usize,
-						name: copy_rust_string_from_buffer(data_buffer.unwrap())?.0.to_string(),
+						name: rust_str_from_buffer(data_buffer.unwrap())?.0.to_string(),
 				}))
 			}
 			SMOSInvocation::ObjCreate => {
@@ -334,7 +335,7 @@ mod SMOS_Invocation_Raw {
 						return Err(InvocationError::DataBufferNotSet);
 					}
 
-					unsafe { Some(copy_rust_string_from_buffer(data_buffer.unwrap())?.0.to_string()) }
+					unsafe { Some(rust_str_from_buffer(data_buffer.unwrap())?.0.to_string()) }
 				} else {
 					None
 				};
@@ -353,7 +354,7 @@ mod SMOS_Invocation_Raw {
 					return Err(InvocationError::DataBufferNotSet);
 				}
 
-				let name = unsafe { copy_rust_string_from_buffer(data_buffer.unwrap())?.0.to_string() };
+				let name = unsafe { rust_str_from_buffer(data_buffer.unwrap())?.0.to_string() };
 
 				Ok(SMOS_Invocation::ObjOpen(
 					ObjOpen {
@@ -533,8 +534,37 @@ mod SMOS_Invocation_Raw {
 				Ok(SMOS_Invocation::ReplyCreate)
 			},
 			SMOSInvocation::ProcSpawn => {
-				// @alwin: Add the argument unmarshalling here
-				Ok(SMOS_Invocation::ProcessSpawn(ProcessSpawn {}))
+
+				if data_buffer.is_none() {
+					return Err(InvocationError::DataBufferNotSet);
+				}
+
+				if info.length() != 1 {
+					return Err(InvocationError::InvalidArguments);
+				}
+
+
+				let mut data_buffer_ref = data_buffer.unwrap();
+
+				let (exec_name, ref mut data_buffer_ref) = rust_str_from_buffer(data_buffer_ref)?;
+				let (fs_name, ref mut data_buffer_ref) = rust_str_from_buffer(data_buffer_ref)?;
+
+				let args = if info.length() == 0 {
+					None
+				} else {
+					let mut args_inner = Vec::new();
+					for i in 0..f_msg(0) {
+						let (arg_tmp, ref mut data_buffer_ref) = rust_str_from_buffer(data_buffer_ref)?;
+						args_inner.push(arg_tmp.to_string());
+					}
+					Some(args_inner)
+				};
+
+				Ok(SMOS_Invocation::ProcessSpawn(ProcessSpawn {
+					exec_name: exec_name.to_string(),
+					fs_name: fs_name.to_string(),
+					args: args
+				}))
 			},
 			SMOSInvocation::TestSimple => {
 				panic!("Okay got to test simple");

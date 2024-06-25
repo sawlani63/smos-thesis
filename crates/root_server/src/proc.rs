@@ -23,7 +23,11 @@ use smos_common::local_handle;
 use crate::object::AnonymousMemoryObject;
 use smos_server::event::{INVOCATION_EP_BITS, FAULT_EP_BITS};
 use smos_server::handle::{HandleInner, ServerHandle, HandleAllocater};
-
+use smos_common::string::copy_terminated_rust_string_to_buffer;
+use smos_common::util::{ROUND_UP, ROUND_DOWN};
+use alloc::vec;
+use alloc::string::String;
+use byteorder::{ByteOrder, LittleEndian};
 
 const LOADER_CONTENTS: &[u8] = include_bytes!(env!("LOADER_ELF"));
 
@@ -81,6 +85,7 @@ pub struct UserProcess {
     initial_windows: Vec<Rc<RefCell<Window>>>,
     windows: Vec<Rc<RefCell<Window>>>,
     pub views: Vec<Rc<RefCell<View>>>,
+    pub actual_args: Option<Vec<String>>
     // pub connections: Vec<Rc<Connection>> // @alwin: This stores outgoing conns. Do we need to store incoming conns too?
 }
 
@@ -118,7 +123,7 @@ impl UserProcess {
             sched_context: sched_context, cspace: cspace,
             stack: stack, fault_ep: fault_ep, handle_table: [ARRAY_REPEAT_VALUE; 256],
             shared_buffer: shared_buffer, /* bfs_shared_buffer: None, */ initial_windows: initial_windows,
-            windows: Vec::new(), views: Vec::new()
+            windows: Vec::new(), views: Vec::new(), actual_args: None
             /* connections: Vec::new() */
         };
     }
@@ -159,6 +164,82 @@ impl UserProcess {
     pub fn add_window_unchecked(&mut self, window: Rc<RefCell<Window>>) {
         self.windows.push(window);
     }
+
+    pub fn write_args_to_stack(&self, frame_table: &mut FrameTable, args: Option<Vec<&str>>) -> usize {
+        let mut argv: Vec<u64> = Vec::new();
+        let mut curr_stack_vaddr = vmem_layout::PROCESS_STACK_TOP;
+
+        if args.is_some() {
+            /* Write args to stack */
+            for arg in args.as_ref().unwrap().iter() {
+                if ROUND_UP(curr_stack_vaddr, sel4_sys::seL4_PageBits.try_into().unwrap()) !=
+                   ROUND_UP(curr_stack_vaddr - (arg.as_bytes().len() + 1), sel4_sys::seL4_PageBits.try_into().unwrap()) {
+                    /* @alwin: When part of an arg ends up on a different page to another part */
+                    todo!();
+                }
+
+                curr_stack_vaddr = curr_stack_vaddr - (arg.as_bytes().len() + 1);
+                argv.push(curr_stack_vaddr as u64);
+                self.write_str_to_stack(frame_table, curr_stack_vaddr, arg);
+            }
+
+            /* pad to word alignment */
+            curr_stack_vaddr = curr_stack_vaddr - (curr_stack_vaddr % 8);
+
+            /* Write argv array to stack */
+            curr_stack_vaddr = curr_stack_vaddr - (argv.len() * 8);
+            self.write_words_to_stack(frame_table, curr_stack_vaddr, &argv);
+
+            /* Write argv pointer to stack */
+            let argv_ptr = curr_stack_vaddr as u64;
+            curr_stack_vaddr = curr_stack_vaddr - 8;
+            self.write_words_to_stack(frame_table, curr_stack_vaddr, &[argv_ptr]);
+        } else {
+            /* Write dummy argv pointer to stack */
+            curr_stack_vaddr = curr_stack_vaddr - 8;
+            self.write_words_to_stack(frame_table, curr_stack_vaddr, &[0]);
+        }
+
+        /* Write argc to stack */
+        // @alwin: Do we need to word align?
+        curr_stack_vaddr = curr_stack_vaddr - 4;
+        self.write_half_words_to_stack(frame_table, curr_stack_vaddr, &[argv.len().try_into().unwrap()]);
+
+        return curr_stack_vaddr;
+    }
+
+    fn write_str_to_stack(&self, frame_table: &FrameTable, vaddr: usize, string: &str) {
+        let offset = vmem_layout::PROCESS_STACK_TOP - vaddr;
+        let idx = vmem_layout::USER_DEFAULT_STACK_PAGES - (offset / PAGE_SIZE_4K) - 1;
+
+        let frame_data = frame_table.frame_data(self.stack[idx].1);
+        let offset_page = PAGE_SIZE_4K - (offset % PAGE_SIZE_4K);
+        let string_len_with_null = string.as_bytes().len() + 1;
+
+        copy_terminated_rust_string_to_buffer(&mut frame_data[offset_page..offset_page + string_len_with_null], string);
+    }
+
+    fn write_words_to_stack(&self, frame_table: &FrameTable, vaddr: usize, words: &[u64]) {
+        let offset = vmem_layout::PROCESS_STACK_TOP - vaddr;
+        let idx = vmem_layout::USER_DEFAULT_STACK_PAGES - (offset / PAGE_SIZE_4K) - 1;
+
+        let frame_data = frame_table.frame_data(self.stack[idx].1);
+        let offset_page = PAGE_SIZE_4K - (offset % PAGE_SIZE_4K);
+        let bytes_length = words.len() * 8;
+
+        LittleEndian::write_u64_into(words, &mut frame_data[offset_page..offset_page + bytes_length]);
+    }
+
+    fn write_half_words_to_stack(&self, frame_table: &FrameTable, vaddr: usize, data: &[u32]) {
+        let offset = vmem_layout::PROCESS_STACK_TOP - vaddr;
+        let idx = vmem_layout::USER_DEFAULT_STACK_PAGES - (offset / PAGE_SIZE_4K) - 1;
+
+        let frame_data = frame_table.frame_data(self.stack[idx].1);
+        let offset_page = PAGE_SIZE_4K - (offset % PAGE_SIZE_4K);
+        let bytes_length = data.len() * 4;
+
+        LittleEndian::write_u32_into(data, &mut frame_data[offset_page..offset_page + bytes_length]);
+    }
 }
 
 fn init_process_stack(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,
@@ -195,7 +276,7 @@ fn init_process_stack(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: 
 // @alwin: this leaks cslots and caps!
 pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,
                        sched_control: sel4::cap::SchedControl, name: &str, ep: sel4::cap::Endpoint,
-                       elf_data: &[u8]) -> Result<Rc<RefCell<UserProcess>>, sel4::Error> {
+                       elf_data: &[u8], args: Option<Vec<&str>>) -> Result<Rc<RefCell<UserProcess>>, sel4::Error> {
 
     /* We essentially use the position in the table as the pid. Don't think this is the right way to
        do it properly */
@@ -572,8 +653,7 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
     })?;
 
     /* Set up the process stack */
-
-    let (sp, stack_pages) = init_process_stack(cspace, ut_table, frame_table, vspace.0).map_err(|e| {
+    let (mut sp, stack_pages) = init_process_stack(cspace, ut_table, frame_table, vspace.0).map_err(|e| {
         err_rs!("Failed to initialize stack");
         cspace.delete_cap(fault_ep);
         cspace.free_cap(fault_ep);
@@ -589,6 +669,13 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
         e
     })?;
 
+    let proc = Rc::new( RefCell::new( UserProcess::new(tcb, pos, vspace, ipc_buffer,
+                                                                sched_context, proc_cspace,
+                                                                stack_pages, fault_ep,
+                                                                shared_buffer, initial_windows)));
+
+    sp = proc.borrow_mut().write_args_to_stack(frame_table, args);
+
     let mut user_context = sel4::UserContext::default();
     *user_context.pc_mut() = elf.ehdr.e_entry;
     *user_context.sp_mut() = sp.try_into().unwrap();
@@ -596,10 +683,6 @@ pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &
     // @alwin: Clean up the stack if this fails
     tcb.0.tcb_write_registers(true, 2, &mut user_context)?;
 
-    let proc = Rc::new( RefCell::new( UserProcess::new(tcb, pos, vspace, ipc_buffer,
-                                                                sched_context, proc_cspace,
-                                                                stack_pages, fault_ep,
-                                                                shared_buffer, initial_windows)));
     procs_set(pos, Some(proc.clone()));
 
     return Ok(proc);
@@ -613,9 +696,12 @@ pub fn handle_process_spawn(cspace: &mut CSpace, ut_table: &mut UTTable, frame_t
 
     let (idx, handle_ref) = p.allocate_handle()?;
 
+    let loader_args = Some(vec!{args.exec_name.as_str(), args.fs_name.as_str()});
+    // @alwin: This is a lazy way of handling the error;
     let proc = start_process(cspace, ut_table, frame_table, sched_control,
-                             "@alwin: replace me when string args work", ep, LOADER_CONTENTS)
-                            .map_err(|_| InvocationError::InsufficientResources)?; // @alwin: This is lazy
+                             &args.exec_name, ep, LOADER_CONTENTS, loader_args)
+                            .map_err(|_| InvocationError::InsufficientResources)?;
+    proc.borrow_mut().actual_args = args.args;
 
     *handle_ref = Some(ServerHandle::new(RootServerResource::Process(proc)));
 
@@ -655,9 +741,17 @@ pub fn handle_load_complete(cspace: &mut CSpace, frame_table: &mut FrameTable, p
         frame_data[0..4096].fill(0);
     }
 
+    let proc_args = match &p.actual_args {
+        None => None,
+        Some(x) => Some(x.iter().map(|z| z.as_str()).collect())
+    };
+
+    let sp = p.write_args_to_stack(frame_table, proc_args);
+    p.actual_args = None;
+
     let mut user_context = sel4::UserContext::default();
     *user_context.pc_mut() = args.entry_point as u64;
-    *user_context.sp_mut() = vmem_layout::PROCESS_STACK_TOP as u64;
+    *user_context.sp_mut() = sp as u64;
 
     // @alwin: deal with error case properly here
     p.tcb.0.tcb_write_registers(true, 2, &mut user_context).expect("@alwin: This shouldn't be an assert");

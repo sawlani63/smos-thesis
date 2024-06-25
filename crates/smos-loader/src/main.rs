@@ -13,9 +13,6 @@ use alloc::vec::Vec;
 
 use elf::ElfBytes;
 
-const SERVER_NAME: &str = "BOOT_FS";
-const FILE_NAME: &str = "test_app";
-
 const shared_buffer_region: *mut u8 = 0xA0002000 as *mut u8;
 const elf_base: *const u8 = 0xB000000 as *const u8;
 
@@ -49,17 +46,18 @@ struct SegmentData {
 // @alwin: How the heck am I adding argc and argv
 fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Result<Never> {
     /* Expected arguments
+            0. File name to run
             1. The name of the file server where this file is expected to be
-            2. File name to run
     */
 
-    /* Check that argc == 1*/
-
-    sel4::debug_println!("Hello world! I am loading the executable {} from {}", FILE_NAME, SERVER_NAME);
+    /* Check that argc == 2 */
+    let args: Vec<&str> = smos_runtime::args::args().collect();
+    assert!(args.len() == 2);
+    sel4::debug_println!("Hello world! I am loading the executable {} from {}", args[0], args[1]);
 
     /* Set up connection to file server */
     let fs_ep_slot = cspace.alloc_slot().expect("Failed to allocate slot for FS connection");
-    let mut fs_conn = rs_conn.conn_create::<ObjectServerConnection>(&cspace.to_absolute_cptr(fs_ep_slot), SERVER_NAME).expect("Failed to connect to specified server"); // @alwin: This should come from args
+    let mut fs_conn = rs_conn.conn_create::<ObjectServerConnection>(&cspace.to_absolute_cptr(fs_ep_slot), args[1]).expect("Failed to connect to specified server"); // @alwin: This should come from args
 
     /* Set up shared buffer with FS */
     let shared_buffer_win_hndl = rs_conn.window_create(shared_buffer_region as usize, 4096, None).expect("Failed to create window for shared buffer");
@@ -72,7 +70,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     fs_conn.conn_open(Some((shared_buf_obj.clone(), (shared_buffer_region, 4096))));
 
     /* Open the ELF file*/
-    let file_hndl = fs_conn.obj_open(FILE_NAME, sel4::CapRights::read_only(), None).expect("Failed to open the file");
+    let file_hndl = fs_conn.obj_open(args[0], sel4::CapRights::read_only(), None).expect("Failed to open the file");
     let file_size = fs_conn.obj_stat(&file_hndl).expect("Failed to get stat").size;
 
     /* Create a window */

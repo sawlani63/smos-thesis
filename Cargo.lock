@@ -444,6 +444,7 @@ name = "root_server"
 version = "0.1.0"
 dependencies = [
  "bitfield",
+ "byteorder",
  "downcast-rs",
  "elf",
  "linked_list_allocator",
@@ -824,6 +825,7 @@ dependencies = [
 name = "smos-runtime"
 version = "0.1.0"
 dependencies = [
+ "byteorder",
  "linked_list_allocator",
  "sel4",
  "sel4-config",
