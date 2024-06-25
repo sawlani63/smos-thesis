@@ -5,6 +5,7 @@ use crate::args::{*};
 use crate::returns::{*};
 use crate::connection::{*};
 use crate::error::{*};
+use crate::string::copy_terminated_rust_string_to_buffer;
 use crate::local_handle::{HandleOrHandleCap, LocalHandle, HandleCap, WindowHandle,
 						  ViewHandle, ObjectHandle, ProcessHandle, ConnRegistrationHandle,
 						  WindowRegistrationHandle, ConnectionHandle, PublishHandle};
@@ -12,6 +13,7 @@ use core::marker::PhantomData;
 use smos_cspace::SMOSUserCSpace;
 use crate::client_connection::{*};
 use crate::server_connection::{*};
+use core::slice;
 
 /*
  * This is kind of what I want to do:
@@ -34,14 +36,10 @@ use crate::server_connection::{*};
 pub trait RootServerInterface: ClientConnection {
 	fn conn_create<T: ClientConnection>(&self, slot: &AbsoluteCPtr, server_name: &str) -> Result<T, InvocationError> {
 		let (handle, endpoint) = sel4::with_ipc_buffer_mut(|ipc_buf| {
-			/* Make sure the whole string fits in the buffer */
-			let shared_buf = self.get_buf_mut().ok_or(InvocationError::DataBufferNotSet)?;
-			if server_name.as_bytes().len() >= shared_buf.1 {
-				return Err(InvocationError::BufferTooLarge);
-			}
-			unsafe {
-				core::ptr::copy(server_name.as_bytes().as_ptr(), shared_buf.0, server_name.as_bytes().len());
-			}
+			let shared_buf_raw = self.get_buf_mut().ok_or(InvocationError::DataBufferNotSet)?;
+			let shared_buf = unsafe {slice::from_raw_parts_mut(shared_buf_raw.0, shared_buf_raw.1)};
+			copy_terminated_rust_string_to_buffer(shared_buf, server_name)?;
+
 			ipc_buf.set_recv_slot(slot);
 			let mut msginfo = sel4::MessageInfoBuilder::default()
 														.label(SMOSInvocation::ConnCreate as u64)
@@ -93,13 +91,11 @@ pub trait RootServerInterface: ClientConnection {
 
 	fn conn_publish<T: ServerConnection>(&self, ntfn_buffer: *mut u8, slot: &AbsoluteCPtr, name: &str) -> Result<T, InvocationError> {
 		let (handle, endpoint) = sel4::with_ipc_buffer_mut(|ipc_buf| {
-			let shared_buf = self.get_buf_mut().ok_or(InvocationError::DataBufferNotSet)?;
-			if name.as_bytes().len() >= shared_buf.1 {
-				return Err(InvocationError::BufferTooLarge);
-			}
-			unsafe {
-				core::ptr::copy(name.as_bytes().as_ptr(), shared_buf.0, name.as_bytes().len())
-			}
+
+			let shared_buf_raw = self.get_buf_mut().ok_or(InvocationError::DataBufferNotSet)?;
+			let shared_buf = unsafe {slice::from_raw_parts_mut(shared_buf_raw.0, shared_buf_raw.1)};
+			copy_terminated_rust_string_to_buffer(shared_buf, name)?;
+
 			ipc_buf.set_recv_slot(slot);
 			ipc_buf.msg_regs_mut()[0] = ntfn_buffer as u64;
 			let mut msginfo = sel4::MessageInfoBuilder::default()
@@ -278,15 +274,14 @@ pub trait RootServerInterface: ClientConnection {
 		});
 	}
 
-	fn process_spawn(&self, executable_name: &str, fs_name: &str, /* argv: Option<Vec<&str>> */) -> Result<LocalHandle<ProcessHandle>, InvocationError> {
+	fn process_spawn(&self, executable_name: &str, fs_name: &str/*, argv: Option<Vec<&str>> */) -> Result<LocalHandle<ProcessHandle>, InvocationError> {
 		let mut msginfo_builder = sel4::MessageInfoBuilder::default().label(SMOSInvocation::ProcSpawn as u64);
-		let shared_buf = self.get_buf_mut().ok_or(InvocationError::DataBufferNotSet)?;
 
-		// @alwin: actually pass in the strings
-		if executable_name.as_bytes().len() >= shared_buf.1 {
-			return Err(InvocationError::BufferTooLarge);
-		}
+		let shared_buf_raw = self.get_buf_mut().ok_or(InvocationError::DataBufferNotSet)?;
+		let shared_buf = unsafe {slice::from_raw_parts_mut(shared_buf_raw.0, shared_buf_raw.1)};
+		copy_terminated_rust_string_to_buffer(shared_buf, executable_name)?;
 
+		/* @alwin: Deal with argv */
 		return sel4::with_ipc_buffer_mut(|ipc_buf| {
 			let msginfo = self.ep().call(msginfo_builder.build());
 			try_unpack_error(msginfo.label(), ipc_buf)?;
@@ -371,14 +366,11 @@ pub trait ObjectServerInterface: ClientConnection {
 			ipc_buf.msg_regs_mut()[ObjCreateArgs::HasName as usize] = name_opt.is_some() as u64;
 			if name_opt.is_some() {
 				let name = name_opt.unwrap();
-				let shared_buf = self.get_buf_mut().ok_or(InvocationError::DataBufferNotSet)?;
-				if name.as_bytes().len() >= shared_buf.1 {
-					return Err(InvocationError::BufferTooLarge);
-				}
-				unsafe {
-					core::ptr::copy(name.as_bytes().as_ptr(), shared_buf.0, name.as_bytes().len());
-				}
+				let shared_buf_raw = self.get_buf_mut().ok_or(InvocationError::DataBufferNotSet)?;
+				let shared_buf = unsafe {slice::from_raw_parts_mut(shared_buf_raw.0, shared_buf_raw.1)};
+				copy_terminated_rust_string_to_buffer(shared_buf, name)?;
 			}
+
 			ipc_buf.msg_regs_mut()[ObjCreateArgs::Size as usize] = size as u64;
 			ipc_buf.msg_regs_mut()[ObjCreateArgs::Rights as usize] = rights.into_inner().0.bits()[0];
 			ipc_buf.msg_regs_mut()[ObjCreateArgs::ReturnCap as usize] = return_cap.is_some() as u64;
@@ -410,11 +402,10 @@ pub trait ObjectServerInterface: ClientConnection {
 													.build();
 
 		return sel4::with_ipc_buffer_mut(|ipc_buf| {
-			let shared_buf = self.get_buf_mut().ok_or(InvocationError::DataBufferNotSet)?;
-			if name.as_bytes().len() >= shared_buf.1 {
-				return Err(InvocationError::BufferTooLarge);
-			}
-			unsafe { core::ptr::copy(name.as_bytes().as_ptr(), shared_buf.0, name.as_bytes().len()) };
+			let shared_buf_raw = self.get_buf_mut().ok_or(InvocationError::DataBufferNotSet)?;
+			let shared_buf = unsafe {slice::from_raw_parts_mut(shared_buf_raw.0, shared_buf_raw.1)};
+			copy_terminated_rust_string_to_buffer(shared_buf, name)?;
+
 			ipc_buf.msg_regs_mut()[0] = rights.into_inner().0.bits()[0];
 			ipc_buf.msg_regs_mut()[1] = return_cap.is_some() as u64;
 			if return_cap.is_some() {

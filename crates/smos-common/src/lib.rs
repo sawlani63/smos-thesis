@@ -11,3 +11,4 @@ pub mod server_connection;
 pub mod local_handle;
 pub mod syscall;
 pub mod util;
+pub mod string;
