@@ -6,6 +6,7 @@ use smos_common::{error::{*}, args::{*}, invocations::SMOSInvocation, connection
 use core::marker::PhantomData;
 use smos_common::local_handle::{HandleOrHandleCap, WindowHandle, ObjectHandle};
 use smos_common::server_connection::ServerConnection;
+use smos_common::string::copy_rust_string_from_buffer;
 use smos_common::util::BIT;
 use crate::handle_arg::{ServerReceivedHandleOrHandleCap, ReceivedHandle, UnwrappedHandleCap};
 use core::ffi::CStr;
@@ -313,7 +314,7 @@ mod SMOS_Invocation_Raw {
 				// @alwin: idk about this, let's see
 				Ok(SMOS_Invocation::ConnCreate(
 					ConnCreate {
-						name: unsafe { CStr::from_ptr(data_buffer.unwrap().as_ptr() as *const i8).to_str().expect("@alwin: This should not be an expect").to_string() },
+						name: copy_rust_string_from_buffer(data_buffer.unwrap())?.0.to_string(),
 				}))
 			},
 			SMOSInvocation::ConnPublish => {
@@ -324,7 +325,7 @@ mod SMOS_Invocation_Raw {
 				Ok(SMOS_Invocation::ConnPublish(
 					ConnPublish {
 						ntfn_buffer: f_msg(0) as usize,
-						name: unsafe { CStr::from_ptr(data_buffer.unwrap().as_ptr() as *const i8).to_str().expect("@alwin: This should not be an expect").to_string() },
+						name: copy_rust_string_from_buffer(data_buffer.unwrap())?.0.to_string(),
 				}))
 			}
 			SMOSInvocation::ObjCreate => {
@@ -333,7 +334,7 @@ mod SMOS_Invocation_Raw {
 						return Err(InvocationError::DataBufferNotSet);
 					}
 
-					unsafe { Some(CStr::from_ptr(data_buffer.unwrap().as_ptr() as *const i8).to_str().expect("@alwin: This should not be an expect").to_string()) }
+					unsafe { Some(copy_rust_string_from_buffer(data_buffer.unwrap())?.0.to_string()) }
 				} else {
 					None
 				};
@@ -352,7 +353,7 @@ mod SMOS_Invocation_Raw {
 					return Err(InvocationError::DataBufferNotSet);
 				}
 
-				let name = unsafe { CStr::from_ptr(data_buffer.unwrap().as_ptr() as *const i8).to_str().expect("@alwin: This should not be an expect").to_string() };
+				let name = unsafe { copy_rust_string_from_buffer(data_buffer.unwrap())?.0.to_string() };
 
 				Ok(SMOS_Invocation::ObjOpen(
 					ObjOpen {
