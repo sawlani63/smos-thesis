@@ -13,3 +13,4 @@ smos-runtime = { path = "../smos-runtime" }
 smos-cspace = { path = "../smos-cspace" }
 smos-common = { path = "../smos-common"}
 elf = {version = "0.7.4", default-features = false, features=[]}
+byteorder = { version = "1.5.0", default-features = false }

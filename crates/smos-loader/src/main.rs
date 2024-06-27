@@ -2,6 +2,8 @@
 #![no_main]
 
 extern crate alloc;
+use elf::endian::LittleEndian;
+use smos_common::string::copy_terminated_rust_string_to_buffer;
 use smos_runtime::{smos_declare_main, Never};
 use smos_cspace::SMOSUserCSpace;
 use smos_common::connection::{RootServerConnection, ObjectServerConnection};
@@ -10,6 +12,8 @@ use smos_common::util::{ROUND_UP, ROUND_DOWN};
 use smos_common::local_handle::{LocalHandle, HandleOrHandleCap, WindowHandle, ObjectHandle,
                                 ViewHandle};
 use alloc::vec::Vec;
+use byteorder::ByteOrder;
+
 
 use elf::ElfBytes;
 
@@ -127,6 +131,45 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
         rs_conn.view(&segment.win_hndl, &segment.obj_hndl, 0, 0, segment.size, segment.rights);
     }
 
+    /* Create a stack */
+    // @alwin: Put this stuff somewhere else
+    const STACK_TOP: usize = 0xA0000000;
+    const STACK_PAGES: usize = 100;
+    let stack_win_hndl = rs_conn.window_create(STACK_TOP - STACK_PAGES * PAGE_SIZE_4K as usize, STACK_PAGES * PAGE_SIZE_4K as usize, None).expect("Could not make stack window");
+    let stack_obj_hndl = rs_conn.obj_create(None, STACK_PAGES * PAGE_SIZE_4K as usize, sel4::CapRights::all(), None).expect("Could not make stack object");
+    let stack_view = rs_conn.view(&stack_win_hndl, &stack_obj_hndl, 0, 0, STACK_PAGES * PAGE_SIZE_4K as usize, sel4::CapRights::all()).expect("Could not make stack view");
+
+    let mut curr_sp = STACK_TOP as *mut u8;
+    let mut argv: Vec<u64> = Vec::new();
+
+    let argv_ptr = if args[2..].len() > 0 {
+        /* Copy args onto the stack */
+        for arg in &args[2..] {
+            curr_sp = unsafe { curr_sp.sub(arg.as_bytes().len() + 1) };
+            argv.push(curr_sp as u64);
+            copy_terminated_rust_string_to_buffer(unsafe { core::slice::from_raw_parts_mut(curr_sp, arg.as_bytes().len() + 1) }, arg);
+        }
+
+        /* Pad to word alignment */
+        curr_sp = unsafe { curr_sp.sub(curr_sp as usize % 8) };
+
+        /* Write argv array to stack */
+        curr_sp = unsafe { curr_sp.sub(argv.len() * 8) };
+        byteorder::LittleEndian::write_u64_into(&argv, unsafe { core::slice::from_raw_parts_mut(curr_sp, argv.len() * 8) });
+
+        curr_sp
+    } else {
+        core::ptr::null()
+    };
+
+    /* Write ptr to argv on the stack*/
+    curr_sp = unsafe { curr_sp.sub(8) };
+    byteorder::LittleEndian::write_u64_into(&[argv_ptr as u64], unsafe { core::slice::from_raw_parts_mut(curr_sp, 8) });
+
+    /* Write argc to stack */
+    curr_sp = unsafe { curr_sp.sub(4) };
+    byteorder::LittleEndian::write_u32_into(&[argv.len().try_into().unwrap()], unsafe { core::slice::from_raw_parts_mut(curr_sp, 4) });
+
     /* Get the ELF entrypoint */
     let start_vaddr = elf.ehdr.e_entry;
 
@@ -155,7 +198,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     sel4::debug_println!("About to jump to executable at addr {:x}", start_vaddr);
 
     /* Jump to the real executable */
-    rs_conn.load_complete(start_vaddr as usize).expect("Failed to complete load");
+    rs_conn.load_complete(start_vaddr as usize, curr_sp as usize).expect("Failed to complete load");
 
     unreachable!()
 }

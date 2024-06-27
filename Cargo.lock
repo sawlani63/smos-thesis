@@ -802,6 +802,7 @@ dependencies = [
 name = "smos-loader"
 version = "0.1.0"
 dependencies = [
+ "byteorder",
  "elf",
  "sel4",
  "sel4-config",

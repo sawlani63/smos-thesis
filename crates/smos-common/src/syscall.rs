@@ -306,14 +306,15 @@ pub trait RootServerInterface: ClientConnection {
 		});
 	}
 
-	fn load_complete(&self, entry_point: usize) -> Result<(), InvocationError> {
+	fn load_complete(&self, entry_point: usize, sp: usize) -> Result<(), InvocationError> {
 		let mut msginfo= sel4::MessageInfoBuilder::default()
 												   .label(SMOSInvocation::LoadComplete as u64)
-												   .length(1)
+												   .length(2)
 												   .build();
 
 		return sel4::with_ipc_buffer_mut(|ipc_buf| {
             ipc_buf.msg_regs_mut()[0] = entry_point as u64;
+            ipc_buf.msg_regs_mut()[1] = sp as u64;
             let msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf)?;
 

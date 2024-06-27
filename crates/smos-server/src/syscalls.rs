@@ -133,7 +133,8 @@ pub struct ConnDestroy {
 
 #[derive(Debug)]
 pub struct LoadComplete {
-	pub entry_point: usize
+	pub entry_point: usize,
+	pub sp: usize
 }
 
 // General invocation enum
@@ -474,13 +475,14 @@ mod SMOS_Invocation_Raw {
 				))
 			},
 			SMOSInvocation::LoadComplete => {
-				if info.length() != 1 {
+				if info.length() != 2 {
 					return Err(InvocationError::InvalidArguments);
 				}
 
 				Ok(SMOS_Invocation::LoadComplete(
 					LoadComplete {
-						entry_point: f_msg(0) as usize
+						entry_point: f_msg(0) as usize,
+						sp: f_msg(1) as usize
 					}
 				))
 			}
