@@ -56,7 +56,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
 
     /* Check that argc == 2 */
     let args: Vec<&str> = smos_runtime::args::args().collect();
-    assert!(args.len() == 2);
+    assert!(args.len() >= 2);
     sel4::debug_println!("Hello world! I am loading the executable {} from {}", args[0], args[1]);
 
     /* Set up connection to file server */
@@ -141,6 +141,35 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
 
     let mut curr_sp = STACK_TOP as *mut u8;
     let mut argv: Vec<u64> = Vec::new();
+    let mut envp: Vec<u64> = Vec::new();
+
+    let envp_ptr = {
+        /* Write STACK_TOP */
+        curr_sp = unsafe {curr_sp.sub(8)};
+        byteorder::LittleEndian::write_u64_into(&[0xA0000000], unsafe {core::slice::from_raw_parts_mut(curr_sp, 8)});
+        envp.push(curr_sp as u64);
+
+        /* Write IPC buffer address */
+        curr_sp = unsafe {curr_sp.sub(8)};
+        byteorder::LittleEndian::write_u64_into(&[smos_runtime::env::ipc_buffer() as u64],
+                                                unsafe {core::slice::from_raw_parts_mut(curr_sp, 8)});
+        envp.push(curr_sp as u64);
+
+        /* Write the address of the shared buffer between to the RS */
+        curr_sp = unsafe {curr_sp.sub(8)};
+        byteorder::LittleEndian::write_u64_into(&[smos_runtime::env::rs_shared_buf() as u64],
+                                                unsafe {core::slice::from_raw_parts_mut(curr_sp, 8)});
+        envp.push(curr_sp as u64);
+
+        /* Add null terminator to envp */
+        envp.push(0);
+
+        /* Write envp array to stack */
+        curr_sp = unsafe { curr_sp.sub(envp.len() * 8) };
+        byteorder::LittleEndian::write_u64_into(&envp, unsafe { core::slice::from_raw_parts_mut(curr_sp, envp.len() * 8)});
+
+        curr_sp
+    };
 
     let argv_ptr = if args[2..].len() > 0 {
         /* Copy args onto the stack */
@@ -161,6 +190,10 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     } else {
         core::ptr::null()
     };
+
+    /* Write ptr to envp on the stack */
+    curr_sp = unsafe { curr_sp.sub(8) };
+    byteorder::LittleEndian::write_u64_into(&[envp_ptr as u64], unsafe {core::slice::from_raw_parts_mut(curr_sp, 8) });
 
     /* Write ptr to argv on the stack*/
     curr_sp = unsafe { curr_sp.sub(8) };

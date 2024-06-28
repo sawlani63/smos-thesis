@@ -4,6 +4,7 @@ use core::fmt;
 
 mod entry;
 pub mod args;
+pub mod env;
 
 pub use smos_macros::smos_declare_main;
 pub use entry::run_main;

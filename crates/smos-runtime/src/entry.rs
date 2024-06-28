@@ -11,11 +11,7 @@ use smos_common::local_handle::{LocalHandle, ConnectionHandle};
 use linked_list_allocator::LockedHeap;
 use smos_common::string::rust_str_from_buffer;
 use crate::args::init_args;
-
-// @alwin: should this be passed on the stack somehow? I think yes, but I'm not too sure how yet (
-// at least with minimal changes and hackery around the initialize_tls_on_stack thing)
-pub const IPC_BUFFER: *mut sel4::IpcBuffer =    0xA0000000 as *mut sel4::IpcBuffer;
-pub const RS_SHARED_BUFFER: *mut u8 =           0xA0001000 as *mut u8;
+use crate::env;
 
 // @alwin: Do this more properly. Map in a heap from the root server and initialize this
 // instead
@@ -34,6 +30,7 @@ global_asm! {
         _start:
             ldrsw x0, [sp]
             ldr x1, [sp, #4]
+            ldr x2, [sp, #12]
             b sel4_runtime_rust_entry
 
             1: b 1b
@@ -49,12 +46,13 @@ sel4_panicking_env::register_debug_put_char!(sel4::debug_put_char);
 enum Never {}
 
 #[no_mangle]
-unsafe extern "C" fn sel4_runtime_rust_entry(argc: u32, argv: *const u8) -> ! {
+unsafe extern "C" fn sel4_runtime_rust_entry(argc: u32, argv: *const u8, envp: *const u8) -> ! {
     unsafe extern "C" fn cont_fn(_cont_arg: *mut sel4_runtime_common::ContArg) -> ! {
         inner_entry()
     }
 
     unsafe { init_args(argc as usize, argv) };
+    unsafe { env::init_env(envp) };
     sel4_runtime_common::initialize_tls_on_stack_and_continue(cont_fn, ptr::null_mut())
 }
 
@@ -69,7 +67,7 @@ pub fn run_main<T>(
     }
 
     unsafe {
-        ::sel4::set_ipc_buffer(IPC_BUFFER.as_mut().unwrap());
+        ::sel4::set_ipc_buffer((env::ipc_buffer() as *mut sel4::IpcBuffer).as_mut().unwrap());
         ::sel4_runtime_common::run_ctors();
     }
 
@@ -97,7 +95,7 @@ pub fn run_main<T>(
     // @alwin: Use some constant instread for page size
     let conn = RootServerConnection::new(smos_common::init::slot::RS_EP.cap(),
                                          LocalHandle::<ConnectionHandle>::new(0),
-                                         Some((RS_SHARED_BUFFER, 4096)));
+                                         Some((env::rs_shared_buf() as *mut u8, 4096)));
 
     // @alwin: Revisit this: I don't really get unwinding
     // match catch_unwind(f, cspace) {

@@ -166,7 +166,32 @@ impl UserProcess {
                                loader_args: Option<Vec<&str>>, exec_args: Option<Vec<String>>) -> usize {
 
         let mut argv: Vec<u64> = Vec::new();
+        let mut envp: Vec<u64> = Vec::new();
         let mut curr_stack_vaddr = vmem_layout::PROCESS_STACK_TOP;
+
+        let envp_ptr = {
+            /* envp looks like the following */
+            /* [STACK_TOP, IPC_BUFFER_ADDR, RS_SHARED_BUF, NULL] */
+            curr_stack_vaddr = curr_stack_vaddr - 8;
+            self.write_words_to_stack(frame_table, &stack, curr_stack_vaddr, &[crate::vmem_layout::PROCESS_STACK_TOP as u64]);
+            envp.push(curr_stack_vaddr as u64);
+
+            curr_stack_vaddr = curr_stack_vaddr - 8;
+            self.write_words_to_stack(frame_table, &stack, curr_stack_vaddr, &[crate::vmem_layout::PROCESS_IPC_BUFFER as u64]);
+            envp.push(curr_stack_vaddr as u64);
+
+            curr_stack_vaddr = curr_stack_vaddr - 8;
+            self.write_words_to_stack(frame_table, &stack, curr_stack_vaddr, &[crate::vmem_layout::PROCESS_RS_DATA_TRANSFER_PAGE as u64]);
+            envp.push(curr_stack_vaddr as u64);
+
+            /* Add null terminator to envp */
+            envp.push(0);
+
+            curr_stack_vaddr = curr_stack_vaddr - (envp.len() * 8);
+            self.write_words_to_stack(frame_table, &stack, curr_stack_vaddr, &envp);
+
+            curr_stack_vaddr as u64
+        };
 
         let argv_ptr = if loader_args.is_some() || exec_args.is_some() {
             if loader_args.is_some() {
@@ -212,6 +237,11 @@ impl UserProcess {
 
         };
 
+        /* Write ptr to envp to stack */
+        curr_stack_vaddr = curr_stack_vaddr - 8;
+        self.write_words_to_stack(frame_table, &stack, curr_stack_vaddr, &[envp_ptr]);
+
+        /* Write ptr to argv to stack */
         curr_stack_vaddr = curr_stack_vaddr - 8;
         self.write_words_to_stack(frame_table, &stack, curr_stack_vaddr, &[argv_ptr]);
 

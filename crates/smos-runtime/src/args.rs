@@ -31,7 +31,7 @@ impl Iterator for Args {
 	}
 
 	fn size_hint(&self) -> (usize, Option<usize>) {
-		return self.inner.size_hint();
+		self.inner.size_hint()
 	}
 }
 
@@ -40,7 +40,8 @@ impl<'a> Iterator for ArgsInner {
 
 	fn next(&mut self) -> Option<&'static str> {
 		if self.index < self.size {
-            let slice = unsafe { core::slice::from_raw_parts(self.inner[self.index] as *const u8, 0x90000000 - self.inner[self.index] as usize) };
+            let slice = unsafe { core::slice::from_raw_parts(self.inner[self.index] as *const u8,
+            												 crate::env::stack_top() - self.inner[self.index] as usize) };
             let result = Some(rust_str_from_buffer(slice).ok()?.0);
 			self.index += 1;
 			result
@@ -50,7 +51,7 @@ impl<'a> Iterator for ArgsInner {
 	}
 
 	fn size_hint(&self) -> (usize, Option<usize>) {
-		return (self.size - self.index, Some(self.size - self.index));
+		(self.size - self.index, Some(self.size - self.index))
 	}
 }
 

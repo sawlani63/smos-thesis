@@ -26,7 +26,8 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     // let msg_info = sel4::MessageInfoBuilder::default().label(1).length(1).build();
     // root_server_ep.call(msg_info);
 
-    sel4::debug_println!("Hello world! I am test_app ^_^!");
+    sel4::debug_println!("Hello world! I am test_app ^_^! I got arg[0] = {}",
+                         smos_runtime::args::args().nth(0).unwrap());
 
     // let slot = cspace.alloc_slot().expect("Failed to alloc slot");
     // let window_hndl_cap = rs_conn.window_create(0xA0000000, 4096, Some(cspace.to_absolute_cptr(slot))).expect("blah");
