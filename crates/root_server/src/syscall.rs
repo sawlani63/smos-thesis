@@ -61,6 +61,7 @@ pub fn handle_syscall(msg: sel4::MessageInfo, pid: usize, cspace: &mut CSpace, f
         SMOS_Invocation::Unview(t) => handle_unview(cspace, &mut p, &t),
         SMOS_Invocation::ConnPublish(t) => handle_conn_publish(cspace, ut_table, frame_table, &mut p, t),
         SMOS_Invocation::ReplyCreate => handle_reply_create(cspace, ut_table, &mut p),
+        SMOS_Invocation::ServerHandleCapCreate(t) => handle_server_handle_cap_create(cspace, &mut p, &t),
         SMOS_Invocation::ProcessSpawn(t) => handle_process_spawn(cspace, ut_table, frame_table, sched_control, ep, &mut p, t),
         SMOS_Invocation::LoadComplete(t) => handle_load_complete(cspace, frame_table, &mut p, t),
         SMOS_Invocation::ConnRegister(t) => handle_conn_register(&mut p, &t),

@@ -80,7 +80,15 @@ pub fn generic_get_handle<'a, 'b: 'a, Y: HandleInner, X: HandleAllocater<Y>>(p: 
     match hndl {
         ServerReceivedHandleOrHandleCap::Handle(x) => p.get_handle_mut(x.idx).map_err(|_| InvocationError::InvalidHandle{ which_arg: which_arg}),
         ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(x) => handle_cap_table.get_handle_cap_mut(x.idx).map_err(|_| InvocationError::InvalidHandleCapability {which_arg: which_arg}),
-        ServerReceivedHandleOrHandleCap::WrappedHandleCap(x) => panic!("Should never be calling this on an unwrapped handle cap")
+        ServerReceivedHandleOrHandleCap::WrappedHandleCap(x) => panic!("Should never be calling this on an wrapped handle cap")
+    }
+}
+
+pub fn generic_invalid_handle_error(hndl: ServerReceivedHandleOrHandleCap, which_arg: usize) -> InvocationError {
+    match hndl {
+        ServerReceivedHandleOrHandleCap::Handle(x) => InvocationError::InvalidHandle {which_arg: which_arg},
+        ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(x) => InvocationError::InvalidHandleCapability {which_arg: which_arg},
+        _ => panic!("We should not get an unwrapped handle cap here")
     }
 }
 
@@ -90,6 +98,6 @@ pub fn generic_cleanup_handle<'a, 'b: 'a, Y: HandleInner, X: HandleAllocater<Y>>
     match hndl {
         ServerReceivedHandleOrHandleCap::Handle(x) => p.cleanup_handle(x.idx).map_err(|_| InvocationError::InvalidHandle{ which_arg: which_arg}),
         ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(x) => handle_cap_table.cleanup_handle_cap(x.idx).map_err(|_| InvocationError::InvalidHandleCapability {which_arg: which_arg}),
-        ServerReceivedHandleOrHandleCap::WrappedHandleCap(x) => panic!("Should never be calling this on an unwrapped handle cap")
+        ServerReceivedHandleOrHandleCap::WrappedHandleCap(x) => panic!("Should never be calling this on an wrapped handle cap")
     }
 }

@@ -12,6 +12,7 @@ pub struct HandleCapabilityTable<T: HandleInner> {
 }
 
 impl<T: HandleInner> HandleCapabilityTable<T> {
+	// @alwin: Could this be a &[HandleCapability<T>]
 	pub fn new(slots: Vec<HandleCapability<T>>) -> Self {
 		return HandleCapabilityTable {
 			slots: slots

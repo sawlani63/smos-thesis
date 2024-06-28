@@ -30,6 +30,8 @@ pub enum SMOSInvocation {
 	ProcCreateComplete, // @alwin: needed? You can probably just jump to the application from the loader
 	ReplyCreate, // @alwin: This is used for making reply objects, but I think this should be a general function kinda like untyped retype
 	ReplyDestroy, // @alwin: as previous
+	ServerHandleCapCreate,
+	ServerHandleCapDestroy,
 	DirOpen,
 	DirClose,
 	DirRead,

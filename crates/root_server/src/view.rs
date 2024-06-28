@@ -1,5 +1,6 @@
 use crate::handle::RootServerResource;
-use smos_server::handle::{generic_allocate_handle, generic_get_handle, generic_cleanup_handle, HandleAllocater, ServerHandle};
+use smos_server::handle::{generic_allocate_handle, generic_get_handle, generic_cleanup_handle,
+						  generic_invalid_handle_error, HandleAllocater, ServerHandle};
 use crate::window::Window;
 use crate::object::{AnonymousMemoryObject, OBJ_MAX_FRAMES};
 use alloc::rc::Rc;
@@ -37,25 +38,13 @@ pub fn handle_view(p: &mut UserProcess, handle_cap_table: &mut HandleCapabilityT
     let window_ref = generic_get_handle(p, handle_cap_table, args.window, ViewArgs::Window as usize)?;
     let window: Rc<RefCell<Window>> = match window_ref.as_ref().unwrap().inner() {
         RootServerResource::Window(win) => Ok(win.clone()),
-        _ => {
-            match args.window {
-                ServerReceivedHandleOrHandleCap::Handle(x) => Err(InvocationError::InvalidHandle {which_arg: ViewArgs::Window as usize}),
-                ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(x) => Err(InvocationError::InvalidHandleCapability {which_arg: ViewArgs::Window as usize}),
-                _ => panic!("We should not get an unwrapped handle cap here")
-            }
-        }
+        _ => Err(generic_invalid_handle_error(args.window, ViewArgs::Window as usize)),
     }?;
 
     let object_ref = generic_get_handle(p, handle_cap_table, args.object, ViewArgs::Object as usize)?;
     let object: Rc<RefCell<AnonymousMemoryObject>> = match object_ref.as_ref().unwrap().inner() {
         RootServerResource::Object(obj) => Ok(obj.clone()),
-        _ => {
-            match args.object {
-                ServerReceivedHandleOrHandleCap::Handle(x) => Err(InvocationError::InvalidHandle {which_arg: ViewArgs::Object as usize}),
-                ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(x) => Err(InvocationError::InvalidHandleCapability {which_arg: ViewArgs::Object as usize}),
-                _ => panic!("We should not get an unwrapped handle cap here")
-            }
-        }
+        _ => Err(generic_invalid_handle_error(args.object, ViewArgs::Object as usize)),
     }?;
 
 	/* Ensure the size is non-zero */

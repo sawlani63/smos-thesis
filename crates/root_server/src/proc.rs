@@ -246,7 +246,6 @@ impl UserProcess {
         self.write_words_to_stack(frame_table, &stack, curr_stack_vaddr, &[argv_ptr]);
 
         /* Write argc to stack */
-        // @alwin: Do we need to word align?
         curr_stack_vaddr = curr_stack_vaddr - 4;
         self.write_half_words_to_stack(frame_table, &stack, curr_stack_vaddr, &[argv.len().try_into().unwrap()]);
 

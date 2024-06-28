@@ -27,6 +27,10 @@ pub struct ReplyHandle {}
 impl HandleType for ReplyHandle {}
 
 #[derive(Debug, Clone)]
+pub struct HandleCapHandle {}
+impl HandleType for HandleCapHandle {}
+
+#[derive(Debug, Clone)]
 pub struct ProcessHandle {}
 impl HandleType for ProcessHandle {}
 

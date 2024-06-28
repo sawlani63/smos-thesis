@@ -44,7 +44,8 @@ pub enum RootServerResource {
     Connection(Rc<RefCell<Connection>>), // Does this need a refcell?
     Server(Rc<RefCell<Server>>),
     Process(Rc<RefCell<UserProcess>>),
-    Reply((sel4::cap::Reply, UTWrapper))
+    Reply((sel4::cap::Reply, UTWrapper)),
+    HandleCap(sel4::cap::Endpoint),
 }
 
 impl HandleInner for RootServerResource {}

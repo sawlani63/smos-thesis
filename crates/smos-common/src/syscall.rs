@@ -8,7 +8,7 @@ use crate::error::{*};
 use crate::string::copy_terminated_rust_string_to_buffer;
 use crate::local_handle::{HandleOrHandleCap, LocalHandle, HandleCap, WindowHandle,
 						  ViewHandle, ObjectHandle, ProcessHandle, ConnRegistrationHandle,
-						  WindowRegistrationHandle, ConnectionHandle, PublishHandle};
+						  WindowRegistrationHandle, ConnectionHandle, PublishHandle, HandleCapHandle};
 use core::marker::PhantomData;
 use smos_cspace::SMOSUserCSpace;
 use crate::client_connection::{*};
@@ -271,6 +271,30 @@ pub trait RootServerInterface: ClientConnection {
 				handle: ipc_buf.msg_regs()[0] as usize,
 				cap: sel4::CPtr::from_bits(return_cap.path().bits()).cast()
 			})
+		});
+	}
+
+	fn server_handle_cap_create(&self, publish_hndl: &LocalHandle<ConnectionHandle>,        // \/ @alwin: This is super confusing
+						 ident: usize, return_slot: AbsoluteCPtr) -> Result<(LocalHandle<HandleCapHandle>, AbsoluteCPtr), InvocationError>{
+		let mut msginfo = sel4::MessageInfoBuilder::default()
+													.label(SMOSInvocation::ServerHandleCapCreate as u64)
+													.length(2)
+													.build();
+
+		return sel4::with_ipc_buffer_mut(|ipc_buf| {
+			ipc_buf.set_recv_slot(&return_slot);
+
+			ipc_buf.msg_regs_mut()[0] = publish_hndl.idx as u64;
+			ipc_buf.msg_regs_mut()[1] = ident as u64;
+
+			msginfo = self.ep().call(msginfo);
+			try_unpack_error(msginfo.label(), ipc_buf)?;
+
+			if msginfo.extra_caps() != 1 || msginfo.caps_unwrapped() != 0 || msginfo.length() != 1 {
+				return Err(InvocationError::ServerError);
+			}
+
+			Ok((LocalHandle::<HandleCapHandle>::new(ipc_buf.msg_regs()[0] as usize), return_slot))
 		});
 	}
 

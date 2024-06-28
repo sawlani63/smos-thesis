@@ -16,10 +16,12 @@ use smos_common::util::ROUND_UP;
 use smos_server::error::{*};
 use smos_server::event::{decode_entry_type, EntryType};
 use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
-use smos_server::handle::{HandleInner, ServerHandle, HandleAllocater};
+use smos_server::handle::{HandleInner, ServerHandle, HandleAllocater, generic_allocate_handle, generic_get_handle,
+                          generic_invalid_handle_error, generic_cleanup_handle};
 use smos_common::local_handle::{HandleOrHandleCap, WindowHandle, ObjectHandle, ViewHandle,
                                 LocalHandle, WindowRegistrationHandle, ConnectionHandle,
                                 ConnRegistrationHandle};
+use smos_server::handle_capability::{HandleCapability, HandleCapabilityTable};
 use core::cell::RefCell;
 extern crate alloc;
 use alloc::rc::Rc;
@@ -28,9 +30,9 @@ use smos_server::ntfn_buffer::{*};
 use core::ptr::NonNull;
 
 
-// @alwin: Should really make sure nothing else starts on the same page as this ELF to prevent
-// information leakage. Maybe if another page aligned 'guard page' is added? Kinda relying on the
-// behaviour of the compiler
+// @alwin: Should really make sure nothing else starts on the same page as this ELF finishes
+// to prevent information leakage. Maybe if another page aligned 'guard page' is added? Kinda
+// relying on the behaviour of the compiler
 
 const NUM_FILES: usize = 1;
 const TEST_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("TEST_ELF"));
@@ -131,23 +133,15 @@ fn find_client_slot() -> Option<&'static mut Option<Client>> {
     return None;
 }
 
-fn handle_obj_stat(client: &mut Client, args: &ObjStat) -> Result<SMOSReply, InvocationError> {
+fn handle_obj_stat(client: &mut Client, handle_cap_table: &mut HandleCapabilityTable<BFSResource>,
+                   args: &ObjStat) -> Result<SMOSReply, InvocationError> {
 
-    let hndl = match args.hndl {
-        ServerReceivedHandleOrHandleCap::Handle(x) => {
-            client.get_handle(x.idx).or(Err(InvocationError::InvalidArguments))?
-        },
-        ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(x) => {
-            /* @alwin: Figure out how to deal with handle caps */
-            todo!()
-        }
-        _ => panic!("Should never recieve a wrapped handle cap. @alwin: Maybe make a new type ServerRecievedLocalHandleOrUnwrappedHandleCap for this kind of case"),
-    };
+    let hndl_ref = generic_get_handle(client, handle_cap_table, args.hndl, 0)?;
 
-    let object = match hndl.as_ref().unwrap().inner() {
-        BFSResource::Object(obj) => obj.clone(),
-        _ => todo!() //@alwin: Deal with when wrong kind of handle is passed in
-    };
+    let object = match hndl_ref.as_ref().unwrap().inner() {
+        BFSResource::Object(obj) => Ok(obj.clone()),
+        _ => Err(generic_invalid_handle_error(args.hndl, 0)),
+    }?;
 
     let size = object.borrow().file.data.len();
     Ok(SMOSReply::ObjStat {
@@ -157,7 +151,9 @@ fn handle_obj_stat(client: &mut Client, args: &ObjStat) -> Result<SMOSReply, Inv
     })
 }
 
-fn handle_obj_open(client: &mut Client, args: &ObjOpen) -> Result<SMOSReply, InvocationError> {
+fn handle_obj_open(client: &mut Client, handle_cap_table: &mut HandleCapabilityTable<BFSResource>,
+                   args: &ObjOpen) -> Result<SMOSReply, InvocationError> {
+
     let mut matched_file = None;
 
     unsafe {
@@ -178,7 +174,7 @@ fn handle_obj_open(client: &mut Client, args: &ObjOpen) -> Result<SMOSReply, Inv
         return Err(InvocationError::InvalidArguments);
     }
 
-    let (idx, handle_ref) = client.allocate_handle()?;
+    let (idx, handle_ref, cptr) = generic_allocate_handle(client, handle_cap_table, args.return_cap)?;
 
     let object = Rc::new(RefCell::new(
             Object {
@@ -189,27 +185,25 @@ fn handle_obj_open(client: &mut Client, args: &ObjOpen) -> Result<SMOSReply, Inv
 
     *handle_ref = Some(ServerHandle::<BFSResource>::new(BFSResource::Object(object)));
 
-    // @alwin: Deal with handle caps
+    let ret = if args.return_cap {
+        HandleOrHandleCap::<ObjectHandle>::new_handle_cap(cptr.unwrap())
+    } else {
+        HandleOrHandleCap::<ObjectHandle>::new_handle(idx)
+    };
+
     Ok(SMOSReply::ObjOpen {
-        hndl: HandleOrHandleCap::new_handle(idx)
+        hndl: ret
     })
 }
 
-fn handle_obj_close(client: &mut Client, args: &ObjClose) -> Result<SMOSReply, InvocationError> {
-    let obj_ref = match args.hndl {
-        ServerReceivedHandleOrHandleCap::Handle(x) => {
-            client.get_handle_mut(x.idx).or(Err(InvocationError::InvalidArguments))
-        },
-        ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(x) => {
-            /* @alwin: Figure out how to deal with handle caps */
-            todo!()
-        },
-        _ => panic!("Should never recieve a wrapped handle cap. @alwin: Maybe make a new type ServerRecievedLocalHandleOrUnwrappedHandleCap for this kind of case"),
-    }?;
+fn handle_obj_close(client: &mut Client, handle_cap_table: &mut HandleCapabilityTable<BFSResource>,
+                    args: &ObjClose) -> Result<SMOSReply, InvocationError> {
+
+    let obj_ref = generic_get_handle(client, handle_cap_table, args.hndl, 0)?;
 
     let object = match obj_ref.as_ref().unwrap().inner() {
         BFSResource::Object(obj) => Ok(obj.clone()),
-        _ => Err(InvocationError::InvalidArguments)
+        _ => Err(generic_invalid_handle_error(args.hndl, 0)),
     }?;
 
     if !object.borrow().associated_views.is_empty() {
@@ -217,13 +211,14 @@ fn handle_obj_close(client: &mut Client, args: &ObjClose) -> Result<SMOSReply, I
         todo!();
     }
 
-    *obj_ref = None;
+    generic_cleanup_handle(client, handle_cap_table, args.hndl, 0);
 
     return Ok(SMOSReply::ObjClose);
 }
 
 fn handle_view(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<ConnectionHandle>,
-               client: &mut Client, args: &View) -> Result<SMOSReply, InvocationError> {
+               handle_cap_table: &mut HandleCapabilityTable<BFSResource>, client: &mut Client,
+               args: &View) -> Result<SMOSReply, InvocationError> {
 
     /* This should always be a wrapped handle cap (for a server that isn't the root-server ) */
     // @alwin: I wonder if it's worth having two versions of the invocation unwrapping stubs,
@@ -231,18 +226,9 @@ fn handle_view(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<Connec
     let window: smos_common::local_handle::HandleCap<WindowHandle> = args.window.try_into()
                                                                                 .or(Err(InvocationError::InvalidArguments))?;
 
-    let obj_handle = match args.object {
-        ServerReceivedHandleOrHandleCap::Handle(x) => {
-            client.get_handle(x.idx).or(Err(InvocationError::InvalidArguments))?.as_ref().unwrap()
-        },
-        ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(x) => {
-            /* @alwin: Figure out how to deal with handle caps */
-            todo!()
-        }
-        _ => panic!("Should never recieve a wrapped handle cap. @alwin: Maybe make a new type ServerRecievedLocalHandleOrUnwrappedHandleCap for this kind of case"),
-    };
+    let obj_handle = generic_get_handle(client, handle_cap_table, args.object, 1)?;
 
-    let object = match obj_handle.inner() {
+    let object = match obj_handle.as_ref().unwrap().inner() {
         BFSResource::Object(obj) => Ok(obj.clone()),
         _ => Err(InvocationError::InvalidArguments)
     }?;
@@ -251,9 +237,6 @@ fn handle_view(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<Connec
     let (idx, handle_ref) = client.allocate_handle()?;
 
     let reg_hndl = rs_conn.window_register(publish_hdnl, &window, client_id, idx)?;
-
-/* @alwin: This might fail because the cap given was not a valid window handle cap. In this case,
-       we should delete the cap and free the slot (actually, we should probably do this regardless) */
 
     let view = Rc::new( RefCell::new(
         ViewData {
@@ -265,8 +248,6 @@ fn handle_view(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<Connec
             registration_hndl: reg_hndl
         }
     ));
-
-    // @alwin: Deal with proper error handling and cleanup
 
     object.borrow_mut().associated_views.push(view.clone());
 
@@ -301,7 +282,7 @@ fn handle_conn_open(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<C
 
     let shared_buffer: Option<(*mut u8, usize, HandleOrHandleCap<WindowHandle>, LocalHandle<ViewHandle>)>;
     if let Some(sb) = args.shared_buf_obj {
-        // @alwin: This server arbitrarily only supports windows of size 4K
+        // This server arbitrarily only supports windows of size 4K
         if sb.1 % 4096 != 0 {
             return Err(InvocationError::AlignmentError{ which_arg: 0});
         }
@@ -320,15 +301,13 @@ fn handle_conn_open(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<C
 
         /* Create a view for the shared buffer*/
         let view_hndl = rs_conn.view(&window_hndl, &sb.0.try_into().or(Err(InvocationError::InvalidArguments))?, 0, 0, 4096, sel4::CapRights::all())?;
-        /* @alwin: This might fail because the cap given was not a valid window handle cap. In this case,
-           we should delete the cap and free the slot (actually, we should probably do this regardless) */
 
         shared_buffer = Some((SHARED_BUFFER_BASE, sb.1, window_hndl, view_hndl));
     } else {
         shared_buffer = None;
     }
 
-    let registration_handle = rs_conn.conn_register(publish_hdnl, id).expect("@alwin: CAn this be an assert?");
+    let registration_handle = rs_conn.conn_register(publish_hdnl, id).expect("@alwin: can this be an assert?");
     const HANDLE_REPEAT_VALUE: Option<ServerHandle<BFSResource>> = None;
     const VIEW_REPEAT_VALUE: Option<Rc<RefCell<ViewData>>> = None;
 
@@ -392,8 +371,9 @@ fn handle_conn_destroy_ntfn(rs_conn: &RootServerConnection, args: ConnDestroyNot
 
     for handle in client.handle_table() {
         if handle.is_some() {
-            sel4::debug_println!("Not all handles have been cleaned up!");
             // @alwin: Should probably do some kind of cleanup here
+            sel4::debug_println!("Not all handles have been cleaned up!");
+            todo!();
         }
     }
 
@@ -433,13 +413,8 @@ fn handle_notification(rs_conn: &RootServerConnection) {
 
 fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace, listen_conn: T, reply: ReplyWrapper) {
 
+    let mut handle_cap_table = init_handle_cap_table(&mut cspace, &rs_conn, &listen_conn);
     let mut reply_msg_info = None;
-
-    /* @alwin: What should be responsible for deciding whether to allocate a new slot? I think it
-       is least error-prone if it is done by SMOS_Invocation::new(). If the handlers use the recieved
-       cap and decide they don't need it anymore, they can just delete and free it and this can just
-       be re-used anyway. */
-
     let mut recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
     let mut recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
     sel4::with_ipc_buffer_mut(|ipc_buf| {
@@ -460,7 +435,6 @@ fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: 
                 handle_notification(&rs_conn);
                 reply_msg_info = None;
             },
-            // EntryType::Ntfn => todo!(),
             EntryType::Fault(_x) => todo!(),
             EntryType::Invocation(id) => {
                 let client = find_client_from_id(id);
@@ -509,7 +483,6 @@ fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: 
                     todo!()
                 }
 
-                // @alwin: I think this is rather ugly
                 let ret = if matches!(invocation, Ok(SMOS_Invocation::ConnOpen(ref t))) {
                     match invocation.unwrap() {
                         SMOS_Invocation::ConnOpen(t) => handle_conn_open(&rs_conn, listen_conn.hndl(), id, t),
@@ -523,16 +496,17 @@ fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: 
                     match invocation.unwrap() {
                         SMOS_Invocation::ConnOpen(_) => panic!("conn_open should never be handled here"),
                         SMOS_Invocation::ConnClose => handle_conn_close(&rs_conn, client_unwrapped),
-                        SMOS_Invocation::ObjOpen(t) => handle_obj_open(client_unwrapped, &t),
-                        SMOS_Invocation::ObjClose(t) => handle_obj_close(client_unwrapped, &t),
-                        SMOS_Invocation::ObjStat(t) => handle_obj_stat(client_unwrapped, &t),
-                        SMOS_Invocation::View(t) => handle_view(&rs_conn, listen_conn.hndl(), client_unwrapped, &t),
+                        SMOS_Invocation::ObjOpen(t) => handle_obj_open(client_unwrapped, &mut handle_cap_table, &t),
+                        SMOS_Invocation::ObjClose(t) => handle_obj_close(client_unwrapped, &mut handle_cap_table, &t),
+                        SMOS_Invocation::ObjStat(t) => handle_obj_stat(client_unwrapped, &mut handle_cap_table, &t),
+                        SMOS_Invocation::View(t) => handle_view(&rs_conn, listen_conn.hndl(), &mut handle_cap_table, client_unwrapped, &t),
                         SMOS_Invocation::Unview(t) => handle_unview(&rs_conn, client_unwrapped, &t),
                         _ => todo!()
                     }
                 };
 
-                // @alwin: I'm pretty sure the BFS never needs to hold on to any caps it recieves
+                /* We delete any cap that was recieved. If a handler wants to hold onto a cap, it
+                   is their responsibility to copy it somewhere else */
                 if consumed_cap {
                     recv_slot.delete();
                 }
@@ -552,6 +526,22 @@ fn init_file_table() {
     }
 }
 
+fn init_handle_cap_table<T: ServerConnection>(cspace: &mut SMOSUserCSpace, rs_conn: &RootServerConnection,
+                                              listen_conn: &T) -> HandleCapabilityTable<BFSResource> {
+    const MAX_HANDLE_CAPS: usize = 16;
+    let mut handle_cap_table_inner: Vec<HandleCapability<BFSResource>> = Vec::new();
+    for i in 0..MAX_HANDLE_CAPS {
+        let slot = cspace.alloc_slot().expect("Could not get a slot");
+        rs_conn.server_handle_cap_create(&listen_conn.hndl(), i, cspace.to_absolute_cptr(slot)).expect("Failed to create handle capability");
+        handle_cap_table_inner.push( HandleCapability {
+            handle: None,
+            root_cap: Some(cspace.to_absolute_cptr(slot))
+        });
+    }
+
+    return HandleCapabilityTable::new(handle_cap_table_inner);
+}
+
 #[smos_declare_main]
 fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Result<Never> {
 
@@ -569,7 +559,6 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     /* Start the other relavant processes */
     rs_conn.process_spawn("test_app", "BOOT_FS", Some(&["test"]));
 
-    /* @alwin: Idk if this is the best way to do this */
     let reply_cptr = cspace.alloc_slot().expect("Could not get a slot");
     let reply = rs_conn.reply_create(cspace.to_absolute_cptr(reply_cptr)).expect("Could not create reply object");
 

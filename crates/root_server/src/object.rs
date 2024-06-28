@@ -13,7 +13,8 @@ use smos_server::reply::SMOSReply;
 use smos_common::error::InvocationError;
 use smos_server::syscalls::{ObjCreate, ObjDestroy};
 use crate::PAGE_SIZE_4K;
-use smos_server::handle::{generic_allocate_handle, generic_get_handle, generic_cleanup_handle, ServerHandle};
+use smos_server::handle::{generic_allocate_handle, generic_get_handle, generic_cleanup_handle,
+						  generic_invalid_handle_error, ServerHandle};
 use smos_server::handle_capability::HandleCapabilityTable;
 use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
 
@@ -79,13 +80,7 @@ pub fn handle_obj_destroy(frame_table: &mut FrameTable, p: &mut UserProcess,
 	    /* Check that the handle refers to is an object */
     let object = match handle_ref.as_ref().unwrap().inner() {
         RootServerResource::Object(obj) => Ok(obj.clone()),
-        _ => {
-            match args.hndl {
-                ServerReceivedHandleOrHandleCap::Handle(x) => Err(InvocationError::InvalidHandle {which_arg: 0}),
-                ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(x) => Err(InvocationError::InvalidHandleCapability {which_arg: 0}),
-                _ => panic!("We should not get an unwrapped handle cap here")
-            }
-        }
+        _ => Err(generic_invalid_handle_error(args.hndl, 0)),
     }?;
 
     if !object.borrow().associated_views.is_empty() {

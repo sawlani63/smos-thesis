@@ -1,4 +1,5 @@
-use smos_server::syscalls::{ConnCreate, ConnPublish, ConnRegister, ConnDestroy, ConnDeregister};
+use smos_server::syscalls::{ConnCreate, ConnPublish, ConnRegister, ConnDestroy, ConnDeregister,
+							ServerHandleCapCreate};
 use crate::object::{AnonymousMemoryObject, OBJ_MAX_FRAMES};
 use crate::page::PAGE_SIZE_4K;
 use crate::proc::{UserProcess, procs_get};
@@ -30,7 +31,7 @@ use smos_common::local_handle::LocalHandle;
 pub struct Server {
 	name: String,
 	pid: usize,
-	unbadged_ep: (sel4::cap::Endpoint, UTWrapper),
+	pub unbadged_ep: (sel4::cap::Endpoint, UTWrapper),
 	unbadged_ntfn: (sel4::cap::Notification, UTWrapper),
 	pub badged_ntfn: sel4::cap::Notification,
 	ntfn_buffer_view: Rc<RefCell<View>>,
@@ -176,6 +177,34 @@ pub fn handle_conn_destroy(cspace: &mut CSpace, p: &mut UserProcess, args: &Conn
 	p.cleanup_handle(args.hndl.idx);
 
 	return Ok(SMOSReply::ConnDestroy);
+}
+
+pub fn handle_server_handle_cap_create(cspace: &mut CSpace, p: &mut UserProcess,
+								args: &ServerHandleCapCreate) -> Result<SMOSReply, InvocationError> {
+
+	let server_ref = p.get_handle_mut(args.publish_hndl.idx).or(Err(InvocationError::InvalidHandle {which_arg: 0}))?;
+	let server: Rc<RefCell<Server>> = match server_ref.as_ref().unwrap().inner() {
+		RootServerResource::Server(sv) => Ok(sv.clone()),
+		_ => Err(InvocationError::InvalidHandle{ which_arg: 0})
+	}?;
+
+	let badged_cap = cspace.alloc_cap::<sel4::cap_type::Endpoint>().or(Err(InvocationError::InsufficientResources))?;
+	cspace.root_cnode.relative(badged_cap).mint(&cspace.root_cnode().relative(server.borrow().unbadged_ep.0),
+													   sel4::CapRights::none(),
+													   args.ident as u64).map_err(|_| {
+		cspace.free_cap(badged_cap);
+		InvocationError::InsufficientResources
+   })?;
+
+	let (idx, handle_ref) = p.allocate_handle().map_err(|e| {
+		cspace.delete_cap(badged_cap);
+		cspace.free_cap(badged_cap);
+		e
+	})?;
+
+	*handle_ref = Some(ServerHandle::new(RootServerResource::HandleCap(badged_cap)));
+
+	return Ok(SMOSReply::ServerHandleCapCreate {hndl: LocalHandle::new(idx), cap: badged_cap});
 }
 
 pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,

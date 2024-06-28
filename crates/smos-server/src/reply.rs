@@ -1,6 +1,6 @@
 use smos_common::local_handle::{HandleOrHandleCap, LocalHandle, HandleCap, WindowHandle, ObjectHandle,
 								ConnectionHandle, HandleType, ViewHandle, ReplyHandle, ProcessHandle,
-								WindowRegistrationHandle, ConnRegistrationHandle};
+								WindowRegistrationHandle, ConnRegistrationHandle, HandleCapHandle};
 use smos_common::error::InvocationErrorLabel;
 use smos_common::returns::{*};
 
@@ -29,6 +29,10 @@ pub enum SMOSReply {
 	ConnCreate {
 		hndl: LocalHandle<ConnectionHandle>,
 		ep: sel4::cap::Endpoint
+	},
+	ServerHandleCapCreate {
+		hndl: LocalHandle<HandleCapHandle>,
+		cap: sel4::cap::Endpoint
 	},
 	ConnPublish {
 		hndl: LocalHandle<ConnectionHandle>,
@@ -93,6 +97,11 @@ pub fn handle_reply(ipc_buf: &mut sel4::IpcBuffer, reply_type: SMOSReply) -> sel
 			msginfo = msginfo.length(1).extra_caps(1);
 			ipc_buf.msg_regs_mut()[0] = hndl.idx as u64;
 			ipc_buf.caps_or_badges_mut()[0] = ep.bits();
+		},
+		SMOSReply::ServerHandleCapCreate{hndl, cap} => {
+			msginfo = msginfo.length(1).extra_caps(1);
+			ipc_buf.msg_regs_mut()[0] = hndl.idx as u64;
+			ipc_buf.caps_or_badges_mut()[0] = cap.bits();
 		},
 		SMOSReply::ConnPublish {hndl, ep} => {
 			msginfo = msginfo.length(1).extra_caps(1);

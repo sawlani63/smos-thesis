@@ -137,6 +137,12 @@ pub struct LoadComplete {
 	pub sp: usize
 }
 
+#[derive(Debug)]
+pub struct ServerHandleCapCreate {
+	pub publish_hndl: ReceivedHandle,
+	pub ident: usize,
+}
+
 // General invocation enum
 #[derive(Debug)]
 pub enum SMOS_Invocation {
@@ -157,6 +163,7 @@ pub enum SMOS_Invocation {
 	ConnRegister(ConnRegister),
 	ConnDeregister(ConnDeregister),
 	ReplyCreate,
+	ServerHandleCapCreate(ServerHandleCapCreate),
 	ProcessSpawn(ProcessSpawn),
 	WindowRegister(WindowRegister),
 	WindowDeregister(WindowDeregister),
@@ -535,6 +542,17 @@ mod SMOS_Invocation_Raw {
 			SMOSInvocation::ReplyCreate => {
 				Ok(SMOS_Invocation::ReplyCreate)
 			},
+			SMOSInvocation::ServerHandleCapCreate => {
+				if info.length() != 2 {
+					return Err(InvocationError::InvalidArguments);
+				}
+
+				Ok(SMOS_Invocation::ServerHandleCapCreate(
+					ServerHandleCapCreate {
+						publish_hndl: ReceivedHandle::new(f_msg(0) as usize),
+						ident: f_msg(1) as usize
+					}))
+			}
 			SMOSInvocation::ProcSpawn => {
 
 				if data_buffer.is_none() {
