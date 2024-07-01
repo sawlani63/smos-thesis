@@ -163,7 +163,7 @@ impl UserProcess {
     }
 
     pub fn write_args_to_stack(&self, frame_table: &mut FrameTable, stack: Rc<RefCell<Window>>,
-                               loader_args: Option<Vec<&str>>, exec_args: Option<Vec<String>>) -> usize {
+                               loader_args: Option<Vec<&str>>, exec_args: Option<Vec<&str>>) -> usize {
 
         let mut argv: Vec<u64> = Vec::new();
         let mut envp: Vec<u64> = Vec::new();
@@ -340,7 +340,7 @@ fn init_process_stack(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: 
 // @alwin: this leaks cslots and caps!
 pub fn start_process(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,
                      sched_control: sel4::cap::SchedControl, name: &str, ep: sel4::cap::Endpoint,
-                     elf_data: &[u8], loader_args: Option<Vec<&str>>, exec_args: Option<Vec<String>>)
+                     elf_data: &[u8], loader_args: Option<Vec<&str>>, exec_args: Option<Vec<&str>>)
                      -> Result<Rc<RefCell<UserProcess>>, sel4::Error> {
 
     /* We essentially use the position in the table as the pid. Don't think this is the right way to
@@ -762,7 +762,7 @@ pub fn handle_process_spawn(cspace: &mut CSpace, ut_table: &mut UTTable, frame_t
 
     let (idx, handle_ref) = p.allocate_handle()?;
 
-    let loader_args = Some(vec!{args.exec_name.as_str(), args.fs_name.as_str()});
+    let loader_args = Some(vec!{args.exec_name, args.fs_name});
     // @alwin: This is a lazy way of handling the error;
     let proc = start_process(cspace, ut_table, frame_table, sched_control,
                              &args.exec_name, ep, LOADER_CONTENTS, loader_args, args.args)

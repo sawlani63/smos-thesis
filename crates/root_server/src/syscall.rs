@@ -39,7 +39,14 @@ pub fn handle_syscall(msg: sel4::MessageInfo, pid: usize, cspace: &mut CSpace, f
 
     let mut p = procs_get_mut(pid).as_mut().expect("Was called with invalid badge").borrow_mut();
 
-    let (invocation, consumed_cap) = sel4::with_ipc_buffer(|buf| SMOS_Invocation::new::<RootServerConnection>(buf, &msg, Some(frame_table.frame_data(p.shared_buffer.1)), recv_slot));
+    /* Safety: It is necessary to construct this from a raw pointer because otherwise there is
+       an issue where frame table is borrowed as mutable and immutable at the same time. This is
+       still safe, because frame_data is static after it has been initialized and will never be
+       changed by an access to the frame table
+    */
+    let shared_buf = unsafe { &(*frame_table.frame_data_raw(p.shared_buffer.1)) };
+
+    let (invocation, consumed_cap) = sel4::with_ipc_buffer(|buf| SMOS_Invocation::new::<RootServerConnection>(buf, &msg, Some(shared_buf), recv_slot));
 
     // The user provided an invalid argument
     if invocation.is_err() {

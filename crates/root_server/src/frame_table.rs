@@ -105,6 +105,11 @@ impl FrameTable {
         return unsafe { &mut (*self.frame_data.wrapping_add(frame_ref.try_into().unwrap())) };
     }
 
+    pub fn frame_data_raw(self: &Self, frame_ref: FrameRef) -> *const FrameData {
+        assert!(frame_ref < self.capacity.try_into().unwrap());
+        return unsafe { self.frame_data.wrapping_add(frame_ref.try_into().unwrap()) };
+    }
+
     fn pop_front(self: &mut Self, list_id: ListID) -> Option<FrameWrapper> {
         let mut list = match list_id {
             ListID::FreeList => self.free,

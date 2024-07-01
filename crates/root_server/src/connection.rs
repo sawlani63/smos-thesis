@@ -66,7 +66,7 @@ fn find_empty_slot() -> Option<&'static mut Option<Rc<RefCell<Server>>>> {
 	return None;
 }
 
-fn find_server_with_name(name: &String) -> Option<Rc<RefCell<Server>>> {
+fn find_server_with_name(name: &str) -> Option<Rc<RefCell<Server>>> {
 	unsafe {
 		for server in servers.iter() {
 			match server {
@@ -124,7 +124,7 @@ pub fn handle_conn_create(cspace: &mut CSpace, p: &mut UserProcess, args: &ConnC
 	let pid = p.pid;
 
 
-    let server = find_server_with_name(&args.name).ok_or(InvocationError::InvalidArguments)?;
+    let server = find_server_with_name(args.name).ok_or(InvocationError::InvalidArguments)?;
     // @alwin: Ideally we would want to partition the RS cspace to prevent any one process from
     // being able to consume too much of it.
 
@@ -209,7 +209,7 @@ pub fn handle_server_handle_cap_create(cspace: &mut CSpace, p: &mut UserProcess,
 
 pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,
 						   p: &mut UserProcess, args: ConnPublish) -> Result<SMOSReply, InvocationError> {
-	if find_server_with_name(&args.name).is_some() {
+	if find_server_with_name(args.name).is_some() {
 		return Err(InvocationError::InvalidArguments);
 	}
 
@@ -315,7 +315,7 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
 
     let server = Rc::new(RefCell::new(Server {
     	pid: pid,
-    	name: args.name,
+    	name: args.name.to_string(),
     	unbadged_ep: ep,
     	unbadged_ntfn: ntfn,
     	badged_ntfn: badged_ntfn_cap,

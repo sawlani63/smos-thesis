@@ -28,8 +28,8 @@ pub struct WindowDestroy {
 }
 
 #[derive(Debug)]
-pub struct ObjCreate {
-	pub name: Option<String>,
+pub struct ObjCreate<'a> {
+	pub name: Option<&'a str>,
 	pub size: usize,
 	pub rights: sel4::CapRights,
 	pub return_cap: bool
@@ -41,8 +41,8 @@ pub struct ObjStat {
 }
 
 #[derive(Debug)]
-pub struct ObjOpen {
-	pub name: String,
+pub struct ObjOpen<'a> {
+	pub name: &'a str,
 	pub rights: sel4::CapRights,
 	pub return_cap: bool
 }
@@ -58,8 +58,8 @@ pub struct ObjDestroy {
 }
 
 #[derive(Debug)]
-pub struct ConnCreate {
-	pub name: String
+pub struct ConnCreate<'a> {
+	pub name: &'a str
 }
 
 #[derive(Debug)]
@@ -68,16 +68,16 @@ pub struct ConnOpen {
 }
 
 #[derive(Debug)]
-pub struct ConnPublish {
+pub struct ConnPublish<'a> {
 	pub ntfn_buffer: usize,
-	pub name: String
+	pub name: &'a str
 }
 
 #[derive(Debug)]
-pub struct ProcessSpawn {
-	pub exec_name: String,
-	pub fs_name: String,
-	pub args: Option<Vec<String>>
+pub struct ProcessSpawn<'a> {
+	pub exec_name: &'a str,
+	pub fs_name: &'a str,
+	pub args: Option<Vec<&'a str>>
 }
 
 #[derive(Debug)]
@@ -145,26 +145,26 @@ pub struct ServerHandleCapCreate {
 
 // General invocation enum
 #[derive(Debug)]
-pub enum SMOS_Invocation {
+pub enum SMOS_Invocation<'a> {
 	WindowCreate(WindowCreate),
 	WindowDestroy(WindowDestroy),
-	ObjCreate(ObjCreate),
-	ObjOpen(ObjOpen),
+	ObjCreate(ObjCreate<'a>),
+	ObjOpen(ObjOpen<'a>),
 	ObjStat(ObjStat),
 	ObjClose(ObjClose),
 	ObjDestroy(ObjDestroy),
 	View(View),
 	Unview(Unview),
-	ConnCreate(ConnCreate),
+	ConnCreate(ConnCreate<'a>),
 	ConnDestroy(ConnDestroy),
 	ConnOpen(ConnOpen),
 	ConnClose,
-	ConnPublish(ConnPublish),
+	ConnPublish(ConnPublish<'a>),
 	ConnRegister(ConnRegister),
 	ConnDeregister(ConnDeregister),
 	ReplyCreate,
 	ServerHandleCapCreate(ServerHandleCapCreate),
-	ProcessSpawn(ProcessSpawn),
+	ProcessSpawn(ProcessSpawn<'a>),
 	WindowRegister(WindowRegister),
 	WindowDeregister(WindowDeregister),
 	PageMap(PageMap),
@@ -172,9 +172,9 @@ pub enum SMOS_Invocation {
 }
 
 
-impl<'a> SMOS_Invocation {
+impl<'a> SMOS_Invocation<'a> {
 	pub fn new<T: ServerConnection>(ipc_buffer: &sel4::IpcBuffer, info: &sel4::MessageInfo,
-									data_buffer: Option<&[u8]>, recv_slot: AbsoluteCPtr) -> (Result<SMOS_Invocation, InvocationError>, bool) {
+									data_buffer: Option<&'a [u8]>, recv_slot: AbsoluteCPtr) -> (Result<SMOS_Invocation<'a>, InvocationError>, bool) {
 
 		return SMOS_Invocation_Raw::get_from_ipc_buffer::<T>(info, ipc_buffer, data_buffer, recv_slot);
 	}
@@ -185,8 +185,8 @@ mod SMOS_Invocation_Raw {
 	use alloc::boxed::Box;
 	use crate::syscalls::{*};
 
-	pub fn get_from_ipc_buffer<T: ServerConnection>(info: &sel4::MessageInfo, ipcbuf: &sel4::IpcBuffer,
-													data_buffer: Option<&[u8]>, recv_slot: AbsoluteCPtr) ->(Result<SMOS_Invocation, InvocationError>, bool) {
+	pub fn get_from_ipc_buffer<'a, T: ServerConnection>(info: &sel4::MessageInfo, ipcbuf: &sel4::IpcBuffer,
+														data_buffer: Option<&'a [u8]>, recv_slot: AbsoluteCPtr) ->(Result<SMOS_Invocation<'a>, InvocationError>, bool) {
 
 
 		/* We check if we recieved a capability in the recv slot. We return this to the caller.
@@ -218,11 +218,11 @@ mod SMOS_Invocation_Raw {
 	}
 
 	// @alwin: This is all kind of very ugly and very manual, but if we want to keep the API minimal, I think this is the only way
-	fn get_with(info: &sel4::MessageInfo,
-					  f_msg: impl Fn(core::ffi::c_ulong) -> sel4_sys::seL4_Word,
-					  f_cap: impl Fn(core::ffi::c_ulong) -> sel4_sys::seL4_Word,
-					  data_buffer: Option<&[u8]>, recv_slot: AbsoluteCPtr,
-					  consumed_recv_slot: &mut bool) -> Result<SMOS_Invocation, InvocationError> {
+	fn get_with<'a>(info: &sel4::MessageInfo,
+				f_msg: impl Fn(core::ffi::c_ulong) -> sel4_sys::seL4_Word,
+				f_cap: impl Fn(core::ffi::c_ulong) -> sel4_sys::seL4_Word,
+				data_buffer: Option<&'a [u8]>, recv_slot: AbsoluteCPtr,
+				consumed_recv_slot: &mut bool) -> Result<SMOS_Invocation<'a>, InvocationError> {
 
 		match info.label().try_into().or(Err(InvocationError::InvalidInvocation))? {
 			SMOSInvocation::WindowCreate => {
@@ -316,14 +316,9 @@ mod SMOS_Invocation_Raw {
 					return Err(InvocationError::DataBufferNotSet);
 				}
 
-				// @alwin: This should not do to_string(), because that has an unnecessary copy.
-				// Doing it properly involves lifetime wrangling that I do not want to deal with
-				// today.
-
-				// @alwin: idk about this, let's see
 				Ok(SMOS_Invocation::ConnCreate(
 					ConnCreate {
-						name: rust_str_from_buffer(data_buffer.unwrap())?.0.to_string(),
+						name: rust_str_from_buffer(data_buffer.unwrap())?.0,
 				}))
 			},
 			SMOSInvocation::ConnPublish => {
@@ -334,7 +329,7 @@ mod SMOS_Invocation_Raw {
 				Ok(SMOS_Invocation::ConnPublish(
 					ConnPublish {
 						ntfn_buffer: f_msg(0) as usize,
-						name: rust_str_from_buffer(data_buffer.unwrap())?.0.to_string(),
+						name: rust_str_from_buffer(data_buffer.unwrap())?.0,
 				}))
 			}
 			SMOSInvocation::ObjCreate => {
@@ -343,7 +338,7 @@ mod SMOS_Invocation_Raw {
 						return Err(InvocationError::DataBufferNotSet);
 					}
 
-					unsafe { Some(rust_str_from_buffer(data_buffer.unwrap())?.0.to_string()) }
+					unsafe { Some(rust_str_from_buffer(data_buffer.unwrap())?.0) }
 				} else {
 					None
 				};
@@ -362,7 +357,7 @@ mod SMOS_Invocation_Raw {
 					return Err(InvocationError::DataBufferNotSet);
 				}
 
-				let name = unsafe { rust_str_from_buffer(data_buffer.unwrap())?.0.to_string() };
+				let name = unsafe { rust_str_from_buffer(data_buffer.unwrap())?.0 };
 
 				Ok(SMOS_Invocation::ObjOpen(
 					ObjOpen {
@@ -408,7 +403,6 @@ mod SMOS_Invocation_Raw {
 						window = ServerReceivedHandleOrHandleCap::new_unwrapped_handle_cap(f_cap(cap_arg_counter) as usize);
 					} else {
 						/* Capability was not unwrapped */
-						// @alwin: Need to extend ServerReceivedHandleOrHandleCap to deal with this
 						window = ServerReceivedHandleOrHandleCap::new_wrapped_handle_cap(recv_slot)
 					}
 					cap_arg_counter += 1;
@@ -575,14 +569,14 @@ mod SMOS_Invocation_Raw {
 					let mut args_inner = Vec::new();
 					for i in 0..f_msg(0) {
 						let (arg_tmp, ref mut data_buffer_ref) = rust_str_from_buffer(data_buffer_ref)?;
-						args_inner.push(arg_tmp.to_string());
+						args_inner.push(arg_tmp);
 					}
 					Some(args_inner)
 				};
 
 				Ok(SMOS_Invocation::ProcessSpawn(ProcessSpawn {
-					exec_name: exec_name.to_string(),
-					fs_name: fs_name.to_string(),
+					exec_name: exec_name,
+					fs_name: fs_name,
 					args: args
 				}))
 			},
