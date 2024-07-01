@@ -28,7 +28,7 @@ use alloc::rc::Rc;
 use alloc::vec::Vec;
 use smos_server::ntfn_buffer::{*};
 use core::ptr::NonNull;
-
+use offset_allocator::{Allocator, Allocation};
 
 // @alwin: Should really make sure nothing else starts on the same page as this ELF finishes
 // to prevent information leakage. Maybe if another page aligned 'guard page' is added? Kinda
@@ -73,7 +73,7 @@ impl HandleInner for BFSResource {}
 
 struct Client {
     id: usize,
-    shared_buffer: Option<(*mut u8, usize, HandleOrHandleCap<WindowHandle>, LocalHandle<ViewHandle>)>,
+    shared_buffer: Option<(*mut u8, usize, HandleOrHandleCap<WindowHandle>, LocalHandle<ViewHandle>, Allocation<u32>)>,
     handles: [Option<ServerHandle<BFSResource>>; MAX_HANDLES],
     conn_registration_hndl: LocalHandle<ConnRegistrationHandle>
 }
@@ -277,32 +277,28 @@ fn handle_unview(rs_conn: &RootServerConnection, client: &mut Client, args: &Unv
 }
 
 fn handle_conn_open(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<ConnectionHandle>,
-                    id: usize, args: ConnOpen) -> Result<SMOSReply, InvocationError> {
+                    window_allocator: &mut Allocator, id: usize,
+                    args: ConnOpen) -> Result<SMOSReply, InvocationError> {
     let slot = find_client_slot().ok_or(InvocationError::InsufficientResources)?;
 
-    let shared_buffer: Option<(*mut u8, usize, HandleOrHandleCap<WindowHandle>, LocalHandle<ViewHandle>)>;
+    let shared_buffer: Option<(*mut u8, usize, HandleOrHandleCap<WindowHandle>, LocalHandle<ViewHandle>, Allocation<u32>)>;
     if let Some(sb) = args.shared_buf_obj {
         // This server arbitrarily only supports windows of size 4K
-        if sb.1 % 4096 != 0 {
+        if sb.1 != 4096 {
             return Err(InvocationError::AlignmentError{ which_arg: 0});
         }
 
-        if sb.1 > 4096 {
-            return Err(InvocationError::InvalidArguments);
-        }
+        /* Create a window of the 4KB size*/
+        let window_index = window_allocator.allocate(1).ok_or(InvocationError::InsufficientResources)?;
+        let window_address = SHARED_BUFFER_BASE as usize + (window_index.offset as usize * 4096);
 
         /* Create a window for the shared buffer */
-        // @alwin: Figure out a good way to deal with multiple clients
-        // I think something that might work cleanly is some kind of heap allocator that doesn't keep
-        // metadata inside free blocks and doesn't read/write to the actual memory being allocated.
-        // This will essentially be a window allocator inside the virtual address space. Maybe we have
-        // one big one for the whole process, or multiple small ones for different kinds of windows
-        let window_hndl = rs_conn.window_create(SHARED_BUFFER_BASE as usize, sb.1, None)?;
+        let window_hndl = rs_conn.window_create(window_address, sb.1, None)?;
 
         /* Create a view for the shared buffer*/
         let view_hndl = rs_conn.view(&window_hndl, &sb.0.try_into().or(Err(InvocationError::InvalidArguments))?, 0, 0, 4096, sel4::CapRights::all())?;
 
-        shared_buffer = Some((SHARED_BUFFER_BASE, sb.1, window_hndl, view_hndl));
+        shared_buffer = Some((window_address as *mut u8, sb.1, window_hndl, view_hndl, window_index));
     } else {
         shared_buffer = None;
     }
@@ -323,7 +319,8 @@ fn handle_conn_open(rs_conn: &RootServerConnection, publish_hdnl: &LocalHandle<C
     return Ok(SMOSReply::ConnOpen);
 }
 
-fn handle_conn_close(rs_conn: &RootServerConnection, client: &mut Client) -> Result<SMOSReply, InvocationError> {
+fn handle_conn_close(rs_conn: &RootServerConnection, window_allocator: &mut Allocator,
+                     client: &mut Client) -> Result<SMOSReply, InvocationError> {
     for handle in client.handle_table() {
         if handle.is_some() {
             sel4::debug_println!("Not all handles have been cleaned up!");
@@ -334,6 +331,7 @@ fn handle_conn_close(rs_conn: &RootServerConnection, client: &mut Client) -> Res
     if client.shared_buffer.is_some() {
         rs_conn.unview(client.shared_buffer.as_ref().unwrap().3.clone()).expect("Failed to unview");
         rs_conn.window_destroy(client.shared_buffer.as_ref().unwrap().2.clone()).expect("Failed to destroy window");
+        window_allocator.free(client.shared_buffer.as_ref().unwrap().4);
     }
 
     rs_conn.conn_deregister(&client.conn_registration_hndl);
@@ -366,7 +364,8 @@ fn handle_vm_fault(rs_conn: &RootServerConnection, args: VMFaultNotification) {
     rs_conn.page_map(&view.borrow().registration_hndl, args.fault_offset, view.borrow().object.borrow().file.data.as_ptr().wrapping_add(pos + view.borrow().obj_offset));
 }
 
-fn handle_conn_destroy_ntfn(rs_conn: &RootServerConnection, args: ConnDestroyNotification) {
+fn handle_conn_destroy_ntfn(rs_conn: &RootServerConnection, window_allocator: &mut Allocator,
+                            args: ConnDestroyNotification) {
     let client = find_client_from_id(args.conn_id).expect("BFS corruption: Invalid client ID").as_mut().unwrap();
 
     for handle in client.handle_table() {
@@ -380,6 +379,7 @@ fn handle_conn_destroy_ntfn(rs_conn: &RootServerConnection, args: ConnDestroyNot
     if client.shared_buffer.is_some() {
         rs_conn.unview(client.shared_buffer.as_ref().unwrap().3.clone()).expect("Failed to unview");
         rs_conn.window_destroy(client.shared_buffer.as_ref().unwrap().2.clone()).expect("Failed to destroy window");
+        window_allocator.free(client.shared_buffer.as_ref().unwrap().4);
     }
 
     delete_client(client);
@@ -401,11 +401,11 @@ fn handle_win_destroy_ntfn(rs_conn: &RootServerConnection, args: WindowDestroyNo
     *view_ref = None;
 }
 
-fn handle_notification(rs_conn: &RootServerConnection) {
+fn handle_notification(rs_conn: &RootServerConnection, window_allocator: &mut Allocator) {
     while let Some(msg) = unsafe { dequeue_ntfn_buffer_msg(ntfn_buffer) } {
         match msg {
             NotificationType::VMFaultNotification(data) => handle_vm_fault(rs_conn, data),
-            NotificationType::ConnDestroyNotification(data) => handle_conn_destroy_ntfn(rs_conn, data),
+            NotificationType::ConnDestroyNotification(data) => handle_conn_destroy_ntfn(rs_conn, window_allocator, data),
             NotificationType::WindowDestroyNotification(data) => handle_win_destroy_ntfn(rs_conn, data),
         }
     }
@@ -420,6 +420,9 @@ fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: 
     sel4::with_ipc_buffer_mut(|ipc_buf| {
         ipc_buf.set_recv_slot(&recv_slot);
     });
+    /* Used to allocate regions of the virtual address space for the windows used for mapping
+       data buffers with clients  */
+    let mut window_allocator = Allocator::with_max_allocs(MAX_CLIENTS as u32, MAX_CLIENTS as u32 );
 
     loop {
         let (msg, mut badge) = if reply_msg_info.is_some() {
@@ -432,7 +435,7 @@ fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: 
         match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Irq => todo!(),
             EntryType::Signal => {
-                handle_notification(&rs_conn);
+                handle_notification(&rs_conn, &mut window_allocator);
                 reply_msg_info = None;
             },
             EntryType::Fault(_x) => todo!(),
@@ -485,7 +488,7 @@ fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: 
 
                 let ret = if matches!(invocation, Ok(SMOS_Invocation::ConnOpen(ref t))) {
                     match invocation.unwrap() {
-                        SMOS_Invocation::ConnOpen(t) => handle_conn_open(&rs_conn, listen_conn.hndl(), id, t),
+                        SMOS_Invocation::ConnOpen(t) => handle_conn_open(&rs_conn, listen_conn.hndl(), &mut window_allocator, id, t),
                         _ => panic!("No invocations besides conn_open should be handled here")
                     }
                 } else {
@@ -495,7 +498,7 @@ fn syscall_loop<T: ServerConnection>(rs_conn: RootServerConnection, mut cspace: 
 
                     match invocation.unwrap() {
                         SMOS_Invocation::ConnOpen(_) => panic!("conn_open should never be handled here"),
-                        SMOS_Invocation::ConnClose => handle_conn_close(&rs_conn, client_unwrapped),
+                        SMOS_Invocation::ConnClose => handle_conn_close(&rs_conn, &mut window_allocator, client_unwrapped),
                         SMOS_Invocation::ObjOpen(t) => handle_obj_open(client_unwrapped, &mut handle_cap_table, &t),
                         SMOS_Invocation::ObjClose(t) => handle_obj_close(client_unwrapped, &mut handle_cap_table, &t),
                         SMOS_Invocation::ObjStat(t) => handle_obj_stat(client_unwrapped, &mut handle_cap_table, &t),

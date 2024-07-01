@@ -36,7 +36,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
- "syn 2.0.66",
+ "syn 2.0.68",
  "which",
 ]
 
@@ -46,9 +46,9 @@ version = "0.1.0"
 
 [[package]]
 name = "bitflags"
-version = "2.5.0"
+version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf4b9d6a944f767f8e5e0db018570623c85f3d925ac718db4e06d0187adb21c1"
+checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
 
 [[package]]
 name = "block-buffer"
@@ -65,6 +65,7 @@ version = "0.1.0"
 dependencies = [
  "elf",
  "include_bytes_aligned",
+ "offset-allocator",
  "sel4",
  "sel4-config",
  "sel4-panicking",
@@ -155,9 +156,9 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
 name = "either"
-version = "1.12.0"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3dca9240753cf90908d7e4aac30f630662b02aebaa1b58a3cadabdb23385b58b"
+checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
 name = "elf"
@@ -226,9 +227,9 @@ checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 
 [[package]]
 name = "lazy_static"
-version = "1.4.0"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lazycell"
@@ -244,9 +245,9 @@ checksum = "97b3888a4aecf77e811145cadf6eef5901f4782c53886191b2f693f24761847c"
 
 [[package]]
 name = "libloading"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
+checksum = "e310b3a6b5907f99202fcdb4960ff45b93735d7c7d96b760fcff8db2dc0e103d"
 dependencies = [
  "cfg-if",
  "windows-targets",
@@ -279,15 +280,15 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.21"
+version = "0.4.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
+checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 
 [[package]]
 name = "memchr"
-version = "2.7.2"
+version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c8640c5d730cb13ebd907d8d04b52f55ac9a2eec55b440c8892f40d56c76c1d"
+checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
 name = "minimal-lexical"
@@ -306,6 +307,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "nonmax"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "610a5acd306ec67f907abe5567859a3c693fb9886eb1f012ab8f2a47bef3db51"
+
+[[package]]
 name = "num_enum"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -322,7 +329,16 @@ checksum = "681030a937600a36906c185595136d26abfebb4aa9c65701cefcaf8578bb982b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.66",
+ "syn 2.0.68",
+]
+
+[[package]]
+name = "offset-allocator"
+version = "0.1.0"
+source = "git+https://github.com/alwin-joshy/offset-allocator?rev=eb2aa149e1be89b11633c70192f437eb59bebf98#eb2aa149e1be89b11633c70192f437eb59bebf98"
+dependencies = [
+ "log",
+ "nonmax",
 ]
 
 [[package]]
@@ -368,7 +384,7 @@ dependencies = [
  "pest_meta",
  "proc-macro2",
  "quote",
- "syn 2.0.66",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -389,14 +405,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f12335488a2f3b0a83b14edad48dca9879ce89b2edd10e80237e4e852dd645e"
 dependencies = [
  "proc-macro2",
- "syn 2.0.66",
+ "syn 2.0.68",
 ]
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.85"
+version = "1.0.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22244ce15aa966053a896d1accb3a6e68469b97c7f33f284b99f0d576879fc23"
+checksum = "5e719e8df665df0d1c8fbfd238015744736151d4445ec0836b8e628aae103b77"
 dependencies = [
  "unicode-ident",
 ]
@@ -412,9 +428,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.10.4"
+version = "1.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c117dbdfde9c8308975b6a18d71f3f385c89461f7b3fb054288ecf2a2058ba4c"
+checksum = "b91213439dad192326a0d7c6ee3955910425f441d7038e0d6933b0aec5c4517f"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -424,9 +440,9 @@ dependencies = [
 
 [[package]]
 name = "regex-automata"
-version = "0.4.6"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86b83b8b9847f9bf95ef68afb0b8e6cdb80f498442f5179a29fad448fcc1eaea"
+checksum = "38caf58cc5ef2fed281f89292ef23f6365465ed9a41b7a7754eb4e26496c92df"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -435,9 +451,9 @@ dependencies = [
 
 [[package]]
 name = "regex-syntax"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adad44e29e4c806119491a7f06f03de4d1af22c3a680dd47f1e6e179439d1f56"
+checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
 
 [[package]]
 name = "root_server"
@@ -499,7 +515,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 [[package]]
 name = "sel4"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "cfg-if",
  "sel4-config",
@@ -517,12 +533,12 @@ dependencies = [
 [[package]]
 name = "sel4-bitfield-ops"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 
 [[package]]
 name = "sel4-bitfield-parser"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "pest",
  "pest_derive",
@@ -532,12 +548,12 @@ dependencies = [
 [[package]]
 name = "sel4-build-env"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 
 [[package]]
 name = "sel4-config"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "sel4-config-data",
  "sel4-config-generic",
@@ -548,7 +564,7 @@ dependencies = [
 [[package]]
 name = "sel4-config-data"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "lazy_static",
  "sel4-build-env",
@@ -559,7 +575,7 @@ dependencies = [
 [[package]]
 name = "sel4-config-generic"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "fallible-iterator",
  "proc-macro2",
@@ -571,7 +587,7 @@ dependencies = [
 [[package]]
 name = "sel4-config-generic-types"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "serde",
 ]
@@ -579,7 +595,7 @@ dependencies = [
 [[package]]
 name = "sel4-config-macros"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "sel4-config-data",
  "sel4-config-generic",
@@ -588,7 +604,7 @@ dependencies = [
 [[package]]
 name = "sel4-dlmalloc"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "dlmalloc",
  "lock_api",
@@ -597,7 +613,7 @@ dependencies = [
 [[package]]
 name = "sel4-elf-header"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 
 [[package]]
 name = "sel4-externally-shared"
@@ -613,12 +629,12 @@ dependencies = [
 [[package]]
 name = "sel4-immediate-sync-once-cell"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 
 [[package]]
 name = "sel4-initialize-tls"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "cfg-if",
 ]
@@ -626,7 +642,7 @@ dependencies = [
 [[package]]
 name = "sel4-panicking"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "cfg-if",
  "rustc_version",
@@ -638,12 +654,12 @@ dependencies = [
 [[package]]
 name = "sel4-panicking-env"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 
 [[package]]
 name = "sel4-root-task"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "sel4",
  "sel4-dlmalloc",
@@ -658,7 +674,7 @@ dependencies = [
 [[package]]
 name = "sel4-root-task-macros"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -668,7 +684,7 @@ dependencies = [
 [[package]]
 name = "sel4-runtime-common"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "cfg-if",
  "sel4",
@@ -681,7 +697,7 @@ dependencies = [
 [[package]]
 name = "sel4-rustfmt-helper"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "which",
 ]
@@ -699,7 +715,7 @@ dependencies = [
 [[package]]
 name = "sel4-sync"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "lock_api",
  "sel4",
@@ -709,7 +725,7 @@ dependencies = [
 [[package]]
 name = "sel4-sys"
 version = "0.1.0"
-source = "git+https://github.com/seL4/rust-sel4#7cc0691b0633b7318691cc2461c1cc5959610b09"
+source = "git+https://github.com/seL4/rust-sel4#eae32c280b129d11d193e0457890abf72dfd5346"
 dependencies = [
  "bindgen",
  "glob",
@@ -749,14 +765,14 @@ checksum = "500cbc0ebeb6f46627f50f3f5811ccf6bf00643be300b4c3eabc0ef55dc5b5ba"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.66",
+ "syn 2.0.68",
 ]
 
 [[package]]
 name = "serde_json"
-version = "1.0.117"
+version = "1.0.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "455182ea6142b14f93f4bc5320a2b31c1f266b66a4a5c858b013302a5d8cbfc3"
+checksum = "e8eddb61f0697cc3989c5d64b452f5488e2b8a60fd7d5076a3045076ffef8cb0"
 dependencies = [
  "itoa",
  "ryu",
@@ -876,9 +892,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.66"
+version = "2.0.68"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c42f3f41a2de00b01c0aaad383c5a45241efc8b2d1eda5661812fda5f3cdcff5"
+checksum = "901fa70d88b9d6c98022e23b4136f9f3e54e4662c3bc1bd1d84a42a9a0f0c1e9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -915,7 +931,7 @@ checksum = "46c3384250002a6d5af4d114f2845d37b57521033f30d5c3f46c4d70e1197533"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.66",
+ "syn 2.0.68",
 ]
 
 [[package]]
@@ -1074,5 +1090,5 @@ checksum = "15e934569e47891f7d9411f1a451d947a60e000ab3bd24fbb970f000387d1b3b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.66",
+ "syn 2.0.68",
 ]

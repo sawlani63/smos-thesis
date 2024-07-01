@@ -149,7 +149,7 @@ pub fn handle_page_map(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
 
 		/* @alwin: I have to cast the reply object into an ep and calls end on it instead
 		   of doing a normal replu */
-		dst_view.borrow().pending_fault.as_ref().unwrap().0.0.cast().send(msginfo);
+		dst_view.borrow().pending_fault.as_ref().unwrap().0.0.send(msginfo);
 
 		/* Get rid of the reply cap */
 		dealloc_retyped(cspace, ut_table, dst_view.borrow().pending_fault.as_ref().unwrap().0);
