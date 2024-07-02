@@ -20,6 +20,7 @@ use crate::ut::{UTTable, UTWrapper};
 use crate::window::Window;
 use crate::view::View;
 use alloc::vec::Vec;
+use alloc::collections::btree_map::BTreeMap;
 use smos_server::event::{NTFN_SIGNAL_BITS, INVOCATION_EP_BITS};
 use smos_server::handle::HandleAllocater;
 use smos_server::ntfn_buffer::{NtfnBufferData, NotificationType, ConnDestroyNotification,
@@ -27,9 +28,9 @@ use smos_server::ntfn_buffer::{NtfnBufferData, NotificationType, ConnDestroyNoti
 use crate::frame_table::FrameTable;
 use smos_common::local_handle::LocalHandle;
 
+
 #[derive(Debug, Clone)]
 pub struct Server {
-	name: String,
 	pid: usize,
 	pub unbadged_ep: (sel4::cap::Endpoint, UTWrapper),
 	unbadged_ntfn: (sel4::cap::Notification, UTWrapper),
@@ -51,32 +52,12 @@ pub struct Connection {
 const MAX_SERVERS: usize = 10;
 
 const ARRAY_REPEAT_VALUE: Option<Rc<RefCell<Server>>> = None;
-// @alwin: This should probably be a hashmap keyed by name instead
-static mut servers: [Option<Rc<RefCell<Server>>>; MAX_SERVERS] = [ARRAY_REPEAT_VALUE; MAX_SERVERS];
-
-fn find_empty_slot() -> Option<&'static mut Option<Rc<RefCell<Server>>>> {
-	unsafe {
-		for server in servers.iter_mut() {
-			if server.is_none() {
-				return Some(server);
-			}
-		}
-	}
-
-	return None;
-}
+static mut servers: BTreeMap<String, Rc<RefCell<Server>>> = BTreeMap::new();
 
 fn find_server_with_name(name: &str) -> Option<Rc<RefCell<Server>>> {
 	unsafe {
-		for server in servers.iter() {
-			match server {
-				Some(server_internal) => if server_internal.borrow().name == *name { return Some(server_internal.clone()) }
-				_ => (),
-			}
-		}
+		Some(servers.get(name)?.clone())
 	}
-
-	return None;
 }
 
 pub fn handle_conn_register(p: &mut UserProcess, args: &ConnRegister) -> Result<SMOSReply, InvocationError> {
@@ -119,10 +100,7 @@ pub fn handle_conn_deregister(p: &mut UserProcess, args: &ConnDeregister) -> Res
 }
 
 pub fn handle_conn_create(cspace: &mut CSpace, p: &mut UserProcess, args: &ConnCreate) -> Result<SMOSReply, InvocationError> {
-	log_rs!("In handle_conn_create! Creating connection to {:?}", args.name);
-
 	let pid = p.pid;
-
 
     let server = find_server_with_name(args.name).ok_or(InvocationError::InvalidArguments)?;
     // @alwin: Ideally we would want to partition the RS cspace to prevent any one process from
@@ -188,6 +166,7 @@ pub fn handle_server_handle_cap_create(cspace: &mut CSpace, p: &mut UserProcess,
 		_ => Err(InvocationError::InvalidHandle{ which_arg: 0})
 	}?;
 
+	/* Create a badged copy of the cap the server listens on with badge == args.ident  */
 	let badged_cap = cspace.alloc_cap::<sel4::cap_type::Endpoint>().or(Err(InvocationError::InsufficientResources))?;
 	cspace.root_cnode.relative(badged_cap).mint(&cspace.root_cnode().relative(server.borrow().unbadged_ep.0),
 													   sel4::CapRights::none(),
@@ -196,6 +175,7 @@ pub fn handle_server_handle_cap_create(cspace: &mut CSpace, p: &mut UserProcess,
 		InvocationError::InsufficientResources
    })?;
 
+ 	/* Put a handle to this server-created handle cap in the handle table */
 	let (idx, handle_ref) = p.allocate_handle().map_err(|e| {
 		cspace.delete_cap(badged_cap);
 		cspace.free_cap(badged_cap);
@@ -209,11 +189,10 @@ pub fn handle_server_handle_cap_create(cspace: &mut CSpace, p: &mut UserProcess,
 
 pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,
 						   p: &mut UserProcess, args: ConnPublish) -> Result<SMOSReply, InvocationError> {
+
 	if find_server_with_name(args.name).is_some() {
 		return Err(InvocationError::InvalidArguments);
 	}
-
-	let slot = find_empty_slot().ok_or(InvocationError::InsufficientResources)?;
 
 	/* Check that we can create a window at the specified address */
 	if (args.ntfn_buffer % PAGE_SIZE_4K != 0) {
@@ -313,9 +292,9 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
     let pid = p.pid;
     let (idx, handle_ref) = p.allocate_handle()?;
 
+    /* Create the server struct */
     let server = Rc::new(RefCell::new(Server {
     	pid: pid,
-    	name: args.name.to_string(),
     	unbadged_ep: ep,
     	unbadged_ntfn: ntfn,
     	badged_ntfn: badged_ntfn_cap,
@@ -324,7 +303,8 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
     	connections: Vec::new()
     }));
 
-    *slot = Some(server.clone());
+    /* Put the server into the handle table and the server hashmap  */
+    unsafe { servers.insert(args.name.to_string(), server.clone()) };
     *handle_ref = Some(ServerHandle::new(RootServerResource::Server(server)));
 
     return Ok(SMOSReply::ConnPublish {hndl: local_handle::LocalHandle::new(idx), ep: ep.0});
