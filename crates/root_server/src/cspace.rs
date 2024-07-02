@@ -10,6 +10,7 @@ use crate::ut::{UTWrapper, UTTable};
 use crate::util::{alloc_retype, MASK};
 use crate::{log_rs, warn_rs};
 use alloc::boxed::Box;
+use sel4::sel4_cfg;
 
 
 pub const fn CNODE_SLOT_BITS(x : usize) -> usize {
@@ -361,22 +362,47 @@ impl<'a> CSpace<'a> {
                     };
     }
 
+    // @alwin: is conditional compilation the way to go here?
+    #[sel4_cfg(ENABLE_SMP_SUPPORT)]
+    fn irq_control_get_ppi(&mut self, irq_control: sel4::cap::IrqControl, irq: usize,
+                           edge_triggered: bool, irq_handler: sel4::cap::IrqHandler) -> Result<(), sel4::Error> {
+
+        // @alwin: Core number is currently hardcoded here
+         irq_control.irq_control_get_trigger_core(irq.try_into().unwrap(), edge_triggered.into(),
+                                                  0, &self.root_cnode.relative(irq_handler))
+                                                  .or(Err(sel4::Error::InvalidArgument))
+    }
+
+    #[sel4_cfg(not(ENABLE_SMP_SUPPORT))]
+    fn irq_control_get_ppi(&mut self, irq_control: sel4::cap::IrqControl, irq: usize,
+                           edge_triggered: bool, irq_handler: sel4::cap::IrqHandler) -> Result<(), sel4::Error> {
+
+        irq_control.irq_control_get_trigger(irq.try_into().unwrap(), edge_triggered.into(),
+                                &self.root_cnode.relative(irq_handler))
+                                .or(Err(sel4::Error::InvalidArgument))
+    }
+
+
     pub fn irq_control_get(self: &mut Self, cptr: usize, irq_control: sel4::cap::IrqControl,
                            irq: usize, edge_triggered : bool) -> Result<sel4::cap::IrqHandler, sel4::Error> {
         let irq_handler = sel4::CPtr::from_bits(cptr.try_into().unwrap()).cast::<sel4::cap_type::IrqHandler>();
+
+
+
+        // Determine if the IRQ corresponds to a PPI or SPI
+        // https://developer.arm.com/documentation/den0024/a/AArch64-Exception-Handling/The-Generic-Interrupt-Controller
         // @alwin: Edge triggered is expected to be a word instead of a bool for some reason. Submit a PR
         // to rust-sel4 to fix this
-
-        // @alwin: Need some way of determining if an IRQ is a PPI or not here to do the right
-        // invocation
-        irq_control.irq_control_get_trigger(irq.try_into().unwrap(), edge_triggered.try_into().unwrap(),
-                                                   &self.root_cnode.relative(irq_handler))
-                                                   .or(Err(sel4::Error::InvalidArgument))?;
-
-        // @alwin: Core number is hard-coded here
-        // irq_control.irq_control_get_trigger_core(irq.try_into().unwrap(), edge_triggered.try_into().unwrap(),
-        //                                       0, &self.root_cnode.relative(irq_handler))
-        //                                       .or(Err(sel4::Error::InvalidArgument))?;
+        if irq >= 16 && irq < 32 {
+            self.irq_control_get_ppi(irq_control, irq, edge_triggered, irq_handler);
+       } else if irq >= 32 && irq < 1021 {
+            irq_control.irq_control_get_trigger(irq.try_into().unwrap(), edge_triggered.into(),
+                                    &self.root_cnode.relative(irq_handler))
+                                    .or(Err(sel4::Error::InvalidArgument))?;
+       } else {
+            warn_rs!("Passed in an unsupported IRQ number");
+            return Err(sel4::Error::InvalidArgument);
+       }
 
         return Ok(irq_handler);
     }
