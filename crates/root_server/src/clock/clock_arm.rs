@@ -110,7 +110,11 @@ fn cycles_and_freq_to_ns(cycles: usize, freq: usize) -> usize {
     } else if freq * KHZ == 0 {
         return (cycles * US_IN_S) / (freq / KHZ)
     } else {
-        return (cycles * NS_IN_S) / freq
+        // @alwin: This multiplication easily overflows, so we store it in a u128 instead of
+        // a usize. This still does not deal with when the counter eventually overflows, so this
+        // is something else we need to eventually think about
+        let res = cycles as u128 * NS_IN_S as u128;
+        return usize::try_from(res / freq as u128).unwrap();
     }
 }
 

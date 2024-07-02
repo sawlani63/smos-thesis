@@ -102,7 +102,6 @@ fn timeouts_init() {
     unsafe { TIMEOUTS[MAX_TIMEOUTS - 1].next = None; };
 }
 
-// @alwin: This file has way too much unsafe everywhere
 unsafe fn timeouts_insert(deadline: usize, callback: TimerCallback, data: *const ()) -> Option<usize>{
     if timeouts_full() {
         return None;
@@ -115,7 +114,6 @@ unsafe fn timeouts_insert(deadline: usize, callback: TimerCallback, data: *const
         TIMEOUTS[timeouts_head_idx].deadline = deadline;
         TIMEOUTS[timeouts_head_idx].callback = Some(callback);
         TIMEOUTS[timeouts_head_idx].callback_data = data;
-        // timeouts[timeouts_head_idx].valid = true; @alwin: necessary?
         TIMEOUTS[timeouts_head_idx].next = None;
         TIMEOUTS[timeouts_head_idx].prev = None;
         return Some(timeouts_head_idx);
@@ -130,7 +128,6 @@ unsafe fn timeouts_insert(deadline: usize, callback: TimerCallback, data: *const
         TIMEOUTS[insert_index].deadline = deadline;
         TIMEOUTS[insert_index].callback = Some(callback);
         TIMEOUTS[insert_index].callback_data = data;
-        // timeouts[insert_index].valid = true;
         return Some(insert_index);
     }
 
@@ -152,7 +149,6 @@ unsafe fn timeouts_insert(deadline: usize, callback: TimerCallback, data: *const
     TIMEOUTS[insert_index].deadline = deadline;
     TIMEOUTS[insert_index].callback = Some(callback);
     TIMEOUTS[insert_index].callback_data = data;
-    // timeouts[insert_index].valid = true;
     return Some(insert_index.try_into().unwrap());
 }
 
