@@ -13,7 +13,6 @@ use smos_server::handle::{ServerHandle};
 use crate::alloc::string::ToString;
 use smos_common::local_handle;
 use crate::util::{alloc_retype, dealloc_retyped};
-use core::borrow::BorrowMut;
 use core::cell::RefCell;
 use smos_common::util::BIT;
 use crate::ut::{UTTable, UTWrapper};
@@ -75,8 +74,7 @@ pub fn handle_conn_register(p: &mut UserProcess, args: &ConnRegister) -> Result<
 
 	for connection in &server.borrow().connections {
 		if connection.borrow().id == args.client_id {
-			// @alwin: why do I need to do an explicit dereference thing?
-			(**connection).borrow_mut().registered = true;
+			connection.borrow_mut().registered = true;
     		let (idx, handle_ref) = p.allocate_handle()?;
 		    *handle_ref = Some(ServerHandle::new(RootServerResource::ConnRegistration(connection.clone())));
     		return Ok(SMOSReply::ConnRegister {hndl: LocalHandle::new(idx)})
@@ -93,7 +91,7 @@ pub fn handle_conn_deregister(p: &mut UserProcess, args: &ConnDeregister) -> Res
 		_ => Err(InvocationError::InvalidHandle {which_arg: 0})
 	}?;
 
-	(*conn).borrow_mut().registered = false;
+	conn.borrow_mut().registered = false;
 	p.cleanup_handle(args.hndl.idx);
 
 	return Ok(SMOSReply::ConnDeregister);
@@ -124,7 +122,7 @@ pub fn handle_conn_create(cspace: &mut CSpace, p: &mut UserProcess, args: &ConnC
    								registered: false
   	}));
 
-   	(*server).borrow_mut().connections.push(connection.clone());
+   	server.borrow_mut().connections.push(connection.clone());
 
 	let (idx, handle_ref) = p.allocate_handle()?;
    	*handle_ref = Some(ServerHandle::new(RootServerResource::Connection(connection.clone())));
@@ -199,7 +197,10 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
 		return Err(InvocationError::AlignmentError { which_arg: 0 });
 	}
 
-	/* @alwin: Check notification is in user-addressable memory */
+	/* Check notification buffer is in user-addressable memory */
+	if (args.ntfn_buffer >= sel4_sys::seL4_UserTop.try_into().unwrap()) {
+		return Err(InvocationError::InvalidArguments);
+	}
 
 	if p.overlapping_window(args.ntfn_buffer, PAGE_SIZE_4K) {
 		return Err(InvocationError::InvalidArguments);
@@ -217,7 +218,6 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
 	})?;
 
 	/* Bind the notification to the TCB */
-	// @alwin: What to return and how to clean up on failure?
 	p.tcb.0.tcb_bind_notification(ntfn.0).map_err(|_| {
 		dealloc_retyped(cspace, ut_table, ntfn);
 		dealloc_retyped(cspace, ut_table, ep);
@@ -226,6 +226,7 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
 
 	/* Create a badged notification cap that the RS uses to communicate with the server */
 	let badged_ntfn_cap = cspace.alloc_cap::<sel4::cap_type::Notification>().map_err(|_| {
+		p.tcb.0.tcb_unbind_notification();
 		dealloc_retyped(cspace, ut_table, ntfn);
 		dealloc_retyped(cspace, ut_table, ep);
 		InvocationError::InsufficientResources
@@ -235,6 +236,7 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
 													   sel4::CapRights::all(),
 													   NTFN_SIGNAL_BITS as u64).map_err(|_| {
     	cspace.free_cap(badged_ntfn_cap);
+		p.tcb.0.tcb_unbind_notification();
     	dealloc_retyped(cspace, ut_table, ep);
     	dealloc_retyped(cspace, ut_table, ntfn);
 		InvocationError::InsufficientResources
@@ -242,8 +244,9 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
 
     /* Pre-allocate the frame used for the notification buffer */
     let frame_ref = frame_table.alloc_frame(cspace, ut_table).ok_or_else(|| {
-    	// cspace.delete(badged_ntfn_cap);
+    	cspace.delete_cap(badged_ntfn_cap);
     	cspace.free_cap(badged_ntfn_cap);
+		p.tcb.0.tcb_unbind_notification();
     	dealloc_retyped(cspace, ut_table, ep);
     	dealloc_retyped(cspace, ut_table, ntfn);
 		InvocationError::InsufficientResources
@@ -276,9 +279,9 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
         pending_fault: None
     }));
 
-    (*window).borrow_mut().bound_view = Some(view.clone());
-    (*object).borrow_mut().associated_views.push(view.clone());
-    (*object).borrow_mut().frames[0] = Some((orig_frame_cap, frame_ref));
+    window.borrow_mut().bound_view = Some(view.clone());
+    object.borrow_mut().associated_views.push(view.clone());
+    object.borrow_mut().frames[0] = Some((orig_frame_cap, frame_ref));
 
     p.add_window_unchecked(window);
     p.views.push(view.clone());
