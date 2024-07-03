@@ -13,12 +13,12 @@ use smos_common::args::{WindowCreateArgs, WindowDestroyArgs};
 use smos_common::local_handle::{HandleOrHandleCap, WindowHandle, LocalHandle, WindowRegistrationHandle};
 use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
 use core::cell::RefCell;
-use crate::object::OBJ_MAX_FRAMES;
 use crate::connection::Server;
-use crate::object::AnonymousMemoryObject;
+use crate::object::{AnonymousMemoryObject, OBJ_LVL_MAX};
 use smos_server::syscalls::{WindowRegister, WindowDeregister};
 use crate::cspace::{CSpace, CSpaceTrait};
 use smos_server::ntfn_buffer::{NotificationType, WindowDestroyNotification, enqueue_ntfn_buffer_msg};
+use alloc::vec;
 
 #[derive(Clone, Debug)]
 pub struct Window {
@@ -85,18 +85,16 @@ pub fn handle_window_register(p: &mut UserProcess, handle_cap_table: &mut Handle
 
     let (idx, handle_ref) = p.allocate_handle()?;
 
-    let view = Rc::new( RefCell::new( View {
-        caps: [None; OBJ_MAX_FRAMES],
-        bound_window: window.clone(),
-        bound_object: None,
-        managing_server_info: Some((server.clone(), args.client_id, args.reference)),
-        rights: sel4::CapRights::all(), // @alwin: what are these meant to be? The permissions of the view don't really make
+    let view = Rc::new( RefCell::new( View::new(
+        window.clone(),
+        None,
+        Some((server.clone(), args.client_id, args.reference)),
+        sel4::CapRights::all(), // @alwin: what are these meant to be? The permissions of the view don't really make
                                         // sense with an externally managed object, which the server might choose to map in
                                         // with any set of rights, with different ones for each page
-        win_offset: 0, // @alwin: These aren't really necessary for externally managed
-        obj_offset: 0, // '''
-        pending_fault: None
-    }));
+        0, // @alwin: These aren't really necessary for externally managed
+        0, // '''
+    )));
 
     window.borrow_mut().bound_view = Some(view.clone());
 
@@ -115,12 +113,7 @@ pub fn handle_window_deregister(cspace: &mut CSpace, p: &mut UserProcess, args: 
     }?;
 
     // @alwin: This fn is kinda the same as handle_unview, what to do abt this?
-    for cap in view.borrow_mut().caps {
-        if let Some(frame_cap) = cap {
-            cspace.delete_cap(frame_cap);
-            cspace.free_cap(frame_cap);
-        }
-    }
+    view.borrow_mut().cleanup_cap_table(cspace, true);
 
     // @alwin: There should probs be some checks about pending fault or something here?
     view.borrow_mut().bound_window.borrow_mut().bound_view = None;
@@ -170,12 +163,7 @@ pub fn handle_window_destroy(cspace: &mut CSpace, p: &mut UserProcess, handle_ca
             bv.borrow_mut().bound_object.as_ref().unwrap().borrow_mut().associated_views.swap_remove(pos);
         }
 
-        for cap in bv.borrow_mut().caps {
-           if let Some(frame_cap) = cap {
-                cspace.delete_cap(frame_cap);
-                cspace.free_cap(frame_cap);
-            }
-        }
+        bv.borrow_mut().cleanup_cap_table(cspace, true);
     }
 
     generic_cleanup_handle(p, handle_cap_table, args.hndl, WindowDestroyArgs::Handle as usize)?;

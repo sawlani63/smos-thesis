@@ -57,7 +57,7 @@ pub fn handle_page_map(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
 	}?;
 
 	/* Check if there is already a mapping in the view at the offset */
-	if dst_view.borrow().caps[args.view_offset / PAGE_SIZE_4K].is_some() {
+	if dst_view.borrow().lookup_cap(args.view_offset).is_some() {
 		/* @alwin: What this the correct behaviour here? Overmap? Fail? */
 		todo!();
 	}
@@ -71,7 +71,7 @@ pub fn handle_page_map(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
 
 	/* Check that the view has a mapping associated with offset */
 
-	if src_view.borrow().caps[src_window_offset / PAGE_SIZE_4K].is_none() {
+	if src_view.borrow().lookup_cap(src_window_offset).is_none() {
 		let object_option = src_view.borrow().bound_object.clone();
 
 		if object_option.as_ref().is_none() {
@@ -93,12 +93,12 @@ pub fn handle_page_map(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
 		let obj_offset = src_view.borrow().obj_offset + (src_window_offset - src_view.borrow().win_offset);
 
 
-		let obj_frame_cap = if object.borrow().frames[obj_offset / PAGE_SIZE_4K].is_none() {
+		let obj_frame_cap = if object.borrow().lookup_frame(obj_offset).is_none() {
 
 			/* Allocate a frame */
 			let frame_ref = frame_table.alloc_frame(cspace, ut_table).expect("@alwin: Should probs not be an assert");
 			let orig_frame_cap = frame_table.frame_from_ref(frame_ref).get_cap();
-			object.borrow_mut().frames[obj_offset / PAGE_SIZE_4K] = Some((orig_frame_cap, frame_ref));
+			object.borrow_mut().insert_frame_at(obj_offset, (orig_frame_cap, frame_ref));
 
 			/* Zero-out the frame */
 			let frame_data = frame_table.frame_data(frame_ref);
@@ -106,7 +106,7 @@ pub fn handle_page_map(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
 			orig_frame_cap
 		} else {
 			/* The object already has a frame at that location */
-	 		object.borrow().frames[obj_offset / PAGE_SIZE_4K].unwrap().0
+			object.borrow().lookup_frame(obj_offset).unwrap().cap
 		};
 
 		/* Copy the frame into the view*/
@@ -118,7 +118,7 @@ pub fn handle_page_map(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
         	sel4::CapRightsBuilder::all().build()
     	);
 
-    	src_view.borrow_mut().caps[src_window_offset / PAGE_SIZE_4K] = Some(view_frame_cap)
+    	src_view.borrow_mut().insert_cap_at(src_window_offset, view_frame_cap);
 	}
 
 	/* If we get to this point, there is guaranteed to be a mapping in the view */
@@ -127,17 +127,17 @@ pub fn handle_page_map(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table:
 	let dst_view_frame_slot = cspace.alloc_slot().expect("@alwin: this should not be an assert");
 	let dst_view_frame_cap = sel4::CPtr::from_bits(dst_view_frame_slot.try_into().unwrap()).cast::<sel4::cap_type::UnspecifiedFrame>();
 	cspace.root_cnode.relative(dst_view_frame_cap).copy(
-		&cspace.root_cnode.relative(src_view.borrow().caps[src_window_offset / PAGE_SIZE_4K].unwrap()),
+		&cspace.root_cnode.relative(src_view.borrow().lookup_cap(src_window_offset).unwrap().cap),
 		// @alwin: Be careful about rights here
     	sel4::CapRightsBuilder::all().build()
 	);
 
-	dst_view.borrow_mut().caps[args.view_offset / PAGE_SIZE_4K] = Some(dst_view_frame_cap);
+	dst_view.borrow_mut().insert_cap_at(args.view_offset, dst_view_frame_cap);
 
 	if dst_view.borrow().pending_fault.is_some() {
 		/* Map the page into the faulting process */
-		// warn_rs!("Mapping frame")
-		map_frame(cspace, ut_table, dst_view.borrow().caps[args.view_offset / PAGE_SIZE_4K].unwrap(),
+		// warn_rs!("Mapping frame");
+		map_frame(cspace, ut_table, dst_view.borrow().lookup_cap(args.view_offset).unwrap().cap,
 				  dst_view.borrow().pending_fault.as_ref().unwrap().2,
 			  	  ROUND_DOWN(dst_view.borrow().pending_fault.as_ref().unwrap().1.addr() as usize,
 			  	  sel4_sys::seL4_PageBits.try_into().unwrap()),
@@ -184,7 +184,7 @@ pub fn handle_vm_fault(cspace: &mut CSpace, frame_table: &mut FrameTable, ut_tab
 
 	let view = window_unwrapped.borrow().bound_view.as_ref().unwrap().clone();
 
-	if view.borrow().caps[fault_offset / PAGE_SIZE_4K].is_none() {
+	if view.borrow().lookup_cap(fault_offset).is_none() {
 		let object_option = view.borrow().bound_object.clone();
 
 		if object_option.as_ref().is_none() {
@@ -199,18 +199,19 @@ pub fn handle_vm_fault(cspace: &mut CSpace, frame_table: &mut FrameTable, ut_tab
 
 		let obj_offset = view.borrow().obj_offset + (fault_offset - view.borrow().win_offset);
 
-		let obj_frame_cap = if object.borrow().frames[obj_offset / PAGE_SIZE_4K].is_none() {
+		let obj_frame_cap = if object.borrow().lookup_frame(obj_offset).is_none() {
 			/* Allocate a frame */
 			let frame_ref = frame_table.alloc_frame(cspace, ut_table).expect("@alwin: Should probs not be an assert");
 			let orig_frame_cap = frame_table.frame_from_ref(frame_ref).get_cap();
-			object.borrow_mut().frames[obj_offset / PAGE_SIZE_4K] = Some((orig_frame_cap, frame_ref));
+			object.borrow_mut().insert_frame_at(obj_offset, (orig_frame_cap, frame_ref));
+
 
 			/* Zero-out the frame */
 			let frame_data = frame_table.frame_data(frame_ref);
 			frame_data[0..4096].fill(0);
 			orig_frame_cap
 		} else {
-	 		object.borrow().frames[obj_offset / PAGE_SIZE_4K].unwrap().0
+	 		object.borrow().lookup_frame(obj_offset).unwrap().cap
 		};
 
         let view_frame_cap = cspace.alloc_cap::<sel4::cap_type::UnspecifiedFrame>().expect("@alwin: This should not be an assert");
@@ -220,11 +221,11 @@ pub fn handle_vm_fault(cspace: &mut CSpace, frame_table: &mut FrameTable, ut_tab
         	sel4::CapRightsBuilder::all().build()
     	);
 
-    	view.borrow_mut().caps[fault_offset / PAGE_SIZE_4K] = Some(view_frame_cap)
+    	view.borrow_mut().insert_cap_at(fault_offset, view_frame_cap);
 	}
 
 	/* Map views[idx] into virtual address space*/
-	map_frame(cspace, ut_table, view.borrow().caps[fault_offset / PAGE_SIZE_4K].unwrap(), proc.vspace.0,
+	map_frame(cspace, ut_table, view.borrow().lookup_cap(fault_offset).unwrap().cap, proc.vspace.0,
 			  ROUND_DOWN(fault_info.addr() as usize, sel4_sys::seL4_PageBits.try_into().unwrap()),
 			  view.borrow().rights.clone(), sel4::VmAttributes::DEFAULT, None);
 

@@ -4,10 +4,11 @@ use crate::page::PAGE_SIZE_4K;
 use crate::ut::UTTable;
 use crate::frame_table::{FrameTable};
 use alloc::vec::Vec;
+use alloc::vec;
 use alloc::rc::Rc;
 use crate::window::Window;
 use crate::view::View;
-use crate::object::{AnonymousMemoryObject, OBJ_MAX_FRAMES};
+use crate::object::{AnonymousMemoryObject, OBJ_LVL_MAX, MAX_OBJ_SIZE};
 use core::cell::RefCell;
 use smos_common::util::ROUND_DOWN;
 
@@ -46,7 +47,7 @@ fn handle_overlapping_segment(window: Rc<RefCell<Window>>, segment: &elf::segmen
     // themselves don't overlap, we will need to keep some extra book-keeping and have more segments.
 
     // Check that the rights of this segment are the same as the existing window that overlaps with it
-    if rights_from_elf_flags(segment.p_flags) != window.borrow().view.borrow().rights {
+    if rights_from_elf_flags(segment.p_flags) != window.borrow().bound_view.as_ref().unwrap().borrow().rights {
         todo!();
     }
 
@@ -79,7 +80,7 @@ fn load_segment_into_vspace(cspace: &mut CSpace, ut_table: &mut UTTable, frame_t
         None => {}
     };
 
-    if total_size as usize / PAGE_SIZE_4K > OBJ_MAX_FRAMES {
+    if total_size as usize > MAX_OBJ_SIZE {
         err_rs!("@alwin: Deal with the case where segment size is to large");
         todo!();
     }
@@ -92,24 +93,17 @@ fn load_segment_into_vspace(cspace: &mut CSpace, ut_table: &mut UTTable, frame_t
     }));
 
     /* Create a memory object corresponding to this segment */
-    let mut object = Rc::new( RefCell::new( AnonymousMemoryObject {
-        size: total_size.try_into().unwrap(),
-        rights: rights_from_elf_flags(segment.p_flags),
-        frames: [None; OBJ_MAX_FRAMES],
-        associated_views: Vec::new()
-    }));
+    let mut object = Rc::new( RefCell::new( AnonymousMemoryObject::new(total_size.try_into().unwrap(), rights_from_elf_flags(segment.p_flags))));
 
     /* Create a view corresponding to this segment */
-    let mut view = Rc::new( RefCell::new( View {
-        caps: [None; OBJ_MAX_FRAMES],
-        bound_window: window.clone(),
-        bound_object: Some(object.clone()),
-        managing_server_info: None,
-        rights: rights_from_elf_flags(segment.p_flags),
-        win_offset: 0,
-        obj_offset: 0,
-        pending_fault: None
-    }));
+    let mut view = Rc::new( RefCell::new( View::new(
+        window.clone(),
+        Some(object.clone()),
+        None,
+        rights_from_elf_flags(segment.p_flags),
+        0,
+        0,
+    )));
 
     window.borrow_mut().bound_view = Some(view.clone());
     object.borrow_mut().associated_views.push(view.clone());
@@ -122,11 +116,11 @@ fn load_segment_into_vspace(cspace: &mut CSpace, ut_table: &mut UTTable, frame_t
 
         let frame_ref = frame_table.alloc_frame(cspace, ut_table).ok_or(sel4::Error::NotEnoughMemory)?;
         let orig_frame_cap = frame_table.frame_from_ref(frame_ref).get_cap();
-        object.borrow_mut().frames[i] = Some((orig_frame_cap, frame_ref));
+        object.borrow_mut().insert_frame_at(i * PAGE_SIZE_4K, (orig_frame_cap, frame_ref));
 
         let loadee_frame = sel4::CPtr::from_bits(cspace.alloc_slot()?.try_into().unwrap()).cast::<sel4::cap_type::UnspecifiedFrame>();
         cspace.root_cnode().relative(loadee_frame).copy(&cspace.root_cnode().relative(frame_table.frame_from_ref(frame_ref).get_cap()), sel4::CapRightsBuilder::all().build());
-        view.borrow_mut().caps[i] = Some(loadee_frame.cast());
+        view.borrow_mut().insert_cap_at(i * PAGE_SIZE_4K, loadee_frame.cast());
 
         match map_frame(cspace, ut_table, loadee_frame, vspace, loadee_vaddr, view.borrow().rights.clone(), sel4::VmAttributes::DEFAULT, None) {
             Ok(_) => {},

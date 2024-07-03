@@ -20,7 +20,7 @@ use crate::handle::RootServerResource;
 use smos_server::syscalls::{ProcessSpawn, LoadComplete};
 use smos_server::reply::SMOSReply;
 use smos_common::local_handle;
-use crate::object::{AnonymousMemoryObject, OBJ_MAX_FRAMES};
+use crate::object::{AnonymousMemoryObject, OBJ_LVL_MAX};
 use smos_server::event::{INVOCATION_EP_BITS, FAULT_EP_BITS};
 use smos_server::handle::{HandleInner, ServerHandle, HandleAllocater};
 use smos_common::string::copy_terminated_rust_string_to_buffer;
@@ -255,10 +255,9 @@ impl UserProcess {
     fn write_str_to_stack(&self, frame_table: &FrameTable, stack_win: &Rc<RefCell<Window>>, vaddr: usize, string: &str) {
         const STACK_BOTTOM: usize = vmem_layout::PROCESS_STACK_TOP - STACK_PAGES * PAGE_SIZE_4K;
         let offset = vaddr - STACK_BOTTOM;
-        let idx = offset / PAGE_SIZE_4K;
 
         let obj = stack_win.borrow_mut().bound_view.as_ref().unwrap().borrow_mut().bound_object.as_ref().unwrap().clone();
-        let frame_data = frame_table.frame_data(obj.borrow_mut().frames[idx].as_ref().unwrap().1);
+        let frame_data = frame_table.frame_data(obj.borrow_mut().lookup_frame(offset).expect("Could not get frame").frame_ref);
         let offset_page = vaddr % PAGE_SIZE_4K;
 
         let string_len_with_null = string.as_bytes().len() + 1;
@@ -268,10 +267,9 @@ impl UserProcess {
     fn write_words_to_stack(&self, frame_table: &FrameTable, stack_win: &Rc<RefCell<Window>>, vaddr: usize, words: &[u64]) {
         const STACK_BOTTOM: usize = vmem_layout::PROCESS_STACK_TOP - STACK_PAGES * PAGE_SIZE_4K;
         let offset = vaddr - STACK_BOTTOM;
-        let idx = offset / PAGE_SIZE_4K;
 
         let obj = stack_win.borrow_mut().bound_view.as_ref().unwrap().borrow_mut().bound_object.as_ref().unwrap().clone();
-        let frame_data = frame_table.frame_data(obj.borrow_mut().frames[idx].as_ref().unwrap().1);
+        let frame_data = frame_table.frame_data(obj.borrow_mut().lookup_frame(offset).expect("Could not get frame").frame_ref);
         let offset_page = vaddr % PAGE_SIZE_4K;
 
         let bytes_length = words.len() * 8;
@@ -281,10 +279,9 @@ impl UserProcess {
     fn write_half_words_to_stack(&self, frame_table: &FrameTable, stack_win: &Rc<RefCell<Window>>, vaddr: usize, data: &[u32]) {
         const STACK_BOTTOM: usize = vmem_layout::PROCESS_STACK_TOP - STACK_PAGES * PAGE_SIZE_4K;
         let offset = vaddr - STACK_BOTTOM;
-        let idx = offset / PAGE_SIZE_4K;
 
         let obj = stack_win.borrow_mut().bound_view.as_ref().unwrap().borrow_mut().bound_object.as_ref().unwrap().clone();
-        let frame_data = frame_table.frame_data(obj.borrow_mut().frames[idx].as_ref().unwrap().1);
+        let frame_data = frame_table.frame_data(obj.borrow_mut().lookup_frame(offset).expect("Could not get frame").frame_ref);
         let offset_page = vaddr % PAGE_SIZE_4K;
 
         let bytes_length = data.len() * 4;
@@ -295,43 +292,39 @@ impl UserProcess {
 fn init_process_stack(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable,
                       vspace: sel4::cap::VSpace) -> Result<(usize, Rc<RefCell<Window>>), sel4::Error> {
 
-    let mut window : Rc<RefCell<Window>> = Rc::new(RefCell::new( Window {
+    let mut window = Rc::new(RefCell::new( Window {
         start: vmem_layout::PROCESS_STACK_TOP - vmem_layout::STACK_PAGES * PAGE_SIZE_4K,
         size: vmem_layout::STACK_PAGES * PAGE_SIZE_4K,
         bound_view: None
     }));
 
-    let mut object : Rc<RefCell<AnonymousMemoryObject>> = Rc::new(RefCell::new(AnonymousMemoryObject {
-        size: vmem_layout::STACK_PAGES * PAGE_SIZE_4K,
-        rights: sel4::CapRights::all(),
-        frames: [None; OBJ_MAX_FRAMES],
-        associated_views: Vec::new()
-    }));
+    let mut object = Rc::new( RefCell::new( AnonymousMemoryObject::new(
+        vmem_layout::STACK_PAGES * PAGE_SIZE_4K,
+        sel4::CapRights::all()
+    )));
 
-    let mut view : Rc<RefCell<View>> = Rc::new( RefCell::new ( View {
-        caps: [None; OBJ_MAX_FRAMES],
-        bound_window: window.clone(),
-        bound_object: Some(object.clone()),
-        managing_server_info: None,
-        rights: sel4::CapRights::all(),
-        win_offset: 0,
-        obj_offset: 0,
-        pending_fault: None
-    }));
+    let mut view = Rc::new( RefCell::new ( View::new(
+        window.clone(),
+        Some(object.clone()),
+        None,
+        sel4::CapRights::all(),
+        0,
+        0,
+    )));
 
-    (*window).borrow_mut().bound_view = Some(view.clone());
-    (*object).borrow_mut().associated_views.push(view.clone());
+    window.borrow_mut().bound_view = Some(view.clone());
+    object.borrow_mut().associated_views.push(view.clone());
 
     /* Preallocate the stack */
     // @alwin: This just makes my life a little bit easier, but isn't strictly necessary
     for i in 0..STACK_PAGES {
         let frame_ref = frame_table.alloc_frame(cspace, ut_table).ok_or(sel4::Error::NotEnoughMemory)?;
         let orig_frame_cap = frame_table.frame_from_ref(frame_ref).get_cap();
-        (*object).borrow_mut().frames[i] = Some((orig_frame_cap, frame_ref));
+        object.borrow_mut().insert_frame_at(i * PAGE_SIZE_4K, (orig_frame_cap, frame_ref));
 
         let loadee_frame = sel4::CPtr::from_bits(cspace.alloc_slot()?.try_into().unwrap()).cast::<sel4::cap_type::UnspecifiedFrame>();
         cspace.root_cnode().relative(loadee_frame).copy(&cspace.root_cnode().relative(frame_table.frame_from_ref(frame_ref).get_cap()), sel4::CapRightsBuilder::all().build());
-        (*view).borrow_mut().caps[i] = Some(loadee_frame.cast());
+        view.borrow_mut().insert_cap_at(i * PAGE_SIZE_4K, loadee_frame.cast());
     }
 
     return Ok((vmem_layout::PROCESS_STACK_TOP, window));
@@ -778,22 +771,12 @@ pub fn handle_load_complete(cspace: &mut CSpace, frame_table: &mut FrameTable, p
 
     for window in &p.initial_windows {
         /* Clean up the memory object by freeing the frames in it */
-        for frame in window.borrow_mut().bound_view.as_ref().unwrap()
-                  .borrow_mut().bound_object.as_ref().unwrap()
-                  .borrow_mut().frames
-        {
-            if frame.is_some() {
-                cspace.root_cnode.relative(frame.as_ref().unwrap().0).revoke();
-                frame_table.free_frame(frame.as_ref().unwrap().1);
-            }
-        }
+        window.borrow_mut().bound_view.as_ref().unwrap()
+              .borrow_mut().bound_object.as_ref().unwrap()
+              .borrow_mut().cleanup_frame_table(cspace, frame_table);
 
-        /* The revoke above should delete these caps, just need to free the slots */
-        for cap in window.borrow_mut().bound_view.as_ref().unwrap().borrow_mut().caps {
-            if cap.is_some() {
-                cspace.free_cap(cap.unwrap());
-            }
-        }
+        /* The above should delete these caps, just need to free the slots */
+        window.borrow_mut().bound_view.as_ref().unwrap().borrow_mut().cleanup_cap_table(cspace, false);
     }
 
     // The objects and the views should be cleaned up by doing this since they are RCs that should

@@ -1,6 +1,6 @@
 use smos_server::syscalls::{ConnCreate, ConnPublish, ConnRegister, ConnDestroy, ConnDeregister,
 							ServerHandleCapCreate};
-use crate::object::{AnonymousMemoryObject, OBJ_MAX_FRAMES};
+use crate::object::{AnonymousMemoryObject, OBJ_LVL_MAX};
 use crate::page::PAGE_SIZE_4K;
 use crate::proc::{UserProcess, procs_get};
 use smos_server::reply::SMOSReply;
@@ -8,6 +8,7 @@ use smos_common::error::InvocationError;
 use alloc::string::String;
 use crate::cspace::{CSpace, CSpaceTrait};
 use alloc::rc::Rc;
+use alloc::vec;
 use crate::handle::{RootServerResource};
 use smos_server::handle::{ServerHandle};
 use crate::alloc::string::ToString;
@@ -262,27 +263,20 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
     }));
 
 
-    let object = Rc::new( RefCell::new (AnonymousMemoryObject {
-    	size: PAGE_SIZE_4K,
-    	rights: sel4::CapRights::all(),
-    	frames: [None; OBJ_MAX_FRAMES],
-    	associated_views: Vec::new()
-    }));
+    let object = Rc::new( RefCell::new (AnonymousMemoryObject::new(PAGE_SIZE_4K, sel4::CapRights::all())));
 
-    let view = Rc::new(RefCell::new (View {
-    	caps: [None; OBJ_MAX_FRAMES],
-    	bound_window: window.clone(),
-    	bound_object: Some(object.clone()),
-    	managing_server_info: None,
-    	rights: sel4::CapRights::all(),
-    	win_offset: 0,
-    	obj_offset: 0,
-        pending_fault: None
-    }));
+    let view = Rc::new(RefCell::new (View::new(
+    	window.clone(),
+    	Some(object.clone()),
+    	None,
+    	sel4::CapRights::all(),
+    	0,
+    	0,
+    )));
 
     window.borrow_mut().bound_view = Some(view.clone());
     object.borrow_mut().associated_views.push(view.clone());
-    object.borrow_mut().frames[0] = Some((orig_frame_cap, frame_ref));
+    object.borrow_mut().insert_frame_at(0, (orig_frame_cap, frame_ref));
 
     p.add_window_unchecked(window);
     p.views.push(view.clone());

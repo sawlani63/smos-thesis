@@ -1,4 +1,6 @@
 use alloc::vec::Vec;
+use alloc::vec;
+use smos_common::util::BIT;
 use alloc::rc::Rc;
 use crate::frame_table::FrameRef;
 use crate::view::View;
@@ -18,16 +20,149 @@ use smos_server::handle::{generic_allocate_handle, generic_get_handle, generic_c
 use smos_server::handle_capability::HandleCapabilityTable;
 use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
 
+
+/* Each level of the page table uses 9 bits, just like the underlying page table structure. Realistically,
+   this is kind of unnecessary, because no objects of this size should ever need to be allocated, but
+   it lets us more easily use large and huge pages. @alwin: In future, see if this can be redesigned
+   to use less bits per level to save space without making it a pain to use
+
+	| 9 | 9 | 9 | 9 | 12
+   */
+
 // @alwin: Just increasing this is eventually going to be problematic
-pub const OBJ_MAX_FRAMES: usize = 1096;
+pub const OBJ_LVL_MAX: usize = 512;
+const NUM_FRAME_TABLE_LEVELS: u32 = 4;
+
+// @alwin: I don't think we actually want the max object size to be this big
+pub const MAX_OBJ_SIZE: usize = OBJ_LVL_MAX.pow(NUM_FRAME_TABLE_LEVELS) * PAGE_SIZE_4K;
+
+#[derive(Clone, Debug)]
+pub struct ObjectFrame {
+	pub cap: sel4::cap::SmallPage,
+	pub frame_ref: FrameRef
+}
+
+#[derive(Clone, Debug)]
+pub struct ObjectFrameTable {
+	pub table: Vec<Option<ObjectFrameTableEntry>>
+}
+
+#[derive(Clone, Debug)]
+pub enum ObjectFrameTableEntry {
+	Frame(ObjectFrame),
+	FrameTable(ObjectFrameTable)
+}
 
 #[derive(Debug)]
 pub struct AnonymousMemoryObject {
 	pub size: usize,
 	pub rights: sel4::CapRights,
 	// sid
-	pub frames: [Option<(sel4::cap::SmallPage, FrameRef)>; OBJ_MAX_FRAMES], // @alwin: It'd be good if this was bigger and structured more like a page table
+	frames: Vec<Option<ObjectFrameTableEntry>>,
 	pub associated_views: Vec<Rc<RefCell<View>>>
+}
+
+
+impl AnonymousMemoryObject {
+	pub fn new(size: usize, rights: sel4::CapRights) -> AnonymousMemoryObject {
+		AnonymousMemoryObject {
+			size: size,
+			rights: rights,
+			frames: vec![None; OBJ_LVL_MAX],
+			associated_views: Vec::new()
+		}
+	}
+
+	pub fn lookup_frame<'a>(&'a self, offset: usize) -> Option<&'a ObjectFrame> {
+		let mut shift = 39;
+		let mut curr_table_lvl = 0;
+		let mut curr_table = &self.frames;
+		while curr_table_lvl < 4 {
+			let idx = (offset >> shift) & (BIT(9) - 1);
+
+			curr_table = match &curr_table[idx] {
+				None => return None,
+				Some(x) => {
+					match x {
+						ObjectFrameTableEntry::Frame(ref y) => return Some(&y),
+						ObjectFrameTableEntry::FrameTable(y) => &y.table
+					}
+				}
+			};
+
+			curr_table_lvl +=  1;
+			shift -= 9;
+		}
+
+		return None;
+	}
+
+	pub fn insert_frame_at(&mut self, offset: usize, frame: (sel4::cap::SmallPage, FrameRef)) -> Result<(), sel4::Error> {
+		let mut shift = 39;
+		let mut curr_table_lvl = 0;
+		let mut curr_table = &mut self.frames;
+		while curr_table_lvl < 3 {
+			let idx = (offset >> shift) & (BIT(9) - 1);
+
+			if curr_table[idx].is_none() {
+				curr_table[idx] = Some(ObjectFrameTableEntry::FrameTable(ObjectFrameTable { table: vec![None; OBJ_LVL_MAX] }));
+			}
+
+			curr_table = match &mut curr_table[idx] {
+				None => return Err(sel4::Error::InvalidArgument), // @alwin: What to actually return here?
+				Some(ref mut x) => {
+					match x {
+						ObjectFrameTableEntry::Frame(_) => return Err(sel4::Error::DeleteFirst),
+						ObjectFrameTableEntry::FrameTable(ref mut y) => &mut y.table
+					}
+				}
+			};
+
+			curr_table_lvl +=  1;
+			shift -= 9;
+		}
+
+		let idx = (offset >> shift) & (BIT(9) - 1);
+		if curr_table[idx].is_none() {
+			curr_table[idx] = Some(ObjectFrameTableEntry::Frame(ObjectFrame {cap: frame.0, frame_ref: frame.1}));
+			return Ok(());
+		}
+
+		match &curr_table[idx] {
+			None => panic!("This should have already been handled above"),
+			Some(x) => {
+				match x {
+					ObjectFrameTableEntry::Frame(_) => return Err(sel4::Error::DeleteFirst),
+					ObjectFrameTableEntry::FrameTable(_) => panic!("Internal error: FrameTable on bottom level should not occur")
+				}
+			}
+		}
+	}
+
+	pub fn cleanup_obj_table_inner(vec: &Vec<Option<ObjectFrameTableEntry>>, cspace: &mut CSpace,
+								  frame_table: &mut FrameTable, revoke: bool) {
+		for node in vec {
+			match node {
+				None => continue,
+				Some(x) => {
+					match x {
+						ObjectFrameTableEntry::FrameTable(ref y) => Self::cleanup_obj_table_inner(&y.table, cspace, frame_table, revoke),
+						ObjectFrameTableEntry::Frame(ref y) => {
+							if revoke {
+								cspace.root_cnode.relative(y.cap).revoke();
+							}
+							frame_table.free_frame(y.frame_ref);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	pub fn cleanup_frame_table(&mut self, cspace: &mut CSpace, frame_table: &mut FrameTable) {
+		// @alwin: Double check the revoke condition
+		Self::cleanup_obj_table_inner(&self.frames, cspace, frame_table, self.associated_views.len() != 0)
+	}
 }
 
 pub fn handle_obj_create(p: &mut UserProcess, handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
@@ -45,21 +180,15 @@ pub fn handle_obj_create(p: &mut UserProcess, handle_cap_table: &mut HandleCapab
 	}
 
 	/* Make sure the object is smaller than the max size */
-	if args.size / PAGE_SIZE_4K >= OBJ_MAX_FRAMES {
+	if args.size / PAGE_SIZE_4K >= MAX_OBJ_SIZE {
 		return Err(InvocationError::InvalidArguments);
 	}
 
     let (idx, handle_ref, cptr) = generic_allocate_handle(p, handle_cap_table, args.return_cap)?;
 
-    let mem_obj = Rc::new( RefCell::new( AnonymousMemoryObject {
-		size: args.size,
-		rights: args.rights.clone(),
-		frames: [None; OBJ_MAX_FRAMES],
-		associated_views: Vec::new()
-	}));
+    let mem_obj = Rc::new( RefCell::new( AnonymousMemoryObject::new(args.size, args.rights.clone())));
 
     *handle_ref = Some(ServerHandle::new(RootServerResource::Object(mem_obj)));
-    // @alwin: Do we need a list of memory objects in a process? - probs not
 
     let ret_value = if args.return_cap {
     	HandleOrHandleCap::<ObjectHandle>::new_handle_cap(cptr.unwrap())
@@ -70,7 +199,7 @@ pub fn handle_obj_create(p: &mut UserProcess, handle_cap_table: &mut HandleCapab
     return Ok(SMOSReply::ObjCreate{hndl: ret_value});
 }
 
-pub fn handle_obj_destroy(frame_table: &mut FrameTable, p: &mut UserProcess,
+pub fn handle_obj_destroy(cspace: &mut CSpace, frame_table: &mut FrameTable, p: &mut UserProcess,
 						  handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
 						  args: &ObjDestroy) -> Result<SMOSReply, InvocationError> {
 
@@ -91,11 +220,7 @@ pub fn handle_obj_destroy(frame_table: &mut FrameTable, p: &mut UserProcess,
     	todo!()
     }
 
-    for frame in object.borrow_mut().frames {
-    	if let Some(inner) = frame {
-    		frame_table.free_frame(inner.1);
-    	}
-    }
+    object.borrow_mut().cleanup_frame_table(cspace, frame_table);
 
     generic_cleanup_handle(p, handle_cap_table, args.hndl, 0)?;
 
