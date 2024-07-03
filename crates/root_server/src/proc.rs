@@ -126,17 +126,17 @@ impl UserProcess {
     }
 
     // @alwin: This should be easy to keep sorted (makes it faster to check if window overlaps)
-    pub fn overlapping_window(&self, start: usize, size: usize) -> bool {
+    pub fn overlapping_window(&self, start: usize, size: usize) -> Option<Rc<RefCell<Window>>> {
         for window in &self.windows {
             let window_borrowed = window.borrow();
             if (start >= window_borrowed.start && start < window_borrowed.start + window_borrowed.size) ||
                (start + size >= window_borrowed.start && start + size < window_borrowed.start + window_borrowed.size ) {
 
-                return true;
+                return Some(window.clone());
             }
         }
 
-        return false;
+        return None;
     }
 
     pub fn find_window_containing(&self, vaddr: usize) -> Option<Rc<RefCell<Window>>> {

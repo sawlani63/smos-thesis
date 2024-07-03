@@ -27,27 +27,32 @@ fn rights_from_elf_flags(flags: u32) -> sel4::CapRights {
     return builder.build();
 }
 
-fn overlapping_window(windows: &Vec<Rc<RefCell<Window>>>, start: usize, size: usize) -> bool {
+fn overlapping_window(windows: &Vec<Rc<RefCell<Window>>>, start: usize, size: usize) -> Option<Rc<RefCell<Window>>> {
     for window in windows {
         if (start >= window.borrow().start && start < window.borrow().start + window.borrow().size) ||
            (start + size >= window.borrow().start && start + size < window.borrow().start + window.borrow().size ) {
 
-            return true;
+            return Some(window.clone());
         }
     }
 
-    return false;
+    return None;
 }
 
-fn handle_overlapping_segment(windows: &Vec<Rc<RefCell<Window>>>, segment: &elf::segment::ProgramHeader, data: &[u8]) {
+fn handle_overlapping_segment(window: Rc<RefCell<Window>>, segment: &elf::segment::ProgramHeader, data: &[u8]) {
+    log_rs!("Dealing with an overlapping region");
     // @alwin: We should make sure no segments actually overlap in terms of their precise virtual addresses.
     // This is a bit annoying because, windows are all page-aligned. For us to check that the elf segments
     // themselves don't overlap, we will need to keep some extra book-keeping and have more segments.
 
+    // Check that the rights of this segment are the same as the existing window that overlaps with it
+    if rights_from_elf_flags(segment.p_flags) != window.borrow().view.borrow().rights {
+        todo!();
+    }
+
     /* If the segment doesn't have any data, we don't need to do anything. */
-    // @alwin: Actually, we should check that the permissions are the same.
-    if (segment.p_filesz == 0) {
-        return
+    if segment.p_filesz == 0 {
+        return;
     }
 
     /* If the segment does contain data, we need to copy it into the right part of the frame,
@@ -66,10 +71,13 @@ fn load_segment_into_vspace(cspace: &mut CSpace, ut_table: &mut UTTable, frame_t
 
     log_rs!("Loading segment of type {} => 0x{:x} - 0x{:x}", segment.p_type, segment.p_vaddr, segment.p_vaddr + segment.p_memsz);
 
-    if overlapping_window(windows, segment.p_vaddr.try_into().unwrap(), segment.p_memsz.try_into().unwrap()) {
-        log_rs!("Dealing with an overlapping region");
-        return Ok(());
-    }
+    match overlapping_window(windows, segment.p_vaddr.try_into().unwrap(), segment.p_memsz.try_into().unwrap()) {
+        Some(win) => {
+            handle_overlapping_segment(win, segment, data);
+            return Ok(());
+        },
+        None => {}
+    };
 
     if total_size as usize / PAGE_SIZE_4K > OBJ_MAX_FRAMES {
         err_rs!("@alwin: Deal with the case where segment size is to large");
@@ -123,7 +131,8 @@ fn load_segment_into_vspace(cspace: &mut CSpace, ut_table: &mut UTTable, frame_t
         match map_frame(cspace, ut_table, loadee_frame, vspace, loadee_vaddr, view.borrow().rights.clone(), sel4::VmAttributes::DEFAULT, None) {
             Ok(_) => {},
             Err(e) => match e {
-                // @alwin: check that the overlapping pages have same permissions
+                // @alwin: This won't get triggered as you would expect because overmapping does
+                // not return an error on aarch64.
                 sel4::Error::DeleteFirst => {
                     cspace.delete(loadee_frame.bits().try_into().unwrap());
                     cspace.free_slot(loadee_frame.bits().try_into().unwrap());
@@ -171,8 +180,7 @@ pub fn load_elf(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut F
     let mut windows = Vec::<Rc<RefCell<Window>>>::new();
 
     for segment in elf.segments().ok_or(sel4::Error::InvalidArgument)?.iter() {
-        if segment.p_type != elf::abi::PT_LOAD && segment.p_type != elf::abi::PT_TLS /*&& //@alwin: Do we need this?
-           segment.p_type != elf::abi::PT_PHDR*/ {
+        if segment.p_type != elf::abi::PT_LOAD && segment.p_type != elf::abi::PT_TLS {
 
             continue;
         }

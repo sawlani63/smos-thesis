@@ -202,7 +202,8 @@ pub fn handle_conn_publish(cspace: &mut CSpace, ut_table: &mut UTTable, frame_ta
 		return Err(InvocationError::InvalidArguments);
 	}
 
-	if p.overlapping_window(args.ntfn_buffer, PAGE_SIZE_4K) {
+	/* Check that the notification buffer does not overlap with another window */
+	if p.overlapping_window(args.ntfn_buffer, PAGE_SIZE_4K).is_some() {
 		return Err(InvocationError::InvalidArguments);
 	}
 

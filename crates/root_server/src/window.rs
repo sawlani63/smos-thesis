@@ -35,7 +35,7 @@ pub fn handle_window_create(p: &mut UserProcess, handle_cap_table: &mut HandleCa
     }
 
     /* Ensure that the window does not overlap with any other windows */
-    if p.overlapping_window(args.base_vaddr.try_into().unwrap(), args.size) {
+    if p.overlapping_window(args.base_vaddr.try_into().unwrap(), args.size).is_some() {
         warn_rs!("Window overlaps with an existing window");
         return Err(InvocationError::InvalidArguments);
     }
