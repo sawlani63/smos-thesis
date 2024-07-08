@@ -1,9 +1,9 @@
-use core::fmt::Write;
+use crate::cspace::CSpace;
 use crate::mapping::map_device;
-use crate::page::{PAGE_SIZE_4K, PAGE_ALIGN_4K};
+use crate::page::{PAGE_ALIGN_4K, PAGE_SIZE_4K};
 use crate::ut::UTTable;
 use crate::util::MASK;
-use crate::cspace::CSpace;
+use core::fmt::Write;
 use sel4_config::{sel4_cfg, sel4_cfg_if};
 
 sel4_cfg_if! {
@@ -16,7 +16,7 @@ sel4_cfg_if! {
     }
 }
 
-use imp::{UART, UART_PADDR, plat_uart_init, plat_uart_put_char};
+use imp::{plat_uart_init, plat_uart_put_char, UART, UART_PADDR};
 
 #[derive(Copy, Clone)]
 pub struct UARTPrinter {
@@ -40,24 +40,24 @@ impl Write for UARTPrinter {
             self.uart_put_char(c);
         }
 
-        return Ok(())
+        return Ok(());
     }
 }
 
 impl UART {
-    pub fn from_vaddr<'b>(vaddr: usize) -> &'b mut Self{
+    pub fn from_vaddr<'b>(vaddr: usize) -> &'b mut Self {
         unsafe { &mut *(vaddr as *mut Self) }
     }
 }
 
 pub fn uart_init(cspace: &mut CSpace, ut_table: &mut UTTable) -> Result<UARTPrinter, sel4::Error> {
     let uart_page_vaddr = map_device(cspace, ut_table, PAGE_ALIGN_4K(UART_PADDR), PAGE_SIZE_4K)?;
-    let uart_vaddr = uart_page_vaddr + (UART_PADDR & MASK(sel4_sys::seL4_PageBits.try_into().unwrap()));
+    let uart_vaddr =
+        uart_page_vaddr + (UART_PADDR & MASK(sel4_sys::seL4_PageBits.try_into().unwrap()));
     let uart = UART::from_vaddr(uart_vaddr);
     plat_uart_init(uart);
 
-    Ok(UARTPrinter { uart_vaddr: uart_vaddr })
+    Ok(UARTPrinter {
+        uart_vaddr: uart_vaddr,
+    })
 }
-
-
-

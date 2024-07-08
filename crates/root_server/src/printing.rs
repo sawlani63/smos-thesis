@@ -1,7 +1,7 @@
-use core::fmt;
 use crate::uart::UARTPrinter;
+use core::fmt;
 
-static mut UART_PRINTER : Option<UARTPrinter> = None;
+static mut UART_PRINTER: Option<UARTPrinter> = None;
 
 pub const COLOR_RED: &str = "\x1B[31m";
 pub const COLOR_YELLOW: &str = "\x1B[33m";
@@ -9,9 +9,11 @@ pub const COLOR_RESET: &str = "\x1B[0m";
 
 #[doc(hidden)]
 pub fn print_helper(args: fmt::Arguments) {
-    fmt::write(unsafe { &mut UART_PRINTER.expect("Attempting to use printing before initializing") }, args).unwrap_or_else(|err| {
-        panic!("write error: {:?}", err)
-    })
+    fmt::write(
+        unsafe { &mut UART_PRINTER.expect("Attempting to use printing before initializing") },
+        args,
+    )
+    .unwrap_or_else(|err| panic!("write error: {:?}", err))
 }
 
 #[macro_export]
@@ -59,9 +61,6 @@ macro_rules! warn_rs {
         $crate::print!("{}", $crate::printing::COLOR_RESET);
     }};
 }
-
-
-
 
 pub fn print_init(uart_printer: UARTPrinter) {
     unsafe {

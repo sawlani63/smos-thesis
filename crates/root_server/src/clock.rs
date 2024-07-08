@@ -1,6 +1,6 @@
-use sel4_config::{sel4_cfg, sel4_cfg_if};
-use crate::irq::IRQDispatch;
 use crate::cspace::CSpace;
+use crate::irq::IRQDispatch;
+use sel4_config::{sel4_cfg, sel4_cfg_if};
 
 sel4_cfg_if! {
     if #[sel4_cfg(PLAT_QEMU_ARM_VIRT)] {
@@ -12,7 +12,7 @@ sel4_cfg_if! {
     }
 }
 
-use imp::{plat_timer_init, TIMEOUT_IRQ, get_time, configure_timeout_at, disable_timer};
+use imp::{configure_timeout_at, disable_timer, get_time, plat_timer_init, TIMEOUT_IRQ};
 
 #[derive(Copy, Clone)]
 struct TimeoutNode {
@@ -28,12 +28,13 @@ type TimerCallback = fn(usize, *const ());
 const MAX_TIMEOUTS: usize = 1024;
 static mut TIMEOUTS_HEAD_FULL: Option<u16> = None;
 static mut TIMEOUTS_HEAD_EMPTY: Option<u16> = Some(0);
-static mut TIMEOUTS: [TimeoutNode; MAX_TIMEOUTS] = [TimeoutNode { deadline: 0,
-                                                                   callback: None,
-                                                                   callback_data: core::ptr::null(),
-                                                                   next: None,
-                                                                   prev: None};
-                                                     MAX_TIMEOUTS];
+static mut TIMEOUTS: [TimeoutNode; MAX_TIMEOUTS] = [TimeoutNode {
+    deadline: 0,
+    callback: None,
+    callback_data: core::ptr::null(),
+    next: None,
+    prev: None,
+}; MAX_TIMEOUTS];
 
 fn timeouts_empty() -> bool {
     unsafe {
@@ -67,13 +68,16 @@ fn timeouts_remove_min() -> (usize, TimerCallback, *const (), usize) {
         TIMEOUTS[rm_index].next = TIMEOUTS_HEAD_EMPTY;
         TIMEOUTS_HEAD_EMPTY = Some(rm_index.try_into().unwrap());
 
-        return (TIMEOUTS[rm_index].deadline, TIMEOUTS[rm_index].callback.unwrap(),
-                TIMEOUTS[rm_index].callback_data, rm_index);
+        return (
+            TIMEOUTS[rm_index].deadline,
+            TIMEOUTS[rm_index].callback.unwrap(),
+            TIMEOUTS[rm_index].callback_data,
+            rm_index,
+        );
     }
 }
 
 fn timer_irq(_data: *const (), _irq: usize, irq_handler: sel4::cap::IrqHandler) -> i32 {
-
     // @alwin: should this return something
     let curr_time = get_time();
     let mut deadline = timeouts_peek();
@@ -99,10 +103,16 @@ fn timeouts_init() {
             TIMEOUTS[i].next = Some((i + 1) as u16);
         }
     }
-    unsafe { TIMEOUTS[MAX_TIMEOUTS - 1].next = None; };
+    unsafe {
+        TIMEOUTS[MAX_TIMEOUTS - 1].next = None;
+    };
 }
 
-unsafe fn timeouts_insert(deadline: usize, callback: TimerCallback, data: *const ()) -> Option<usize>{
+unsafe fn timeouts_insert(
+    deadline: usize,
+    callback: TimerCallback,
+    data: *const (),
+) -> Option<usize> {
     if timeouts_full() {
         return None;
     }
@@ -123,7 +133,8 @@ unsafe fn timeouts_insert(deadline: usize, callback: TimerCallback, data: *const
         let insert_index = TIMEOUTS_HEAD_EMPTY.unwrap() as usize;
         TIMEOUTS_HEAD_EMPTY = TIMEOUTS[insert_index].next;
         TIMEOUTS[insert_index].next = TIMEOUTS_HEAD_FULL;
-        TIMEOUTS[TIMEOUTS_HEAD_FULL.unwrap() as usize].prev = Some(insert_index.try_into().unwrap());
+        TIMEOUTS[TIMEOUTS_HEAD_FULL.unwrap() as usize].prev =
+            Some(insert_index.try_into().unwrap());
         TIMEOUTS_HEAD_FULL = Some(insert_index.try_into().unwrap());
         TIMEOUTS[insert_index].deadline = deadline;
         TIMEOUTS[insert_index].callback = Some(callback);
@@ -132,11 +143,10 @@ unsafe fn timeouts_insert(deadline: usize, callback: TimerCallback, data: *const
     }
 
     let mut tmp_index = TIMEOUTS_HEAD_FULL.unwrap() as usize;
-    while TIMEOUTS[tmp_index].next.is_some() &&
-          deadline >= TIMEOUTS[TIMEOUTS[tmp_index].next.unwrap() as usize].deadline {
-
-            tmp_index = TIMEOUTS[tmp_index].next.unwrap() as usize;
-
+    while TIMEOUTS[tmp_index].next.is_some()
+        && deadline >= TIMEOUTS[TIMEOUTS[tmp_index].next.unwrap() as usize].deadline
+    {
+        tmp_index = TIMEOUTS[tmp_index].next.unwrap() as usize;
     }
 
     let insert_index = TIMEOUTS_HEAD_EMPTY.unwrap() as usize;
@@ -144,7 +154,8 @@ unsafe fn timeouts_insert(deadline: usize, callback: TimerCallback, data: *const
     TIMEOUTS[insert_index].prev = Some(tmp_index.try_into().unwrap());
     TIMEOUTS[tmp_index].next = Some(insert_index.try_into().unwrap());
     if TIMEOUTS[insert_index].next.is_some() {
-        TIMEOUTS[TIMEOUTS[insert_index].next.unwrap() as usize].prev = Some(insert_index.try_into().unwrap());
+        TIMEOUTS[TIMEOUTS[insert_index].next.unwrap() as usize].prev =
+            Some(insert_index.try_into().unwrap());
     }
     TIMEOUTS[insert_index].deadline = deadline;
     TIMEOUTS[insert_index].callback = Some(callback);
@@ -152,7 +163,11 @@ unsafe fn timeouts_insert(deadline: usize, callback: TimerCallback, data: *const
     return Some(insert_index.try_into().unwrap());
 }
 
-pub fn register_timer(delay: usize, callback: TimerCallback, data: *const ()) -> Result<(), sel4::Error>{
+pub fn register_timer(
+    delay: usize,
+    callback: TimerCallback,
+    data: *const (),
+) -> Result<(), sel4::Error> {
     let curr_time = get_time();
     let deadline = curr_time + delay;
     let prev_smallest_deadline = timeouts_peek();
@@ -163,14 +178,24 @@ pub fn register_timer(delay: usize, callback: TimerCallback, data: *const ()) ->
         configure_timeout_at(curr_time, deadline);
     }
 
-    return Ok(())
+    return Ok(());
 }
 
-pub fn clock_init(cspace: &mut CSpace, irq_dispatch: &mut IRQDispatch, ntfn: sel4::cap::Notification) -> Result<(), sel4::Error>{
+pub fn clock_init(
+    cspace: &mut CSpace,
+    irq_dispatch: &mut IRQDispatch,
+    ntfn: sel4::cap::Notification,
+) -> Result<(), sel4::Error> {
     plat_timer_init();
-    irq_dispatch.register_irq_handler(cspace, TIMEOUT_IRQ, true, timer_irq, core::ptr::null() as *const (), ntfn)?;
+    irq_dispatch.register_irq_handler(
+        cspace,
+        TIMEOUT_IRQ,
+        true,
+        timer_irq,
+        core::ptr::null() as *const (),
+        ntfn,
+    )?;
 
     timeouts_init();
     Ok(())
 }
-

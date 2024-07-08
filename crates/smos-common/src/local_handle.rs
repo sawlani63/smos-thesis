@@ -44,46 +44,46 @@ impl HandleType for WindowRegistrationHandle {}
 
 #[derive(Debug, Copy, Clone)]
 pub struct LocalHandle<A: HandleType> {
-	pub idx: usize,
-	marker: PhantomData<A>,
+    pub idx: usize,
+    marker: PhantomData<A>,
 }
 
 impl<A: HandleType> LocalHandle<A> {
-	pub fn new(idx: usize) -> LocalHandle<A> {
-		return LocalHandle {
-			marker: PhantomData,
-			idx: idx
-		};
-	}
+    pub fn new(idx: usize) -> LocalHandle<A> {
+        return LocalHandle {
+            marker: PhantomData,
+            idx: idx,
+        };
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct HandleCap<A: HandleType> {
-	pub cptr: sel4::AbsoluteCPtr,
-	marker: PhantomData<A>,
+    pub cptr: sel4::AbsoluteCPtr,
+    marker: PhantomData<A>,
 }
 
 impl<A: HandleType> HandleCap<A> {
-	pub fn new(cptr: sel4::AbsoluteCPtr) -> HandleCap<A> {
-		return HandleCap {
-			marker: PhantomData,
-			cptr: cptr
-		};
-	}
+    pub fn new(cptr: sel4::AbsoluteCPtr) -> HandleCap<A> {
+        return HandleCap {
+            marker: PhantomData,
+            cptr: cptr,
+        };
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum HandleOrHandleCap<A: HandleType> {
-	Handle(LocalHandle<A>),
-	HandleCap(HandleCap<A>)
+    Handle(LocalHandle<A>),
+    HandleCap(HandleCap<A>),
 }
 
 impl<A: HandleType> HandleOrHandleCap<A> {
-	pub fn new_handle(val: usize) -> HandleOrHandleCap<A> {
-		return HandleOrHandleCap::Handle( LocalHandle::new(val) );
-	}
+    pub fn new_handle(val: usize) -> HandleOrHandleCap<A> {
+        return HandleOrHandleCap::Handle(LocalHandle::new(val));
+    }
 
-	pub fn new_handle_cap(cptr: sel4::AbsoluteCPtr) -> HandleOrHandleCap<A> {
-		return HandleOrHandleCap::HandleCap( HandleCap::new(cptr) );
-	}
+    pub fn new_handle_cap(cptr: sel4::AbsoluteCPtr) -> HandleOrHandleCap<A> {
+        return HandleOrHandleCap::HandleCap(HandleCap::new(cptr));
+    }
 }

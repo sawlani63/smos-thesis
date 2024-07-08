@@ -3,7 +3,7 @@
 
 use core::mem::size_of;
 
-const fn BIT(n : usize) -> usize {
+const fn BIT(n: usize) -> usize {
     1 << n
 }
 
@@ -17,8 +17,13 @@ pub fn bf_clr_bit(bf: &mut [u64], idx: usize) {
     bf[WORD_INDEX(idx)] &= !(BIT(BIT_INDEX(idx))) as u64;
 }
 
-pub fn bf_get_bit(bf: &mut[u64], idx: usize) -> bool {
-    if (bf[WORD_INDEX(idx)] & <usize as TryInto<u64>>::try_into(BIT(BIT_INDEX(idx))).unwrap()) != 0 { true } else { false }
+pub fn bf_get_bit(bf: &mut [u64], idx: usize) -> bool {
+    if (bf[WORD_INDEX(idx)] & <usize as TryInto<u64>>::try_into(BIT(BIT_INDEX(idx))).unwrap()) != 0
+    {
+        true
+    } else {
+        false
+    }
 }
 
 pub fn bf_first_free(bf: &[u64]) -> Result<usize, ()> {
@@ -47,11 +52,11 @@ pub const fn BITFIELD_SIZE(x: usize) -> usize {
     x / (size_of::<u64>() * 8)
 }
 
-fn WORD_INDEX(bit : usize) -> usize {
+fn WORD_INDEX(bit: usize) -> usize {
     bit / WORD_BITS
 }
 
-fn BIT_INDEX(bit : usize) -> usize {
+fn BIT_INDEX(bit: usize) -> usize {
     bit % WORD_BITS
 }
 

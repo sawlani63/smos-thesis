@@ -1,6 +1,6 @@
 #![no_std]
 
-use bitfield::{bitfield_type, bitfield_init, bf_first_free, bf_set_bit, bf_clr_bit};
+use bitfield::{bf_clr_bit, bf_first_free, bf_set_bit, bitfield_init, bitfield_type};
 
 const CSPACE_SIZE: usize = 256;
 
@@ -11,10 +11,10 @@ pub struct SMOSUserCSpace {
 
 impl SMOSUserCSpace {
     pub fn new(root_cnode: sel4::cap::CNode) -> Self {
-        return Self{
+        return Self {
             root_cnode: root_cnode,
-            bf: bitfield_init!(CSPACE_SIZE)
-        }
+            bf: bitfield_init!(CSPACE_SIZE),
+        };
     }
 
     pub fn alloc_slot(&mut self) -> Result<usize, ()> {
@@ -33,10 +33,14 @@ impl SMOSUserCSpace {
 
     pub fn to_absolute_cptr(&self, slot: usize) -> sel4::AbsoluteCPtr {
         assert!(slot < CSPACE_SIZE);
-        return self.root_cnode.relative_bits_with_depth(slot.try_into().unwrap(), sel4::WORD_SIZE);
+        return self
+            .root_cnode
+            .relative_bits_with_depth(slot.try_into().unwrap(), sel4::WORD_SIZE);
     }
 
     pub fn delete(&self, cptr: usize) -> Result<(), sel4::Error> {
-        self.root_cnode.relative_bits_with_depth(cptr.try_into().unwrap(), sel4::WORD_SIZE).delete()
+        self.root_cnode
+            .relative_bits_with_depth(cptr.try_into().unwrap(), sel4::WORD_SIZE)
+            .delete()
     }
 }

@@ -1,15 +1,15 @@
 #![allow(non_snake_case)]
 
-use bitfield::{bf_first_free, bf_set_bit, bf_get_bit, bf_clr_bit, bitfield_init, bitfield_type};
-use crate::cspace::{CNODE_SLOTS, CNODE_SIZE_BITS, BOT_LVL_PER_NODE, CSpace, CSpaceTrait};
 use crate::bootstrap::INITIAL_TASK_CNODE_SIZE_BITS;
-use crate::frame_table::{FrameTable, FrameRef};
-use smos_common::util::BIT;
+use crate::cspace::{CSpace, CSpaceTrait, BOT_LVL_PER_NODE, CNODE_SIZE_BITS, CNODE_SLOTS};
+use crate::frame_table::{FrameRef, FrameTable};
 use crate::ut::UTTable;
 use alloc::boxed::Box;
+use bitfield::{bf_clr_bit, bf_first_free, bf_get_bit, bf_set_bit, bitfield_init, bitfield_type};
+use smos_common::util::BIT;
 
 fn test_bf_bit(bit: usize) {
-    let mut bf : bitfield_type!(128) = bitfield_init!(128);
+    let mut bf: bitfield_type!(128) = bitfield_init!(128);
     assert!(bf_first_free(&mut bf).unwrap() == 0);
 
     bf_set_bit(&mut bf, bit);
@@ -22,9 +22,9 @@ fn test_bf_bit(bit: usize) {
 }
 
 const fn NSLOTS_MIN() -> usize {
-    if CNODE_SLOTS(INITIAL_TASK_CNODE_SIZE_BITS) * CNODE_SLOTS(CNODE_SIZE_BITS) - 4 <
-       CNODE_SLOTS(CNODE_SIZE_BITS) * BOT_LVL_PER_NODE + 1 {
-
+    if CNODE_SLOTS(INITIAL_TASK_CNODE_SIZE_BITS) * CNODE_SLOTS(CNODE_SIZE_BITS) - 4
+        < CNODE_SLOTS(CNODE_SIZE_BITS) * BOT_LVL_PER_NODE + 1
+    {
         CNODE_SLOTS(INITIAL_TASK_CNODE_SIZE_BITS) * CNODE_SLOTS(CNODE_SIZE_BITS) - 4
     } else {
         CNODE_SLOTS(CNODE_SIZE_BITS) * BOT_LVL_PER_NODE + 1
@@ -60,7 +60,11 @@ fn test_cspace(cspace: &mut CSpace) {
         }
     }
 
-    log_rs!("Allocated {} <-> {} slots", slots[0], slots[real_nslots - 1]);
+    log_rs!(
+        "Allocated {} <-> {} slots",
+        slots[0],
+        slots[real_nslots - 1]
+    );
 
     for i in 0..real_nslots {
         cspace.free_slot(slots[i]);
@@ -139,7 +143,6 @@ fn test_heap() {
     let t = Box::new(5);
     drop(t);
 }
-
 
 pub fn run_tests(cspace: &mut CSpace, ut_table: &mut UTTable, frame_table: &mut FrameTable) {
     test_bf();

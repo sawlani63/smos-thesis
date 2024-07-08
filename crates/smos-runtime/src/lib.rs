@@ -2,12 +2,12 @@
 
 use core::fmt;
 
-mod entry;
 pub mod args;
+mod entry;
 pub mod env;
 
-pub use smos_macros::smos_declare_main;
 pub use entry::run_main;
+pub use smos_macros::smos_declare_main;
 
 use sel4_panicking_env::abort;
 
@@ -32,4 +32,3 @@ macro_rules! smos_declare_main_internal {
 		}
 	}
 }
-

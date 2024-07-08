@@ -36,7 +36,7 @@ pub fn decode_entry_type(badge: usize) -> EntryType {
             IRQ_VALUE => EntryType::Irq,
             SIGNAL_VALUE => EntryType::Signal,
             _ => panic!("An unexpected notification capability was invoked"),
-        }
+        };
     }
 
     let pid = badge & !(0x3 << EP_TYPE_SHIFT);

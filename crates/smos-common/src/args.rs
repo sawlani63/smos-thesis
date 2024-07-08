@@ -2,37 +2,37 @@
 
 #[repr(usize)]
 pub enum WindowCreateArgs {
-	Base_Vaddr = 0,
-	Size = 1,
-	ReturnCap = 2
+    Base_Vaddr = 0,
+    Size = 1,
+    ReturnCap = 2,
 }
 
 #[repr(usize)]
 pub enum WindowDestroyArgs {
-	Handle = 0
+    Handle = 0,
 }
 
 #[repr(usize)]
 pub enum ConnectionDestroyArgs {
-	Handle = 0
+    Handle = 0,
 }
 
 #[repr(usize)]
 pub enum ObjCreateArgs {
-	HasName = 0,
-	Size,
-	Rights,
-	ReturnCap,
-	Length
+    HasName = 0,
+    Size,
+    Rights,
+    ReturnCap,
+    Length,
 }
 
 #[repr(usize)]
 pub enum ViewArgs {
-	Window = 0,
-	Object,
-	WinOffset,
-	ObjOffset,
-	Size,
-	Rights,
-	Length
+    Window = 0,
+    Object,
+    WinOffset,
+    ObjOffset,
+    Size,
+    Rights,
+    Length,
 }

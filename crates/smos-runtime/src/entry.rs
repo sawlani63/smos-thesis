@@ -1,17 +1,17 @@
-use core::arch::global_asm;
-use sel4_panicking_env::abort;
-use core::ptr;
-use sel4_panicking::catch_unwind;
-use core::panic::UnwindSafe;
-use smos_cspace::SMOSUserCSpace;
-use smos_common::client_connection::ClientConnection;
-use smos_common::connection::RootServerConnection;
-use smos_common::init::InitCNodeSlots::{*};
-use smos_common::local_handle::{LocalHandle, ConnectionHandle};
-use linked_list_allocator::LockedHeap;
-use smos_common::string::rust_str_from_buffer;
 use crate::args::init_args;
 use crate::env;
+use core::arch::global_asm;
+use core::panic::UnwindSafe;
+use core::ptr;
+use linked_list_allocator::LockedHeap;
+use sel4_panicking::catch_unwind;
+use sel4_panicking_env::abort;
+use smos_common::client_connection::ClientConnection;
+use smos_common::connection::RootServerConnection;
+use smos_common::init::InitCNodeSlots::*;
+use smos_common::local_handle::{ConnectionHandle, LocalHandle};
+use smos_common::string::rust_str_from_buffer;
+use smos_cspace::SMOSUserCSpace;
 
 // @alwin: Do this more properly. Map in a heap from the root server and initialize this
 // instead
@@ -57,26 +57,30 @@ unsafe extern "C" fn sel4_runtime_rust_entry(argc: u32, argv: *const u8, envp: *
 }
 
 #[doc(hidden)]
-pub fn run_main<T>(
-    f: impl FnOnce(RootServerConnection, SMOSUserCSpace) -> T + UnwindSafe
-) -> ! {
-
+pub fn run_main<T>(f: impl FnOnce(RootServerConnection, SMOSUserCSpace) -> T + UnwindSafe) -> ! {
     #[cfg(all(feature = "unwinding", panic = "unwind"))]
     {
         ::sel4_runtime_common::set_eh_frame_finder().unwrap();
     }
 
     unsafe {
-        ::sel4::set_ipc_buffer((env::ipc_buffer() as *mut sel4::IpcBuffer).as_mut().unwrap());
+        ::sel4::set_ipc_buffer(
+            (env::ipc_buffer() as *mut sel4::IpcBuffer)
+                .as_mut()
+                .unwrap(),
+        );
         ::sel4_runtime_common::run_ctors();
     }
 
     // Set up the cspace
-    let mut cspace = SMOSUserCSpace::new(sel4::CPtr::from_bits(SMOS_CNodeSelf.try_into().unwrap())
-                                                          .cast::<sel4::cap_type::CNode>());
+    let mut cspace = SMOSUserCSpace::new(
+        sel4::CPtr::from_bits(SMOS_CNodeSelf.try_into().unwrap()).cast::<sel4::cap_type::CNode>(),
+    );
 
     // Alocate the zeroeth sentinel slot
-    let mut slot = cspace.alloc_slot().expect("Failed to allocate initial slot");
+    let mut slot = cspace
+        .alloc_slot()
+        .expect("Failed to allocate initial slot");
     assert!(slot == SMOS_CapNull as usize);
 
     // Allocate the slot used by the cnode self cap
@@ -93,9 +97,11 @@ pub fn run_main<T>(
 
     // @alwin: There is no conn_hndl associated with the connection to the root server
     // @alwin: Use some constant instread for page size
-    let conn = RootServerConnection::new(smos_common::init::slot::RS_EP.cap(),
-                                         LocalHandle::<ConnectionHandle>::new(0),
-                                         Some((env::rs_shared_buf() as *mut u8, 4096)));
+    let conn = RootServerConnection::new(
+        smos_common::init::slot::RS_EP.cap(),
+        LocalHandle::<ConnectionHandle>::new(0),
+        Some((env::rs_shared_buf() as *mut u8, 4096)),
+    );
 
     // @alwin: Revisit this: I don't really get unwinding
     // match catch_unwind(f, cspace) {
@@ -107,4 +113,3 @@ pub fn run_main<T>(
 
     loop {}
 }
-

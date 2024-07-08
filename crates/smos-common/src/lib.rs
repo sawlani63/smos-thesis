@@ -1,14 +1,14 @@
 #![no_std]
 
-pub mod invocations;
 pub mod args;
-pub mod error;
-pub mod returns;
-pub mod init;
-pub mod connection;
 pub mod client_connection;
-pub mod server_connection;
+pub mod connection;
+pub mod error;
+pub mod init;
+pub mod invocations;
 pub mod local_handle;
+pub mod returns;
+pub mod server_connection;
+pub mod string;
 pub mod syscall;
 pub mod util;
-pub mod string;

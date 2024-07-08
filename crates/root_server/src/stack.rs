@@ -4,8 +4,13 @@ use sel4::{BootInfo, BootInfoPtr};
 use crate::cspace::CSpace;
 use crate::ut::UTTable;
 
-pub fn utils_run_on_stack(stack_top: usize, func: unsafe extern "C" fn(*const BootInfo, *mut CSpace, *mut UTTable) -> !,
-                          bootinfo: &sel4::BootInfoPtr, cspace: &mut CSpace, ut_table: &mut UTTable) {
+pub fn utils_run_on_stack(
+    stack_top: usize,
+    func: unsafe extern "C" fn(*const BootInfo, *mut CSpace, *mut UTTable) -> !,
+    bootinfo: &sel4::BootInfoPtr,
+    cspace: &mut CSpace,
+    ut_table: &mut UTTable,
+) {
     unsafe {
         asm!(
             "mov x20, sp",
@@ -20,7 +25,7 @@ pub fn utils_run_on_stack(stack_top: usize, func: unsafe extern "C" fn(*const Bo
         )
 
         /* @alwin: This doesn't work for some reason - seems like same reg is
-           used for arg1 and func? */
+        used for arg1 and func? */
         // asm!(
         //     "mov x20, sp",
         //     "mov sp, {new_stack}",
