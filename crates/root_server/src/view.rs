@@ -4,7 +4,7 @@ use crate::handle::RootServerResource;
 use crate::object::{AnonymousMemoryObject, OBJ_LVL_MAX};
 use crate::proc::UserProcess;
 use crate::window::Window;
-use crate::ReplyWrapper;
+use crate::RSReplyWrapper;
 use crate::PAGE_SIZE_4K;
 use alloc::rc::Rc;
 use alloc::vec;
@@ -48,7 +48,7 @@ pub struct View {
     pub rights: sel4::CapRights,
     pub win_offset: usize,
     pub obj_offset: usize,
-    pub pending_fault: Option<(ReplyWrapper, sel4::VmFault, sel4::cap::VSpace)>,
+    pub pending_fault: Option<(RSReplyWrapper, sel4::VmFault, sel4::cap::VSpace)>,
 }
 
 impl View {
@@ -140,8 +140,6 @@ impl View {
         }
     }
 
-    /* Cleans up cap table. Should use delete == false when the object frame table was cleaned
-    before with revoke == true, as the caps would have already been deleted by this. */
     fn cleanup_cap_table_inner(
         vec: &Vec<Option<ViewCapTableEntry>>,
         cspace: &mut CSpace,
@@ -168,6 +166,8 @@ impl View {
         }
     }
 
+    /* Cleans up cap table. Should use delete == false when the object frame table was cleaned
+    before with revoke == true, as the caps would have already been deleted by this. */
     pub fn cleanup_cap_table(&mut self, cspace: &mut CSpace, delete: bool) {
         Self::cleanup_cap_table_inner(&self.caps, cspace, delete)
     }
@@ -257,6 +257,32 @@ pub fn handle_view(
     });
 }
 
+pub fn handle_unview_internal(cspace: &mut CSpace, view: Rc<RefCell<View>>) {
+    view.borrow_mut().cleanup_cap_table(cspace, true);
+    view.borrow_mut().bound_window.borrow_mut().bound_view = None;
+    assert!(view.borrow_mut().bound_object.is_some());
+
+    /* Find the view inside the object list and delete it*/
+    let pos = view
+        .borrow_mut()
+        .bound_object
+        .as_ref()
+        .unwrap()
+        .borrow_mut()
+        .associated_views
+        .iter()
+        .position(|x| Rc::ptr_eq(x, &view))
+        .unwrap();
+
+    view.borrow_mut()
+        .bound_object
+        .as_ref()
+        .unwrap()
+        .borrow_mut()
+        .associated_views
+        .swap_remove(pos);
+}
+
 pub fn handle_unview(
     cspace: &mut CSpace,
     p: &mut UserProcess,
@@ -270,27 +296,7 @@ pub fn handle_unview(
         _ => Err(InvocationError::InvalidHandle { which_arg: 0 }),
     }?;
 
-    view.borrow_mut().cleanup_cap_table(cspace, true);
-
-    view.borrow_mut().bound_window.borrow_mut().bound_view = None;
-    assert!(view.borrow_mut().bound_object.is_some());
-    let pos = view
-        .borrow_mut()
-        .bound_object
-        .as_ref()
-        .unwrap()
-        .borrow_mut()
-        .associated_views
-        .iter()
-        .position(|x| Rc::ptr_eq(x, &view))
-        .unwrap();
-    view.borrow_mut()
-        .bound_object
-        .as_ref()
-        .unwrap()
-        .borrow_mut()
-        .associated_views
-        .swap_remove(pos);
+    handle_unview_internal(cspace, view);
 
     p.cleanup_handle(args.hndl.idx);
 

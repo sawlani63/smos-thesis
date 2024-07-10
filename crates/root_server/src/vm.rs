@@ -7,7 +7,7 @@ use crate::proc::UserProcess;
 use crate::ut::UTTable;
 use crate::util::dealloc_retyped;
 use crate::view::View;
-use crate::ReplyWrapper;
+use crate::RSReplyWrapper;
 use alloc::rc::Rc;
 use core::cell::RefCell;
 use smos_common::error::InvocationError;
@@ -23,7 +23,7 @@ fn forward_vm_fault(
     p: &mut UserProcess,
     view: Rc<RefCell<View>>,
     offset: usize,
-    reply: ReplyWrapper,
+    reply: RSReplyWrapper,
     info: sel4::VmFault,
 ) {
     let mut borrowed_view = view.borrow_mut();
@@ -216,7 +216,7 @@ pub fn handle_vm_fault(
     cspace: &mut CSpace,
     frame_table: &mut FrameTable,
     ut_table: &mut UTTable,
-    reply: ReplyWrapper,
+    reply: RSReplyWrapper,
     proc: &mut UserProcess,
     fault_info: sel4::VmFault,
 ) -> Option<FaultReply> {
@@ -302,7 +302,9 @@ pub fn handle_vm_fault(
             .insert_cap_at(fault_offset, view_frame_cap);
     }
 
-    /* Map views[idx] into virtual address space*/
+    /* Map views[idx] into virtual address space */
+    // @alwin: This leaks page table caps!! How can this be resolved? Do we need a proper page
+    // table after all?
     map_frame(
         cspace,
         ut_table,

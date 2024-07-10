@@ -55,7 +55,7 @@ pub trait RootServerInterface: ClientConnection {
                 .length(0)
                 .build();
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
             return Ok((
                 ipc_buf.msg_regs()[ConnectionCreateReturn::ConnectionHandle as usize],
                 sel4::CPtr::from_bits(slot.path().bits()).cast::<sel4::cap_type::Endpoint>(),
@@ -85,7 +85,7 @@ pub trait RootServerInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[1] = id as u64;
 
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
             Ok(LocalHandle::new(ipc_buf.msg_regs()[0] as usize))
         });
     }
@@ -103,7 +103,7 @@ pub trait RootServerInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[0] = reg_hndl.idx as u64;
 
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
             Ok(())
         });
     }
@@ -129,7 +129,7 @@ pub trait RootServerInterface: ClientConnection {
                 .length(1)
                 .build();
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
             return Ok((
                 ipc_buf.msg_regs()[0],
                 sel4::CPtr::from_bits(slot.path().bits()).cast::<sel4::cap_type::Endpoint>(),
@@ -154,7 +154,7 @@ pub trait RootServerInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[ConnectionDestroyArgs::Handle as usize] =
                 conn.hndl().idx.try_into().unwrap();
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
             return Ok(());
         })
     }
@@ -167,7 +167,7 @@ pub trait RootServerInterface: ClientConnection {
                 .length(1)
                 .build();
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf);
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs());
             return Ok(());
         })
     }
@@ -192,7 +192,7 @@ pub trait RootServerInterface: ClientConnection {
                 ipc_buf.set_recv_slot(&return_cap.unwrap());
             }
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             if return_cap.is_some() {
                 if msginfo.extra_caps() != 1 || msginfo.caps_unwrapped() != 0 {
@@ -232,7 +232,7 @@ pub trait RootServerInterface: ClientConnection {
             ipc_buf.caps_or_badges_mut()[0] = window_hndl_cap.cptr.path().bits();
 
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             Ok(LocalHandle::<WindowRegistrationHandle>::new(
                 ipc_buf.msg_regs()[0] as usize,
@@ -253,7 +253,7 @@ pub trait RootServerInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[0] = win_reg_hndl.idx.try_into().unwrap();
 
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             Ok(())
         });
@@ -276,7 +276,7 @@ pub trait RootServerInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[2] = content_vaddr as u64;
 
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             Ok(())
         });
@@ -303,7 +303,7 @@ pub trait RootServerInterface: ClientConnection {
             };
 
             let msginfo = self.ep().call(msginfo_builder.build());
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             Ok(())
         });
@@ -320,7 +320,7 @@ pub trait RootServerInterface: ClientConnection {
             ipc_buf.set_recv_slot(&return_cap);
 
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             if (msginfo.extra_caps() != 1 || msginfo.caps_unwrapped() != 0 || msginfo.length() != 1)
             {
@@ -352,7 +352,7 @@ pub trait RootServerInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[1] = ident as u64;
 
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             if msginfo.extra_caps() != 1 || msginfo.caps_unwrapped() != 0 || msginfo.length() != 1 {
                 return Err(InvocationError::ServerError);
@@ -401,10 +401,44 @@ pub trait RootServerInterface: ClientConnection {
                 Some(v) => v.len() as u64,
             };
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             Ok(LocalHandle::new((ipc_buf.msg_regs()[0] as usize)))
         });
+    }
+
+    fn process_wait(&self, hndl: LocalHandle<ProcessHandle>) -> Result<(), InvocationError> {
+        let mut msginfo = sel4::MessageInfoBuilder::default()
+            .label(SMOSInvocation::ProcWait as u64)
+            .length(1)
+            .build();
+
+        return sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.msg_regs_mut()[0] = hndl.idx as u64;
+            msginfo = self.ep().call(msginfo);
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+            // @alwin: error code?
+            return Ok(());
+            // return Ok(try_unpack_error(ipc_buf.msg_regs()[0], ipc_buf.msg_regs[1..]));
+        });
+    }
+
+    fn process_exit(&self) -> Result<(), InvocationError> {
+        let msginfo = sel4::MessageInfoBuilder::default()
+            .label(SMOSInvocation::ProcExit as u64)
+            .build();
+
+        sel4::with_ipc_buffer_mut(|ipc_buf| {
+            // @alwin: error code?
+            // ipc_buf.msg_regs_mut[0] = match err {
+            // Some(x) => x as u64,
+            // None => InvocationError::NoError as u64,
+            // };
+            self.ep().call(msginfo)
+        });
+
+        // @alwin: Deal with return type
+        unreachable!()
     }
 
     fn load_complete(&self, entry_point: usize, sp: usize) -> Result<(), InvocationError> {
@@ -417,7 +451,7 @@ pub trait RootServerInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[0] = entry_point as u64;
             ipc_buf.msg_regs_mut()[1] = sp as u64;
             let msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             Ok(())
         });
@@ -457,7 +491,7 @@ pub trait ObjectServerInterface: ClientConnection {
             };
 
             let msginfo = self.ep().call(msginfo_builder.build());
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             if shared_buf.is_some() {
                 self.set_buf(Some(shared_buf.unwrap().1));
@@ -474,7 +508,7 @@ pub trait ObjectServerInterface: ClientConnection {
 
         return sel4::with_ipc_buffer_mut(|ipc_buf| {
             let msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
             self.set_buf(None);
             return Ok(());
         });
@@ -513,7 +547,7 @@ pub trait ObjectServerInterface: ClientConnection {
             }
 
             let msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             if return_cap.is_some() {
                 if msginfo.extra_caps() != 1 || msginfo.caps_unwrapped() != 0 {
@@ -557,7 +591,7 @@ pub trait ObjectServerInterface: ClientConnection {
             }
 
             let msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             if return_cap.is_some() {
                 if msginfo.extra_caps() != 1 || msginfo.caps_unwrapped() != 0 {
@@ -591,7 +625,7 @@ pub trait ObjectServerInterface: ClientConnection {
             };
 
             let msginfo = self.ep().call(msginfo_builder.build());
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             Ok(())
         });
@@ -614,7 +648,7 @@ pub trait ObjectServerInterface: ClientConnection {
             };
 
             let msginfo = self.ep().call(msginfo_builder.build());
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             Ok(())
         });
@@ -637,7 +671,7 @@ pub trait ObjectServerInterface: ClientConnection {
             };
 
             let msginfo = self.ep().call(msginfo_builder.build());
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             return Ok(ObjStat {
                 size: ipc_buf.msg_regs()[ObjStatReturn::Size as usize] as usize,
@@ -693,7 +727,7 @@ pub trait ObjectServerInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[ViewArgs::Rights as usize] = rights.into_inner().0.bits()[0];
 
             let msginfo = self.ep().call(msginfo_builder.build());
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             if msginfo.length() != 1 {
                 return Err(InvocationError::ServerError);
@@ -712,7 +746,7 @@ pub trait ObjectServerInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[0] = view.idx as u64;
 
             let msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf)?;
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             return Ok(());
         });
@@ -728,7 +762,7 @@ pub trait FileServerInterface: ClientConnection {
                 .length(1)
                 .build();
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf);
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs());
             return Ok(());
         })
     }

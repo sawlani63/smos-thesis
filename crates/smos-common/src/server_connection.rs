@@ -3,7 +3,7 @@ use crate::connection::*;
 use crate::invocations::SMOSInvocation;
 
 /* @alwin: Figure out how to autogenerate these */
-const ROOT_SERVER_INVOCATIONS: [SMOSInvocation; 15] = [
+const ROOT_SERVER_INVOCATIONS: [SMOSInvocation; 17] = [
     SMOSInvocation::ConnCreate,
     SMOSInvocation::ConnDestroy,
     SMOSInvocation::ConnPublish,
@@ -17,6 +17,8 @@ const ROOT_SERVER_INVOCATIONS: [SMOSInvocation; 15] = [
     SMOSInvocation::ReplyCreate,
     SMOSInvocation::ServerHandleCapCreate,
     SMOSInvocation::ProcSpawn,
+    SMOSInvocation::ProcWait,
+    SMOSInvocation::ProcExit,
     SMOSInvocation::PageMap,
     SMOSInvocation::LoadComplete,
 ];

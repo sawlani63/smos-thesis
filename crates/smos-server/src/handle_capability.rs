@@ -1,5 +1,7 @@
 use crate::handle::{HandleInner, ServerHandle};
+use alloc::rc::Rc;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 use smos_common::error::InvocationError;
 
 pub struct HandleCapability<T: HandleInner> {

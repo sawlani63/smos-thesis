@@ -1,7 +1,7 @@
 use crate::connection::{Connection, Server};
 use crate::cspace::{CSpace, CSpaceTrait};
 use crate::object::AnonymousMemoryObject;
-use crate::proc::UserProcess;
+use crate::proc::ProcessType;
 use crate::ut::UTWrapper;
 use crate::view::View;
 use crate::window::Window;
@@ -55,7 +55,7 @@ pub enum RootServerResource {
     View(Rc<RefCell<View>>),
     Connection(Rc<RefCell<Connection>>), // Does this need a refcell?
     Server(Rc<RefCell<Server>>),
-    Process(Rc<RefCell<UserProcess>>),
+    Process(Rc<RefCell<ProcessType>>),
     Reply((sel4::cap::Reply, UTWrapper)),
     HandleCap(sel4::cap::Endpoint),
 }

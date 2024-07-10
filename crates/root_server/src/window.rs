@@ -68,6 +68,9 @@ pub fn handle_window_create(
     *handle_ref = Some(ServerHandle::new(RootServerResource::Window(
         window.clone(),
     )));
+    if args.return_cap {
+        p.created_handle_caps.push(idx);
+    }
     p.add_window_unchecked(window);
 
     let ret_value = if args.return_cap {
@@ -155,6 +158,49 @@ pub fn handle_window_deregister(
     return Ok(SMOSReply::WindowDeregister);
 }
 
+pub fn handle_window_destroy_internal(
+    cspace: &mut CSpace,
+    window: Rc<RefCell<Window>>,
+    destroy_view: bool,
+) {
+    /* if there is a view inside the window, destroy that too? */
+    if let Some(bv) = &window.borrow_mut().bound_view {
+        if let Some((server, client_id, reference)) = &bv.borrow_mut().managing_server_info {
+            let msg = NotificationType::WindowDestroyNotification(WindowDestroyNotification {
+                client_id: *client_id,
+                reference: *reference,
+            });
+
+            unsafe { enqueue_ntfn_buffer_msg(server.borrow().ntfn_buffer_addr, msg) };
+            server.borrow().badged_ntfn.signal();
+        }
+
+        if destroy_view {
+            // @alwin: Should we destroy the view here or say that you're not allowed to delete a window
+            // while a view is still inside of it? What to do we do with the view handle?
+            let pos = bv
+                .borrow_mut()
+                .bound_object
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .associated_views
+                .iter()
+                .position(|x| Rc::ptr_eq(x, &bv))
+                .unwrap();
+            bv.borrow_mut()
+                .bound_object
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .associated_views
+                .swap_remove(pos);
+            bv.borrow_mut().cleanup_cap_table(cspace, true);
+            warn_rs!("deleting view inside window");
+        }
+    }
+}
+
 pub fn handle_window_destroy(
     cspace: &mut CSpace,
     p: &mut UserProcess,
@@ -185,43 +231,7 @@ pub fn handle_window_destroy(
         },
     }?;
 
-    /* if there is a view inside the window, destroy that too? */
-    if let Some(bv) = &window.borrow_mut().bound_view {
-        if let Some((server, client_id, reference)) = &bv.borrow_mut().managing_server_info {
-            let msg = NotificationType::WindowDestroyNotification(WindowDestroyNotification {
-                client_id: *client_id,
-                reference: *reference,
-            });
-
-            unsafe { enqueue_ntfn_buffer_msg(server.borrow().ntfn_buffer_addr, msg) };
-            server.borrow().badged_ntfn.signal();
-        } else {
-            // @alwin: kinda iffy regarding this case, how should we clean up the handle associated with the view?
-            // Should we demand that this isn't allowed to happen and return an error if it does?
-            // Either way we should have probs have conisistent semantics between normal and
-            // externally managed objects
-            todo!();
-            let pos = bv
-                .borrow_mut()
-                .bound_object
-                .as_ref()
-                .unwrap()
-                .borrow_mut()
-                .associated_views
-                .iter()
-                .position(|x| Rc::ptr_eq(x, &bv))
-                .unwrap();
-            bv.borrow_mut()
-                .bound_object
-                .as_ref()
-                .unwrap()
-                .borrow_mut()
-                .associated_views
-                .swap_remove(pos);
-        }
-
-        bv.borrow_mut().cleanup_cap_table(cspace, true);
-    }
+    handle_window_destroy_internal(cspace, window, true);
 
     generic_cleanup_handle(
         p,

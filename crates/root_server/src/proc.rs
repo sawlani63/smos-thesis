@@ -4,13 +4,15 @@ use crate::elf_load::load_elf;
 use crate::frame_table::{FrameRef, FrameTable};
 use crate::handle::RootServerResource;
 use crate::mapping::map_frame;
-use crate::object::{AnonymousMemoryObject, OBJ_LVL_MAX};
+use crate::object::{handle_obj_destroy_internal, AnonymousMemoryObject, OBJ_LVL_MAX};
 use crate::page::PAGE_SIZE_4K;
 use crate::ut::{UTTable, UTWrapper};
 use crate::util::{alloc_retype, dealloc_retyped};
-use crate::view::View;
+use crate::view::{handle_unview_internal, View};
 use crate::vmem_layout::{self, STACK_PAGES};
+use crate::window::handle_window_destroy_internal;
 use crate::window::Window;
+use crate::RSReplyWrapper;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
@@ -26,8 +28,9 @@ use smos_common::util::{ROUND_DOWN, ROUND_UP};
 use smos_server::event::{FAULT_EP_BITS, INVOCATION_EP_BITS};
 use smos_server::handle::{HandleAllocater, HandleInner, ServerHandle};
 use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
-use smos_server::reply::SMOSReply;
-use smos_server::syscalls::{LoadComplete, ProcessSpawn};
+use smos_server::handle_capability::HandleCapabilityTable;
+use smos_server::reply::{handle_reply, SMOSReply};
+use smos_server::syscalls::{LoadComplete, ObjDestroy, ProcessSpawn, ProcessWait, WindowDestroy};
 
 const LOADER_CONTENTS: &[u8] = include_bytes!(env!("LOADER_ELF"));
 
@@ -36,24 +39,32 @@ const MAX_PROCS: usize = 64;
 pub const MAX_PID: usize = 1024;
 const MAX_HANDLES: usize = 256;
 
-const ARRAY_REPEAT_VALUE: Option<Rc<RefCell<UserProcess>>> = None;
-static mut procs: [Option<Rc<RefCell<UserProcess>>>; MAX_PROCS] = [ARRAY_REPEAT_VALUE; MAX_PROCS];
+#[derive(Debug)]
+pub enum ProcessType {
+    ActiveProcess(UserProcess),
+    ZombieProcess(usize), // @alwin: This should probably store the return code
+                          // @alwin: What happens to orphans? Does it become the responsibility of the root server
+                          // to adopt and do a periodic sweep to reap them?
+}
 
-pub fn procs_get(i: usize) -> &'static Option<Rc<RefCell<UserProcess>>> {
+const ARRAY_REPEAT_VALUE: Option<Rc<RefCell<ProcessType>>> = None;
+static mut procs: [Option<Rc<RefCell<ProcessType>>>; MAX_PROCS] = [ARRAY_REPEAT_VALUE; MAX_PROCS];
+
+pub fn procs_get(i: usize) -> &'static Option<Rc<RefCell<ProcessType>>> {
     unsafe {
         assert!(i < procs.len());
         return &procs[i];
     }
 }
 
-pub fn procs_get_mut(i: usize) -> &'static mut Option<Rc<RefCell<UserProcess>>> {
+pub fn procs_get_mut(i: usize) -> &'static mut Option<Rc<RefCell<ProcessType>>> {
     unsafe {
         assert!(i < procs.len());
         return &mut procs[i];
     }
 }
 
-pub fn procs_set(i: usize, proc: Option<Rc<RefCell<UserProcess>>>) {
+pub fn procs_set(i: usize, proc: Option<Rc<RefCell<ProcessType>>>) {
     unsafe {
         assert!(i < procs.len());
         procs[i] = proc;
@@ -81,9 +92,11 @@ pub struct UserProcess {
     cspace: UserCSpace,
     fault_ep: sel4::cap::Endpoint,
     handle_table: [Option<ServerHandle<RootServerResource>>; 256],
+    pub created_handle_caps: Vec<usize>, // @alwin: this is a temporary hack, but doing it as Vec<HandleCapability> completely screws up the generic handle abstraction I have
     initial_windows: Vec<Rc<RefCell<Window>>>,
     windows: Vec<Rc<RefCell<Window>>>,
     pub views: Vec<Rc<RefCell<View>>>,
+    pub waiter: Option<RSReplyWrapper>,
     // pub connections: Vec<Rc<Connection>> // @alwin: This stores outgoing conns. Do we need to store incoming conns too?
 }
 
@@ -113,7 +126,7 @@ impl UserProcess {
         shared_buffer: (sel4::cap::SmallPage, FrameRef),
         initial_windows: Vec<Rc<RefCell<Window>>>,
     ) -> UserProcess {
-        const ARRAY_REPEAT_VALUE: Option<ServerHandle<RootServerResource>> = None;
+        const HNDL_REPEAT_VALUE: Option<ServerHandle<RootServerResource>> = None;
         return UserProcess {
             tcb: tcb,
             pid: pid,
@@ -122,12 +135,84 @@ impl UserProcess {
             sched_context: sched_context,
             cspace: cspace,
             fault_ep: fault_ep,
-            handle_table: [ARRAY_REPEAT_VALUE; 256],
+            handle_table: [HNDL_REPEAT_VALUE; 256],
+            created_handle_caps: Vec::new(),
             shared_buffer: shared_buffer,
             /* bfs_shared_buffer: None, */ initial_windows: initial_windows,
             windows: Vec::new(),
             views: Vec::new(), /* connections: Vec::new() */
+            waiter: None,
         };
+    }
+
+    pub fn destroy(
+        &mut self,
+        cspace: &mut CSpace,
+        ut_table: &mut UTTable,
+        frame_table: &mut FrameTable,
+        handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
+    ) {
+        /* Clean up the handle table */
+        for handle in &self.handle_table {
+            if handle.is_none() {
+                continue;
+            }
+
+            match handle.as_ref().unwrap().inner() {
+                RootServerResource::Window(win) => {
+                    handle_window_destroy_internal(cspace, win.clone(), false);
+                }
+                RootServerResource::Object(obj) => {
+                    handle_obj_destroy_internal(cspace, frame_table, obj.clone(), true);
+                }
+                RootServerResource::ConnRegistration(cr) => {
+                    todo!()
+                }
+                RootServerResource::WindowRegistration(wr) => {
+                    todo!()
+                }
+                RootServerResource::View(view) => {
+                    handle_unview_internal(cspace, view.clone());
+                }
+                RootServerResource::Connection(conn) => {
+                    todo!()
+                }
+                RootServerResource::Server(srv) => {
+                    todo!()
+                }
+                RootServerResource::Process(proc) => {
+                    todo!()
+                }
+                RootServerResource::Reply(rply) => {
+                    todo!()
+                }
+                RootServerResource::HandleCap(hc) => {
+                    todo!()
+                }
+            }
+        }
+
+        self.handle_table.fill(None);
+
+        /* @alwin: Do the same thing for the handle cap table */
+
+        dealloc_retyped(cspace, ut_table, self.sched_context);
+
+        dealloc_retyped(cspace, ut_table, self.tcb);
+
+        dealloc_retyped(cspace, ut_table, self.vspace);
+
+        /* @alwin: Should this just be a window/view/obj */
+        cspace.delete_cap(self.ipc_buffer.0);
+        frame_table.free_frame(self.ipc_buffer.1);
+
+        /* @alwin: Should this just be a window/view/obj */
+        cspace.delete_cap(self.shared_buffer.0);
+        frame_table.free_frame(self.shared_buffer.1);
+
+        cspace.delete_cap(self.fault_ep);
+
+        self.cspace.destroy(cspace, ut_table);
     }
 
     // @alwin: This should be easy to keep sorted (makes it faster to check if window overlaps)
@@ -468,7 +553,7 @@ pub fn start_process(
     elf_data: &[u8],
     loader_args: Option<Vec<&str>>,
     exec_args: Option<Vec<&str>>,
-) -> Result<Rc<RefCell<UserProcess>>, sel4::Error> {
+) -> Result<Rc<RefCell<ProcessType>>, sel4::Error> {
     /* We essentially use the position in the table as the pid. Don't think this is the right way to
     do it properly */
     let pos = find_free_proc().ok_or(sel4::Error::NotEnoughMemory)?;
@@ -934,7 +1019,7 @@ pub fn start_process(
 
     initial_windows.push(stack_window.clone());
 
-    let proc = Rc::new(RefCell::new(UserProcess::new(
+    let proc = UserProcess::new(
         tcb,
         pos,
         vspace,
@@ -944,11 +1029,9 @@ pub fn start_process(
         fault_ep,
         shared_buffer,
         initial_windows,
-    )));
+    );
 
-    sp = proc
-        .borrow_mut()
-        .write_args_to_stack(frame_table, stack_window, loader_args, exec_args);
+    sp = proc.write_args_to_stack(frame_table, stack_window, loader_args, exec_args);
 
     let mut user_context = sel4::UserContext::default();
     *user_context.pc_mut() = elf.ehdr.e_entry;
@@ -957,9 +1040,10 @@ pub fn start_process(
     // @alwin: Clean up the stack if this fails
     tcb.0.tcb_write_registers(true, 2, &mut user_context)?;
 
-    procs_set(pos, Some(proc.clone()));
+    let proc_saved = Rc::new(RefCell::new(ProcessType::ActiveProcess(proc)));
+    procs_set(pos, Some(proc_saved.clone()));
 
-    return Ok(proc);
+    return Ok(proc_saved);
 }
 
 pub fn handle_process_spawn(
@@ -993,6 +1077,68 @@ pub fn handle_process_spawn(
     return Ok(SMOSReply::ProcessSpawn {
         hndl: local_handle::LocalHandle::new(idx),
     });
+}
+
+pub fn handle_process_wait(
+    p: &mut UserProcess,
+    reply: RSReplyWrapper,
+    args: &ProcessWait,
+) -> Option<Result<SMOSReply, InvocationError>> {
+    let wait_proc_ref = match p.get_handle_mut(args.hndl.idx) {
+        Ok(x) => x,
+        Err(_) => return Some(Err(InvocationError::InvalidHandle { which_arg: 0 })),
+    };
+    let wait_proc = match wait_proc_ref.as_ref().unwrap().inner() {
+        RootServerResource::Process(proc) => proc.clone(),
+        _ => return Some(Err(InvocationError::InvalidHandle { which_arg: 0 })),
+    };
+
+    let wait_proc_type: &mut ProcessType = &mut wait_proc.borrow_mut();
+    match wait_proc_type {
+        ProcessType::ActiveProcess(x) => {
+            x.waiter = Some(reply);
+            None
+        }
+        ProcessType::ZombieProcess(x) => {
+            procs_set(*x, None);
+            Some(Ok(SMOSReply::ProcessWait))
+        }
+    }
+}
+
+pub fn handle_process_exit(
+    cspace: &mut CSpace,
+    ut_table: &mut UTTable,
+    frame_table: &mut FrameTable,
+    handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
+    p: &mut UserProcess,
+) {
+    // @alwin: Clean up the process resources
+    p.destroy(cspace, ut_table, frame_table, handle_cap_table);
+
+    match p.waiter {
+        Some(x) => {
+            /* There is a process waiting for this one to terminate */
+            let msginfo =
+                sel4::with_ipc_buffer_mut(|ipc_buf| handle_reply(ipc_buf, SMOSReply::ProcessWait));
+
+            /* Send a message saying that this process terminated */
+            x.0.send(msginfo);
+
+            /* Destroy the reply object*/
+            dealloc_retyped(cspace, ut_table, x);
+            procs_set(p.pid, None);
+            warn_rs!("Sending message to waiter");
+        }
+        None => {
+            // Transition the process to a zombie
+            procs_set(
+                p.pid,
+                Some(Rc::new(RefCell::new(ProcessType::ZombieProcess(p.pid)))),
+            );
+            warn_rs!("Setting the process to a zombie");
+        }
+    }
 }
 
 pub fn handle_load_complete(

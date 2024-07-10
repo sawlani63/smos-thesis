@@ -327,6 +327,20 @@ impl UserCSpace {
 
         return Ok(new_cspace);
     }
+
+    pub fn destroy(&mut self, bootstrap: &mut CSpace, ut_table: &mut UTTable) {
+        /* We have to go through and delete everything because we don't know what the user
+        does with the cspace */
+        for i in 1..BIT(CNODE_SIZE_BITS) {
+            self.root_cnode
+                .relative_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE)
+                .delete();
+        }
+
+        ut_table.free(self.untyped);
+
+        bootstrap.root_cnode().relative(self.root_cnode).delete();
+    }
 }
 
 pub struct CSpace<'a> {

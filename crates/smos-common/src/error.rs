@@ -97,17 +97,17 @@ pub enum InvalidHandleCapabilityMessage {
     Length = 1,
 }
 
-pub fn try_unpack_error(label: u64, ipc_buf: &sel4::IpcBuffer) -> Result<(), InvocationError> {
+pub fn try_unpack_error(label: u64, ipc_buf: &[sel4::Word]) -> Result<(), InvocationError> {
     match label.try_into().expect("This probably shouldn't panic") {
         InvocationErrorLabel::NoError => Ok(()),
         InvocationErrorLabel::InvalidInvocation => Err(InvocationError::InvalidInvocation),
         InvocationErrorLabel::NotEnoughArgs => Err(InvocationError::NotEnoughArgs {
-            expected: ipc_buf.msg_regs()[usize::from(NotEnoughArgsMessage::Expected)] as usize,
-            actual: ipc_buf.msg_regs()[usize::from(NotEnoughArgsMessage::Actual)] as usize,
+            expected: ipc_buf[usize::from(NotEnoughArgsMessage::Expected)] as usize,
+            actual: ipc_buf[usize::from(NotEnoughArgsMessage::Actual)] as usize,
         }),
         InvocationErrorLabel::NotEnoughCaps => Err(InvocationError::NotEnoughCaps {
-            expected: ipc_buf.msg_regs()[usize::from(NotEnoughCapsMessage::Expected)] as usize,
-            actual: ipc_buf.msg_regs()[usize::from(NotEnoughCapsMessage::Actual)] as usize,
+            expected: ipc_buf[usize::from(NotEnoughCapsMessage::Expected)] as usize,
+            actual: ipc_buf[usize::from(NotEnoughCapsMessage::Actual)] as usize,
         }),
         InvocationErrorLabel::InvalidType => {
             Err(InvocationError::InvalidType { which_arg: todo!() })
@@ -116,7 +116,7 @@ pub fn try_unpack_error(label: u64, ipc_buf: &sel4::IpcBuffer) -> Result<(), Inv
         InvocationErrorLabel::UnsupportedInvocation => {
             Err(InvocationError::UnsupportedInvocation {
                 label: SMOSInvocation::try_from(
-                    ipc_buf.msg_regs()[usize::from(UnsupportedInvocationMessage::Label)],
+                    ipc_buf[usize::from(UnsupportedInvocationMessage::Label)],
                 )
                 .unwrap(),
             })
@@ -124,16 +124,15 @@ pub fn try_unpack_error(label: u64, ipc_buf: &sel4::IpcBuffer) -> Result<(), Inv
         InvocationErrorLabel::OutOfHandles => Err(InvocationError::OutOfHandles),
         InvocationErrorLabel::OutOfHandleCaps => Err(InvocationError::OutOfHandleCaps),
         InvocationErrorLabel::AlignmentError => Err(InvocationError::AlignmentError {
-            which_arg: ipc_buf.msg_regs()[usize::from(AlignmentErrorMessage::Which)] as usize,
+            which_arg: ipc_buf[usize::from(AlignmentErrorMessage::Which)] as usize,
         }),
         InvocationErrorLabel::InvalidArguments => Err(InvocationError::InvalidArguments),
         InvocationErrorLabel::InvalidHandle => Err(InvocationError::InvalidHandle {
-            which_arg: ipc_buf.msg_regs()[usize::from(InvalidHandleMessage::Which)] as usize,
+            which_arg: ipc_buf[usize::from(InvalidHandleMessage::Which)] as usize,
         }),
         InvocationErrorLabel::InvalidHandleCapability => {
             Err(InvocationError::InvalidHandleCapability {
-                which_arg: ipc_buf.msg_regs()[usize::from(InvalidHandleCapabilityMessage::Which)]
-                    as usize,
+                which_arg: ipc_buf[usize::from(InvalidHandleCapabilityMessage::Which)] as usize,
             })
         }
         InvocationErrorLabel::DataBufferNotSet => Err(InvocationError::DataBufferNotSet),

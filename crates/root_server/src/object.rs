@@ -210,12 +210,30 @@ pub fn handle_obj_create(
     *handle_ref = Some(ServerHandle::new(RootServerResource::Object(mem_obj)));
 
     let ret_value = if args.return_cap {
+        p.created_handle_caps.push(idx);
         HandleOrHandleCap::<ObjectHandle>::new_handle_cap(cptr.unwrap())
     } else {
         HandleOrHandleCap::<ObjectHandle>::new_handle(idx)
     };
 
     return Ok(SMOSReply::ObjCreate { hndl: ret_value });
+}
+
+pub fn handle_obj_destroy_internal(
+    cspace: &mut CSpace,
+    frame_table: &mut FrameTable,
+    object: Rc<RefCell<AnonymousMemoryObject>>,
+    force_delete: bool,
+) {
+    if !object.borrow().associated_views.is_empty() && !force_delete {
+        // @alwin: I think we shouldn't be able to destroy objects that have views,
+        // since not everything that sets up a view with the object will have
+        // necessarily set up a ntfn buffer to tell them this has gone away
+        // under their feet.
+        todo!()
+    }
+
+    object.borrow_mut().cleanup_frame_table(cspace, frame_table);
 }
 
 pub fn handle_obj_destroy(
@@ -234,15 +252,7 @@ pub fn handle_obj_destroy(
         _ => Err(generic_invalid_handle_error(args.hndl, 0)),
     }?;
 
-    if !object.borrow().associated_views.is_empty() {
-        // @alwin: I think we shouldn't be able to destroy objects that have views,
-        // since not everything that sets up a view with the object will have
-        // necessarily set up a ntfn buffer to tell them this has gone away
-        // under their feet.
-        todo!()
-    }
-
-    object.borrow_mut().cleanup_frame_table(cspace, frame_table);
+    handle_obj_destroy_internal(cspace, frame_table, object, false);
 
     generic_cleanup_handle(p, handle_cap_table, args.hndl, 0)?;
 

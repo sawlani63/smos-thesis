@@ -102,7 +102,7 @@ fn callback(_idk: usize, _idk2: *const ()) {
     log_rs!("hey there!");
 }
 
-pub type ReplyWrapper = (sel4::cap::Reply, UTWrapper);
+pub type RSReplyWrapper = (sel4::cap::Reply, UTWrapper);
 
 fn syscall_loop(
     cspace: &mut CSpace,
@@ -113,7 +113,7 @@ fn syscall_loop(
     irq_dispatch: &mut IRQDispatch,
     sched_control: sel4::cap::SchedControl,
 ) -> Result<(), sel4::Error> {
-    let mut reply: ReplyWrapper =
+    let mut reply: RSReplyWrapper =
         alloc_retype::<sel4::cap_type::Reply>(cspace, ut_table, sel4::ObjectBlueprint::Reply)?;
     let mut reply_msg_info = None;
 
@@ -159,6 +159,7 @@ fn syscall_loop(
                     sched_control,
                     ep,
                     recv_slot,
+                    reply,
                 )
             }
             EntryType::Fault(pid) => {

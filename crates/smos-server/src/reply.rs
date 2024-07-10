@@ -20,6 +20,7 @@ pub enum SMOSReply {
     ConnDestroy,
     ConnDeregister,
     LoadComplete,
+    ProcessWait, // @alwin: This should probably have some kind of return code
     ConnRegister {
         hndl: LocalHandle<ConnRegistrationHandle>,
     },

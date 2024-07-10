@@ -81,6 +81,17 @@ pub struct ProcessSpawn<'a> {
 }
 
 #[derive(Debug)]
+pub struct ProcessWait {
+    pub hndl: ReceivedHandle,
+}
+
+// @alwin: error code?
+// #[derive(Debug)]
+// pub struct ProcessExit {
+// pub res: usize
+// }
+
+#[derive(Debug)]
 pub struct ConnRegister {
     pub publish_hndl: ReceivedHandle,
     pub client_id: usize,
@@ -165,6 +176,8 @@ pub enum SMOS_Invocation<'a> {
     ReplyCreate,
     ServerHandleCapCreate(ServerHandleCapCreate),
     ProcessSpawn(ProcessSpawn<'a>),
+    ProcessWait(ProcessWait),
+    ProcessExit,
     WindowRegister(WindowRegister),
     WindowDeregister(WindowDeregister),
     PageMap(PageMap),
@@ -603,6 +616,16 @@ mod SMOS_Invocation_Raw {
                     args: args,
                 }))
             }
+            SMOSInvocation::ProcWait => {
+                if info.length() != 1 {
+                    return Err(InvocationError::InvalidArguments);
+                }
+
+                Ok(SMOS_Invocation::ProcessWait(ProcessWait {
+                    hndl: ReceivedHandle::new(f_msg(0) as usize),
+                }))
+            }
+            SMOSInvocation::ProcExit => Ok(SMOS_Invocation::ProcessExit),
             SMOSInvocation::TestSimple => {
                 panic!("Okay got to test simple");
             }

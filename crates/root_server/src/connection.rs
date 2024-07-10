@@ -4,7 +4,7 @@ use crate::frame_table::FrameTable;
 use crate::handle::RootServerResource;
 use crate::object::{AnonymousMemoryObject, OBJ_LVL_MAX};
 use crate::page::PAGE_SIZE_4K;
-use crate::proc::{procs_get, UserProcess};
+use crate::proc::{procs_get, ProcessType, UserProcess};
 use crate::ut::{UTTable, UTWrapper};
 use crate::util::{alloc_retype, dealloc_retyped};
 use crate::view::View;
@@ -45,7 +45,7 @@ pub struct Server {
 #[derive(Clone, Debug)]
 pub struct Connection {
     id: usize,
-    client: Rc<RefCell<UserProcess>>, // @alwin: Not 100% sure if this is needed yet
+    client: Rc<RefCell<ProcessType>>, // @alwin: Not 100% sure if this is needed yet
     server: Rc<RefCell<Server>>,
     badged_ep: sel4::cap::Endpoint,
     registered: bool,

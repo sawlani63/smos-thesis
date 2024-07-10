@@ -1,9 +1,9 @@
 use crate::cspace::{CSpace, CSpaceTrait};
 use crate::frame_table::FrameTable;
-use crate::proc::procs_get_mut;
+use crate::proc::{procs_get_mut, ProcessType, UserProcess};
 use crate::ut::UTTable;
 use crate::vm::handle_vm_fault;
-use crate::ReplyWrapper;
+use crate::RSReplyWrapper;
 use sel4::Fault;
 use smos_server::reply::handle_fault_reply;
 
@@ -20,14 +20,18 @@ pub fn handle_fault(
     cspace: &mut CSpace,
     frame_table: &mut FrameTable,
     ut_table: &mut UTTable,
-    reply: ReplyWrapper,
+    reply: RSReplyWrapper,
     msg: sel4::MessageInfo,
     pid: usize,
 ) -> Option<sel4::MessageInfo> {
-    let mut p = procs_get_mut(pid)
+    let proc_type: &mut ProcessType = &mut procs_get_mut(pid)
         .as_mut()
-        .expect("Was invoked with invalid badge")
+        .expect("Was called with an invalid badge")
         .borrow_mut();
+    let mut p: &mut UserProcess = match proc_type {
+        ProcessType::ActiveProcess(x) => x,
+        ProcessType::ZombieProcess(_) => panic!("Zombie process faulted"),
+    };
 
     let fault = sel4::with_ipc_buffer(|buf| Fault::new(buf, &msg));
 

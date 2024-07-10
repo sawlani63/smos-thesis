@@ -43,6 +43,8 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     // server look the same, so I think they are deleted by the capability revocation. Need to do
     // something so they look different
 
+    rs_conn.process_exit();
+
     loop {}
     unreachable!()
 }

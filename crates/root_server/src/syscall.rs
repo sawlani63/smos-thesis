@@ -3,15 +3,16 @@ use crate::cspace::{CSpace, CSpaceTrait};
 use crate::frame_table::FrameTable;
 use crate::handle::RootServerResource;
 use crate::object::*;
-use crate::proc::{handle_load_complete, handle_process_spawn};
+use crate::proc::{
+    handle_load_complete, handle_process_exit, handle_process_spawn, handle_process_wait,
+    procs_get_mut, ProcessType, UserProcess,
+};
+use crate::ut::UTTable;
 use crate::util::alloc_retype;
 use crate::view::*;
 use crate::vm::handle_page_map;
 use crate::window::*;
-use crate::{
-    proc::{procs_get_mut, UserProcess},
-    ut::UTTable,
-};
+use crate::RSReplyWrapper;
 use smos_common::connection::RootServerConnection;
 use smos_common::error::InvocationError;
 use smos_common::local_handle;
@@ -50,11 +51,16 @@ pub fn handle_syscall(
     sched_control: sel4::cap::SchedControl,
     ep: sel4::cap::Endpoint,
     recv_slot: sel4::AbsoluteCPtr,
+    reply: RSReplyWrapper,
 ) -> Option<sel4::MessageInfo> {
-    let mut p = procs_get_mut(pid)
+    let proc_type: &mut ProcessType = &mut procs_get_mut(pid)
         .as_mut()
-        .expect("Was called with invalid badge")
+        .expect("Was called with an invalid badge")
         .borrow_mut();
+    let mut p = match proc_type {
+        ProcessType::ActiveProcess(x) => x,
+        ProcessType::ZombieProcess(_) => panic!("Zombie process invoked root server?!"),
+    };
 
     /* Safety: It is necessary to construct this from a raw pointer because otherwise there is
        an issue where frame table is borrowed as mutable and immutable at the same time. This is
@@ -62,6 +68,7 @@ pub fn handle_syscall(
        changed by an access to the frame table
     */
     let shared_buf = unsafe { &(*frame_table.frame_data_raw(p.shared_buffer.1)) };
+    let mut no_response: bool = false;
 
     let (invocation, consumed_cap) = sel4::with_ipc_buffer(|buf| {
         SMOS_Invocation::new::<RootServerConnection>(buf, &msg, Some(shared_buf), recv_slot)
@@ -106,6 +113,28 @@ pub fn handle_syscall(
         SMOS_Invocation::PageMap(t) => handle_page_map(cspace, ut_table, frame_table, &mut p, &t),
         SMOS_Invocation::WindowDeregister(t) => handle_window_deregister(cspace, &mut p, &t),
         SMOS_Invocation::ConnDeregister(t) => handle_conn_deregister(&mut p, &t),
+        SMOS_Invocation::ProcessWait(t) => {
+            match handle_process_wait(&mut p, reply, &t) {
+                Some(x) => x,
+                None => {
+                    /* @alwin: how can this be done more cleanly? */
+                    if (consumed_cap) {
+                        recv_slot.delete();
+                    }
+                    return None;
+                }
+            }
+        }
+        SMOS_Invocation::ProcessExit => {
+            handle_process_exit(cspace, ut_table, frame_table, handle_cap_table, &mut p);
+
+            /* @alwin: how can this be done more cleanly? */
+            if (consumed_cap) {
+                recv_slot.delete();
+            }
+
+            return None;
+        }
         _ => todo!(),
     };
 
