@@ -12,6 +12,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use smos_common::error::InvocationError;
 use smos_common::local_handle::{HandleOrHandleCap, ObjectHandle};
+use smos_common::obj_attributes::ObjAttributes;
 use smos_common::util::BIT;
 use smos_server::handle::{
     generic_allocate_handle, generic_cleanup_handle, generic_get_handle,
@@ -180,13 +181,16 @@ impl AnonymousMemoryObject {
 }
 
 pub fn handle_obj_create(
+	cspace: &mut CSpace,
+	frame_table: &mut FrameTable,
+	ut_table: &mut UTTable,
     p: &mut UserProcess,
     handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
     args: &ObjCreate,
 ) -> Result<SMOSReply, InvocationError> {
     /* The root server only supports the creation of anonymous memory objects */
     // @alwin: Is this the best way to deal with externally managed objects?
-    if args.name.is_some() {
+    if args.name.is_some() && !args.attributes.has(ObjAttributes::DEVICE) {
         return Err(InvocationError::InvalidArguments);
     }
 
@@ -195,17 +199,47 @@ pub fn handle_obj_create(
         return Err(InvocationError::InvalidArguments);
     }
 
-    /* Make sure the object is smaller than the max size */
-    if args.size / PAGE_SIZE_4K >= MAX_OBJ_SIZE {
-        return Err(InvocationError::InvalidArguments);
-    }
+	 /* Make sure the object is smaller than the max size */
+	if args.size / PAGE_SIZE_4K >= MAX_OBJ_SIZE {
+	     return Err(InvocationError::InvalidArguments);
+	 }
 
-    let (idx, handle_ref, cptr) = generic_allocate_handle(p, handle_cap_table, args.return_cap)?;
-
-    let mem_obj = Rc::new(RefCell::new(AnonymousMemoryObject::new(
+	let mem_obj = Rc::new(RefCell::new(AnonymousMemoryObject::new(
         args.size,
         args.rights.clone(),
     )));
+
+    if args.attributes.has(ObjAttributes::DEVICE) {
+    	let paddr = args.name.expect("@alwin: This should not be an expect").parse::<usize>().expect("@alwin: This should not be an expect");
+    	let frames = frame_table.alloc_device_mem(cspace, ut_table, paddr, args.size).expect("@alwin: This should not be an expect");
+		let mut offset = 0;
+		for frame in frames {
+			mem_obj.borrow_mut().insert_frame_at(offset, frame);
+			offset += PAGE_SIZE_4K;
+		}
+    } else {
+    	let frames = if args.attributes.has(ObjAttributes::CONTIGUOUS) {
+    		frame_table.alloc_frames_contig(cspace, ut_table, args.size / PAGE_SIZE_4K).expect("@alwin: This should not be an expect")
+    	} else if args.attributes.has(ObjAttributes::EAGER) {
+    		let mut vec = Vec::new();
+    		for i in 0..(args.size / PAGE_SIZE_4K) {
+    			vec.push(frame_table.alloc_frame(cspace, ut_table).expect("@alwin: This should not be an expect"));
+    		}
+    		vec
+    	} else {
+    		Vec::new()
+    	};
+
+    	if frames.len() != 0 {
+    		let mut offset = 0;
+    		for frame in frames {
+    			mem_obj.borrow_mut().insert_frame_at(offset, (frame_table.frame_from_ref(frame).get_cap(), frame));
+    			offset += PAGE_SIZE_4K;
+    		}
+    	}
+    }
+
+    let (idx, handle_ref, cptr) = generic_allocate_handle(p, handle_cap_table, args.return_cap)?;
 
     *handle_ref = Some(ServerHandle::new(RootServerResource::Object(mem_obj)));
 

@@ -26,12 +26,12 @@ clean:
 	rm -rf $(build_dir)
 
 # Build the test app
-test_app_crate := test_app
-test_app := $(build_dir)/$(test_app_crate).elf
-$(test_app): $(test_app).intermediate
+init_crate := init
+init := $(build_dir)/$(init_crate).elf
+$(init): $(init).intermediate
 
-.INTERMDIATE: $(test_app).intermediate
-$(test_app).intermediate:
+.INTERMDIATE: $(init).intermediate
+$(init).intermediate:
 	SEL4_PREFIX=$(sel4_prefix) \
 		cargo build \
 			-Z build-std=core,alloc,compiler_builtins \
@@ -40,7 +40,7 @@ $(test_app).intermediate:
 			--target support/targets/aarch64-sel4.json \
 			--target-dir $(abspath $(build_dir)/target) \
 			--out-dir $(build_dir) \
-			-p $(test_app_crate)
+			-p $(init_crate)
 
 
 SEL4_PREFIX=/Users/alwinjoshy/work/smos_new/smos-rs/deps/seL4/install \
@@ -60,9 +60,9 @@ bfs := $(build_dir)/$(bfs_crate).elf
 $(bfs): $(bfs).intermediate
 
 .INTERMDIATE: $(bfs).intermediate
-$(bfs).intermediate: $(test_app)
+$(bfs).intermediate: $(init)
 	SEL4_PREFIX=$(sel4_prefix) \
-	TEST_ELF=$(test_app) \
+	INIT_ELF=$(init) \
 		cargo build \
 			-Z build-std=core,alloc,compiler_builtins \
 			-Z build-std-features=compiler-builtins-mem \
@@ -115,7 +115,7 @@ $(root_server).intermediate: $(bfs) $(smos_loader)
 
 image := $(build_dir)/image.elf
 # Append the payload to the loader using the loader CLI
-$(image): $(root_server) $(test_app) $(bfs) $(smos_loader) $(loader) $(loader_cli)
+$(image): $(root_server) $(init) $(bfs) $(smos_loader) $(loader) $(loader_cli)
 	$(loader_cli) \
 		--loader $(loader) \
 		--sel4-prefix $(sel4_prefix) \

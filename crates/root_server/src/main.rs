@@ -240,6 +240,7 @@ extern "C" fn main_continued(
         BFS_CONTENTS,
         None,
         None,
+        254,
     )
     .expect("Failed to start first process");
 

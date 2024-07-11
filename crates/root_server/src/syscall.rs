@@ -92,7 +92,7 @@ pub fn handle_syscall(
         SMOS_Invocation::WindowRegister(t) => handle_window_register(&mut p, handle_cap_table, &t),
         SMOS_Invocation::ConnCreate(t) => handle_conn_create(cspace, &mut p, &t),
         SMOS_Invocation::ConnDestroy(t) => handle_conn_destroy(cspace, &mut p, &t),
-        SMOS_Invocation::ObjCreate(t) => handle_obj_create(&mut p, handle_cap_table, &t),
+        SMOS_Invocation::ObjCreate(t) => handle_obj_create(cspace, frame_table, ut_table, &mut p, handle_cap_table, &t),
         SMOS_Invocation::ObjDestroy(t) => {
             handle_obj_destroy(cspace, frame_table, &mut p, handle_cap_table, &t)
         }

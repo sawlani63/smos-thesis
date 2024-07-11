@@ -22,6 +22,7 @@ pub enum ObjCreateArgs {
     HasName = 0,
     Size,
     Rights,
+    Attributes,
     ReturnCap,
     Length,
 }

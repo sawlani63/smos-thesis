@@ -9,6 +9,7 @@ use smos_common::connection::{ObjectServerConnection, RootServerConnection};
 use smos_common::local_handle::{
     HandleOrHandleCap, LocalHandle, ObjectHandle, ViewHandle, WindowHandle,
 };
+use smos_common::obj_attributes::ObjAttributes;
 use smos_common::string::copy_terminated_rust_string_to_buffer;
 use smos_common::syscall::{ObjectServerInterface, RootServerInterface};
 use smos_common::util::{ROUND_DOWN, ROUND_UP};
@@ -83,6 +84,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
             None,
             4096,
             sel4::CapRights::all(),
+            ObjAttributes::DEFAULT,
             Some(cspace.to_absolute_cptr(shared_buf_obj_hndl_cap)),
         )
         .expect("Failed to create shared buffer object");
@@ -169,7 +171,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
         // as well as having a more specific DeleteFirst error of some kind. Also be careful with checking perms
         if segment_hndl.is_ok() {
             let mem_obj_hndl = rs_conn
-                .obj_create(None, total_size as usize, sel4::CapRights::all(), None)
+                .obj_create(None, total_size as usize, sel4::CapRights::all(), ObjAttributes::DEFAULT, None)
                 .expect("Failed to create object");
             let view_hndl = rs_conn
                 .view(
@@ -234,6 +236,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
             None,
             STACK_PAGES * PAGE_SIZE_4K as usize,
             sel4::CapRights::all(),
+            ObjAttributes::DEFAULT,
             None,
         )
         .expect("Could not make stack object");

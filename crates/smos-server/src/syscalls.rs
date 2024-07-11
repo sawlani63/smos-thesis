@@ -9,6 +9,7 @@ use sel4::AbsoluteCPtr;
 use sel4_bitfield_ops::Bitfield;
 use sel4_sys::seL4_MessageInfo;
 use smos_common::local_handle::{HandleOrHandleCap, ObjectHandle, WindowHandle};
+use smos_common::obj_attributes::ObjAttributes;
 use smos_common::server_connection::ServerConnection;
 use smos_common::string::rust_str_from_buffer;
 use smos_common::util::BIT;
@@ -32,6 +33,7 @@ pub struct ObjCreate<'a> {
     pub name: Option<&'a str>,
     pub size: usize,
     pub rights: sel4::CapRights,
+    pub attributes: ObjAttributes,
     pub return_cap: bool,
 }
 
@@ -77,6 +79,7 @@ pub struct ConnPublish<'a> {
 pub struct ProcessSpawn<'a> {
     pub exec_name: &'a str,
     pub fs_name: &'a str,
+    pub prio: u8,
     pub args: Option<Vec<&'a str>>,
 }
 
@@ -389,6 +392,7 @@ mod SMOS_Invocation_Raw {
                     rights: sel4::CapRights::from_inner(sel4_sys::seL4_CapRights {
                         0: Bitfield::new([f_msg(ObjCreateArgs::Rights as u64)]),
                     }),
+                    attributes:  ObjAttributes::from_inner(f_msg(ObjCreateArgs::Attributes as u64)),
                     return_cap: f_msg(ObjCreateArgs::ReturnCap as u64) != 0,
                 }))
             }
@@ -589,7 +593,7 @@ mod SMOS_Invocation_Raw {
                     return Err(InvocationError::DataBufferNotSet);
                 }
 
-                if info.length() != 1 {
+                if info.length() != 2 {
                     return Err(InvocationError::InvalidArguments);
                 }
 
@@ -598,7 +602,7 @@ mod SMOS_Invocation_Raw {
                 let (exec_name, ref mut data_buffer_ref) = rust_str_from_buffer(data_buffer_ref)?;
                 let (fs_name, ref mut data_buffer_ref) = rust_str_from_buffer(data_buffer_ref)?;
 
-                let args = if info.length() == 0 {
+                let args = if f_msg(0) == 0 {
                     None
                 } else {
                     let mut args_inner = Vec::new();
@@ -613,6 +617,7 @@ mod SMOS_Invocation_Raw {
                 Ok(SMOS_Invocation::ProcessSpawn(ProcessSpawn {
                     exec_name: exec_name,
                     fs_name: fs_name,
+                    prio: f_msg(1).try_into().expect("@alwin: This should not be an assert"),
                     args: args,
                 }))
             }

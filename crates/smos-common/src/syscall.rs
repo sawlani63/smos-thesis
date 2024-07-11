@@ -8,6 +8,7 @@ use crate::local_handle::{
     LocalHandle, ObjectHandle, ProcessHandle, PublishHandle, ViewHandle, WindowHandle,
     WindowRegistrationHandle,
 };
+use crate::obj_attributes::ObjAttributes;
 use crate::returns::*;
 use crate::server_connection::*;
 use crate::string::copy_terminated_rust_string_to_buffer;
@@ -369,11 +370,12 @@ pub trait RootServerInterface: ClientConnection {
         &self,
         executable_name: &str,
         fs_name: &str,
+        prio: u8,
         argv: Option<&[&str]>,
     ) -> Result<LocalHandle<ProcessHandle>, InvocationError> {
         let mut msginfo = sel4::MessageInfoBuilder::default()
             .label(SMOSInvocation::ProcSpawn as u64)
-            .length(1)
+            .length(2)
             .build();
 
         let shared_buf_raw = self
@@ -400,6 +402,7 @@ pub trait RootServerInterface: ClientConnection {
                 None => 0,
                 Some(v) => v.len() as u64,
             };
+            ipc_buf.msg_regs_mut()[1] = prio as u64;
             msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
@@ -463,6 +466,7 @@ pub struct ReplyWrapper {
     pub cap: sel4::cap::Reply,
 }
 
+
 pub trait ObjectServerInterface: ClientConnection {
     fn conn_open(
         &mut self,
@@ -519,11 +523,12 @@ pub trait ObjectServerInterface: ClientConnection {
         name_opt: Option<&str>,
         size: usize,
         rights: sel4::CapRights,
+        attributes: ObjAttributes, // @alwin: Should probably also take in VMAttributes
         return_cap: Option<AbsoluteCPtr>,
     ) -> Result<HandleOrHandleCap<ObjectHandle>, InvocationError> {
         let mut msginfo = sel4::MessageInfoBuilder::default()
             .label(SMOSInvocation::ObjCreate as u64)
-            .length(4)
+            .length(5)
             .build();
 
         return sel4::with_ipc_buffer_mut(|ipc_buf| {
@@ -541,6 +546,7 @@ pub trait ObjectServerInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[ObjCreateArgs::Size as usize] = size as u64;
             ipc_buf.msg_regs_mut()[ObjCreateArgs::Rights as usize] =
                 rights.into_inner().0.bits()[0];
+            ipc_buf.msg_regs_mut()[ObjCreateArgs::Attributes as usize] = attributes.into_inner();
             ipc_buf.msg_regs_mut()[ObjCreateArgs::ReturnCap as usize] = return_cap.is_some() as u64;
             if return_cap.is_some() {
                 ipc_buf.set_recv_slot(&return_cap.unwrap());

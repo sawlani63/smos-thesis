@@ -41,7 +41,7 @@ use smos_server::ntfn_buffer::*;
 // relying on the behaviour of the compiler
 
 const NUM_FILES: usize = 1;
-const TEST_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("TEST_ELF"));
+const INIT_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("INIT_ELF"));
 
 #[derive(Debug)]
 struct File {
@@ -668,8 +668,8 @@ fn syscall_loop<T: ServerConnection>(
 fn init_file_table() {
     unsafe {
         files[0] = Some(File {
-            name: "test_app",
-            data: TEST_ELF_CONTENTS,
+            name: "init",
+            data: INIT_ELF_CONTENTS,
         });
     }
 }
@@ -699,7 +699,7 @@ fn init_handle_cap_table<T: ServerConnection>(
 fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Result<Never> {
     sel4::debug_println!("Entering boot file server...");
 
-    ElfBytes::<elf::endian::AnyEndian>::minimal_parse(TEST_ELF_CONTENTS)
+    ElfBytes::<elf::endian::AnyEndian>::minimal_parse(INIT_ELF_CONTENTS)
         .expect("Not a valid ELF file");
 
     let ep_cptr = cspace.alloc_slot().expect("Could not get a slot");
@@ -716,7 +716,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     sel4::debug_println!("Boot file server published...");
 
     /* Start the other relavant processes */
-    rs_conn.process_spawn("test_app", "BOOT_FS", Some(&["test"]));
+    rs_conn.process_spawn("init", "BOOT_FS", 252, None).expect("Failed to spawn init");
 
     let reply_cptr = cspace.alloc_slot().expect("Could not get a slot");
     let reply = rs_conn

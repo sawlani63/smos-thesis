@@ -12,3 +12,4 @@ pub mod server_connection;
 pub mod string;
 pub mod syscall;
 pub mod util;
+pub mod obj_attributes;

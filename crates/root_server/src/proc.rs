@@ -560,6 +560,7 @@ pub fn start_process(
     elf_data: &[u8],
     loader_args: Option<Vec<&str>>,
     exec_args: Option<Vec<&str>>,
+    prio: u8,
 ) -> Result<Rc<RefCell<ProcessType>>, sel4::Error> {
     /* We essentially use the position in the table as the pid. Don't think this is the right way to
     do it properly */
@@ -816,7 +817,7 @@ pub fn start_process(
         .tcb_set_sched_params(
             sel4::init_thread::slot::TCB.cap(),
             0,
-            0,
+            prio.into(),
             sched_context.0,
             fault_ep,
         )
@@ -1076,6 +1077,7 @@ pub fn handle_process_spawn(
         LOADER_CONTENTS,
         loader_args,
         args.args,
+        args.prio,
     )
     .map_err(|_| InvocationError::InsufficientResources)?;
 
