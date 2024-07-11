@@ -253,9 +253,16 @@ impl UserProcess {
         return None;
     }
 
-    // @alwin: How can I make this more type-safe?
     pub fn add_window_unchecked(&mut self, window: Rc<RefCell<Window>>) {
         self.windows.push(window);
+    }
+
+    pub fn remove_window(&mut self, window: Rc<RefCell<Window>>) {
+        let pos = self.windows.iter().position(|x| Rc::ptr_eq(x, &window));
+        match pos {
+            Some(x) => { self.windows.swap_remove(x); },
+            None => {},
+        }
     }
 
     pub fn write_args_to_stack(

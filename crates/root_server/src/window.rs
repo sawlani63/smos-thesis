@@ -231,7 +231,8 @@ pub fn handle_window_destroy(
         },
     }?;
 
-    handle_window_destroy_internal(cspace, window, true);
+    handle_window_destroy_internal(cspace, window.clone(), true);
+    p.remove_window(window);
 
     generic_cleanup_handle(
         p,
