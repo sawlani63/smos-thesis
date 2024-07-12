@@ -5,8 +5,8 @@ use crate::error::*;
 use crate::invocations::SMOSInvocation;
 use crate::local_handle::{
     ConnRegistrationHandle, ConnectionHandle, HandleCap, HandleCapHandle, HandleOrHandleCap,
-    LocalHandle, ObjectHandle, ProcessHandle, PublishHandle, ViewHandle, WindowHandle,
-    WindowRegistrationHandle,
+    IRQRegistrationHandle, LocalHandle, ObjectHandle, ProcessHandle, PublishHandle, ViewHandle,
+    WindowHandle, WindowRegistrationHandle,
 };
 use crate::obj_attributes::ObjAttributes;
 use crate::returns::*;
@@ -75,7 +75,7 @@ pub trait RootServerInterface: ClientConnection {
         &self,
         publish_hndl: &LocalHandle<ConnectionHandle>,
         id: usize,
-    ) -> Result<LocalHandle<ConnRegistrationHandle>, InvocationError> {
+    ) -> Result<(LocalHandle<ConnRegistrationHandle>), InvocationError> {
         let mut msginfo = sel4::MessageInfoBuilder::default()
             .label(SMOSInvocation::ConnRegister as u64)
             .length(2)
@@ -87,7 +87,33 @@ pub trait RootServerInterface: ClientConnection {
 
             msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+
             Ok(LocalHandle::new(ipc_buf.msg_regs()[0] as usize))
+        });
+    }
+
+    fn irq_register(
+        &self,
+        publish_hndl: &LocalHandle<ConnectionHandle>,
+        irq_num: usize,
+        edge_triggered: bool,
+    ) -> Result<(LocalHandle<IRQRegistrationHandle>, u8), InvocationError> {
+        let mut msginfo = sel4::MessageInfoBuilder::default()
+            .label(SMOSInvocation::IRQRegister as u64)
+            .length(3)
+            .build();
+
+        return sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.msg_regs_mut()[0] = publish_hndl.idx as u64;
+            ipc_buf.msg_regs_mut()[1] = irq_num as u64;
+            ipc_buf.msg_regs_mut()[2] = edge_triggered.into();
+
+            msginfo = self.ep().call(msginfo);
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+            Ok((
+                LocalHandle::new(ipc_buf.msg_regs()[0] as usize),
+                ipc_buf.msg_regs()[1].try_into().unwrap(),
+            ))
         });
     }
 
@@ -465,7 +491,6 @@ pub struct ReplyWrapper {
     pub handle: usize,
     pub cap: sel4::cap::Reply,
 }
-
 
 pub trait ObjectServerInterface: ClientConnection {
     fn conn_open(

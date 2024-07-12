@@ -25,7 +25,7 @@ none:
 clean:
 	rm -rf $(build_dir)
 
-# Build the test app
+# Build the system initalizer
 init_crate := init
 init := $(build_dir)/$(init_crate).elf
 $(init): $(init).intermediate
@@ -42,17 +42,23 @@ $(init).intermediate:
 			--out-dir $(build_dir) \
 			-p $(init_crate)
 
+# Build the eth driver
+eth_driver_crate := eth_driver
+eth_driver := $(build_dir)/$(eth_driver_crate).elf
+$(eth_driver): $(eth_driver).intermediate
 
-SEL4_PREFIX=/Users/alwinjoshy/work/smos_new/smos-rs/deps/seL4/install \
-	cargo build \
-    	-vv \
-		-Z build-std=core,alloc,compiler_builtins \
-		-Z build-std-features=compiler-builtins-mem \
-		-Z unstable-options \
-		--target support/targets/aarch64-sel4.json \
-		--target-dir build/target \
-		--out-dir build \
-		-p smos-loader
+.INTERMDIATE: $(eth_driver).intermediate
+$(eth_driver).intermediate:
+	SEL4_PREFIX=$(sel4_prefix) \
+		cargo build \
+			-Z build-std=core,alloc,compiler_builtins \
+			-Z build-std-features=compiler-builtins-mem \
+			-Z unstable-options \
+			--target support/targets/aarch64-sel4.json \
+			--target-dir $(abspath $(build_dir)/target) \
+			--out-dir $(build_dir) \
+			-p $(eth_driver_crate)
+
 
 # Build the boot file server
 bfs_crate := boot_file_server
@@ -60,9 +66,10 @@ bfs := $(build_dir)/$(bfs_crate).elf
 $(bfs): $(bfs).intermediate
 
 .INTERMDIATE: $(bfs).intermediate
-$(bfs).intermediate: $(init)
+$(bfs).intermediate: $(init) $(eth_driver)
 	SEL4_PREFIX=$(sel4_prefix) \
 	INIT_ELF=$(init) \
+	ETH_DRIVER_ELF=$(eth_driver) \
 		cargo build \
 			-Z build-std=core,alloc,compiler_builtins \
 			-Z build-std-features=compiler-builtins-mem \
@@ -115,7 +122,7 @@ $(root_server).intermediate: $(bfs) $(smos_loader)
 
 image := $(build_dir)/image.elf
 # Append the payload to the loader using the loader CLI
-$(image): $(root_server) $(init) $(bfs) $(smos_loader) $(loader) $(loader_cli)
+$(image): $(root_server)
 	$(loader_cli) \
 		--loader $(loader) \
 		--sel4-prefix $(sel4_prefix) \

@@ -2,6 +2,7 @@ use crate::alloc::string::ToString;
 use crate::cspace::{CSpace, CSpaceTrait};
 use crate::frame_table::FrameTable;
 use crate::handle::RootServerResource;
+use crate::irq::UserNotificationDispatch;
 use crate::object::{AnonymousMemoryObject, OBJ_LVL_MAX};
 use crate::page::PAGE_SIZE_4K;
 use crate::proc::{procs_get, ProcessType, UserProcess};
@@ -19,7 +20,7 @@ use smos_common::error::InvocationError;
 use smos_common::local_handle;
 use smos_common::local_handle::LocalHandle;
 use smos_common::util::BIT;
-use smos_server::event::{INVOCATION_EP_BITS, NTFN_SIGNAL_BITS};
+use smos_server::event::{INVOCATION_EP_BITS, IRQ_IDENT_BADGE_BITS, NTFN_BIT};
 use smos_server::handle::HandleAllocater;
 use smos_server::handle::ServerHandle;
 use smos_server::ntfn_buffer::{
@@ -35,8 +36,7 @@ use smos_server::syscalls::{
 pub struct Server {
     pid: usize,
     pub unbadged_ep: (sel4::cap::Endpoint, UTWrapper),
-    unbadged_ntfn: (sel4::cap::Notification, UTWrapper),
-    pub badged_ntfn: sel4::cap::Notification,
+    pub ntfn_dispatch: UserNotificationDispatch,
     ntfn_buffer_view: Rc<RefCell<View>>,
     pub ntfn_buffer_addr: *mut u8, //@alwin: I am unsure if this is the best way to appraoch this, but having something with a lifetime in here is extremely painful
     pub connections: Vec<Rc<RefCell<Connection>>>,
@@ -189,7 +189,12 @@ pub fn handle_conn_destroy(
 
         unsafe { enqueue_ntfn_buffer_msg(conn.borrow().server.borrow().ntfn_buffer_addr, msg) };
 
-        conn.borrow().server.borrow().badged_ntfn.signal();
+        conn.borrow()
+            .server
+            .borrow()
+            .ntfn_dispatch
+            .rs_badged_ntfn()
+            .signal();
     }
 
     p.cleanup_handle(args.hndl.idx);
@@ -289,36 +294,24 @@ pub fn handle_conn_publish(
         InvocationError::InsufficientResources
     })?;
 
-    /* Create a badged notification cap that the RS uses to communicate with the server */
-    let badged_ntfn_cap = cspace
-        .alloc_cap::<sel4::cap_type::Notification>()
-        .map_err(|_| {
-            p.tcb.0.tcb_unbind_notification();
-            dealloc_retyped(cspace, ut_table, ntfn);
-            dealloc_retyped(cspace, ut_table, ep);
-            InvocationError::InsufficientResources
-        })?;
+    let mut ntfn_dispatch = UserNotificationDispatch::new(
+        sel4::init_thread::slot::IRQ_CONTROL.cap(),
+        ntfn,
+        NTFN_BIT,
+        IRQ_IDENT_BADGE_BITS,
+    );
 
-    cspace
-        .root_cnode()
-        .relative(badged_ntfn_cap)
-        .mint(
-            &cspace.root_cnode().relative(ntfn.0),
-            sel4::CapRights::all(),
-            NTFN_SIGNAL_BITS as u64,
-        )
-        .map_err(|_| {
-            cspace.free_cap(badged_ntfn_cap);
-            p.tcb.0.tcb_unbind_notification();
-            dealloc_retyped(cspace, ut_table, ep);
-            dealloc_retyped(cspace, ut_table, ntfn);
-            InvocationError::InsufficientResources
-        })?;
+    /* Create a badged notification cap that the RS uses to communicate with the server */
+    ntfn_dispatch.ntfn_register(cspace).map_err(|_| {
+        p.tcb.0.tcb_unbind_notification();
+        dealloc_retyped(cspace, ut_table, ntfn);
+        dealloc_retyped(cspace, ut_table, ep);
+        InvocationError::InsufficientResources
+    })?;
 
     /* Pre-allocate the frame used for the notification buffer */
     let frame_ref = frame_table.alloc_frame(cspace, ut_table).ok_or_else(|| {
-        cspace.delete_cap(badged_ntfn_cap);
-        cspace.free_cap(badged_ntfn_cap);
+        ntfn_dispatch.destroy(cspace, ut_table);
         p.tcb.0.tcb_unbind_notification();
         dealloc_retyped(cspace, ut_table, ep);
         dealloc_retyped(cspace, ut_table, ntfn);
@@ -369,8 +362,7 @@ pub fn handle_conn_publish(
     let server = Rc::new(RefCell::new(Server {
         pid: pid,
         unbadged_ep: ep,
-        unbadged_ntfn: ntfn,
-        badged_ntfn: badged_ntfn_cap,
+        ntfn_dispatch: ntfn_dispatch,
         ntfn_buffer_view: view.clone(),
         ntfn_buffer_addr: frame_table.frame_data(frame_ref).as_mut_ptr(),
         connections: Vec::new(),

@@ -172,7 +172,7 @@ pub fn handle_window_destroy_internal(
             });
 
             unsafe { enqueue_ntfn_buffer_msg(server.borrow().ntfn_buffer_addr, msg) };
-            server.borrow().badged_ntfn.signal();
+            server.borrow().ntfn_dispatch.rs_badged_ntfn().signal();
         }
 
         if destroy_view {

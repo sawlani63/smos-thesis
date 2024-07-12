@@ -167,11 +167,18 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
             total_size as usize,
             None,
         );
+
         // @alwin: Trying to handle overlapping windows but kind of dodgy. Should probably try and make another window from the next page instead
         // as well as having a more specific DeleteFirst error of some kind. Also be careful with checking perms
         if segment_hndl.is_ok() {
             let mem_obj_hndl = rs_conn
-                .obj_create(None, total_size as usize, sel4::CapRights::all(), ObjAttributes::DEFAULT, None)
+                .obj_create(
+                    None,
+                    total_size as usize,
+                    sel4::CapRights::all(),
+                    ObjAttributes::DEFAULT,
+                    None,
+                )
                 .expect("Failed to create object");
             let view_hndl = rs_conn
                 .view(

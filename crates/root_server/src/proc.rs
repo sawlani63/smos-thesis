@@ -189,6 +189,9 @@ impl UserProcess {
                 RootServerResource::HandleCap(hc) => {
                     todo!()
                 }
+                RootServerResource::IRQRegistration(irq_reg) => {
+                    todo!()
+                }
             }
         }
 
@@ -260,8 +263,10 @@ impl UserProcess {
     pub fn remove_window(&mut self, window: Rc<RefCell<Window>>) {
         let pos = self.windows.iter().position(|x| Rc::ptr_eq(x, &window));
         match pos {
-            Some(x) => { self.windows.swap_remove(x); },
-            None => {},
+            Some(x) => {
+                self.windows.swap_remove(x);
+            }
+            None => {}
         }
     }
 

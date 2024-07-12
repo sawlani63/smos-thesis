@@ -43,6 +43,10 @@ pub struct WindowRegistrationHandle {}
 impl HandleType for WindowRegistrationHandle {}
 
 #[derive(Debug, Copy, Clone)]
+pub struct IRQRegistrationHandle {}
+impl HandleType for IRQRegistrationHandle {}
+
+#[derive(Debug, Copy, Clone)]
 pub struct LocalHandle<A: HandleType> {
     pub idx: usize,
     marker: PhantomData<A>,

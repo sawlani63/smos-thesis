@@ -1,16 +1,11 @@
+use alloc::vec::Vec;
 use smos_common::util::BIT;
 
 /* We set the top bit to differentiate between messages from notifications  and EPs */
-// pub const IRQ_EP_BIT: usize = BIT(sel4_sys::seL4_BadgeBits as usize - 1);
-const NTFN_BIT: usize = 0x1 << 63;
-pub const NTFN_IRQ_BITS: usize = NTFN_BIT | 0 << 62;
-pub const NTFN_SIGNAL_BITS: usize = NTFN_BIT | 1 << 62;
+pub const NTFN_BIT: usize = 0x1 << 63;
 
-const IRQ_VALUE: usize = 0x0;
-const SIGNAL_VALUE: usize = 0x1;
-
-/* If we have a notification, we use the remaining 62 bits to differentiate between them */
-pub const IRQ_IDENT_BADGE_BITS: usize = BIT(62) - 1;
+/* If we have a notification, we use the remaining 63 bits to differentiate between them */
+pub const IRQ_IDENT_BADGE_BITS: usize = BIT(63) - 1;
 
 /* If we have an endpoint, we use the 2nd and 3rd top bits to determine if it was the result of a
  * fault, a boot file file server invocation, or root server invocation. */
@@ -26,17 +21,57 @@ pub const FAULT_EP_BITS: usize = EP_BIT | FAULT_VALUE << EP_TYPE_SHIFT;
 pub enum EntryType {
     Invocation(usize),
     Fault(usize),
-    Irq,
-    Signal,
+    Notification(NtfnWord),
+}
+
+pub struct NtfnWord(usize);
+
+impl NtfnWord {
+    pub fn from_inner(inner: usize) -> Self {
+        return Self { 0: inner };
+    }
+
+    pub fn into_inner(self) -> usize {
+        return self.0;
+    }
+
+    pub fn inner(&self) -> &usize {
+        return &self.0;
+    }
+
+    pub fn inner_mut(&mut self) -> &mut usize {
+        return &mut self.0;
+    }
+}
+
+pub struct NtfnWordIterator(usize);
+
+impl Iterator for NtfnWordIterator {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        if self.0 == 0 {
+            return None;
+        }
+
+        let bit = self.0.trailing_zeros().try_into().unwrap();
+        self.0 &= !BIT(bit);
+        return Some(bit);
+    }
+}
+
+impl IntoIterator for NtfnWord {
+    type Item = usize;
+    type IntoIter = NtfnWordIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        return NtfnWordIterator { 0: self.0 };
+    }
 }
 
 pub fn decode_entry_type(badge: usize) -> EntryType {
     if badge & NTFN_BIT != 0 {
-        return match ((badge >> EP_TYPE_SHIFT) & 0x1) {
-            IRQ_VALUE => EntryType::Irq,
-            SIGNAL_VALUE => EntryType::Signal,
-            _ => panic!("An unexpected notification capability was invoked"),
-        };
+        return EntryType::Notification(NtfnWord::from_inner(badge & !NTFN_BIT));
     }
 
     let pid = badge & !(0x3 << EP_TYPE_SHIFT);

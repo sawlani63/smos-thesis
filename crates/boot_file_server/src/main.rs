@@ -40,10 +40,11 @@ use smos_server::ntfn_buffer::*;
 // to prevent information leakage. Maybe if another page aligned 'guard page' is added? Kinda
 // relying on the behaviour of the compiler
 
-const NUM_FILES: usize = 1;
+const NUM_FILES: usize = 2;
 const INIT_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("INIT_ELF"));
+const ETH_DRIVER_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("ETH_DRIVER_ELF"));
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 struct File {
     name: &'static str,
     data: &'static [u8],
@@ -550,9 +551,14 @@ fn syscall_loop<T: ServerConnection>(
         };
 
         match decode_entry_type(badge.try_into().unwrap()) {
-            EntryType::Irq => todo!(),
+            EntryType::Notification(bits) => {
             EntryType::Signal => {
-                handle_notification(&rs_conn, &mut window_allocator);
+                for bit in bits.into_iter() {
+                    match bit {
+                        0 => handle_notification(&rs_conn, &mut window_allocator),
+                        _ => panic!("Don't know how to handle any other notifications {}", badge),
+                    }
+                }
                 reply_msg_info = None;
             }
             EntryType::Fault(_x) => todo!(),
@@ -671,6 +677,10 @@ fn init_file_table() {
             name: "init",
             data: INIT_ELF_CONTENTS,
         });
+        files[1] = Some(File {
+            name: "eth_driver",
+            data: ETH_DRIVER_ELF_CONTENTS,
+        });
     }
 }
 
@@ -716,7 +726,9 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     sel4::debug_println!("Boot file server published...");
 
     /* Start the other relavant processes */
-    rs_conn.process_spawn("init", "BOOT_FS", 252, None).expect("Failed to spawn init");
+    rs_conn
+        .process_spawn("init", "BOOT_FS", 252, None)
+        .expect("Failed to spawn init");
 
     let reply_cptr = cspace.alloc_slot().expect("Could not get a slot");
     let reply = rs_conn

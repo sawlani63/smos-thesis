@@ -1,8 +1,8 @@
 use smos_common::error::InvocationErrorLabel;
 use smos_common::local_handle::{
     ConnRegistrationHandle, ConnectionHandle, HandleCap, HandleCapHandle, HandleOrHandleCap,
-    HandleType, LocalHandle, ObjectHandle, ProcessHandle, ReplyHandle, ViewHandle, WindowHandle,
-    WindowRegistrationHandle,
+    HandleType, IRQRegistrationHandle, LocalHandle, ObjectHandle, ProcessHandle, ReplyHandle,
+    ViewHandle, WindowHandle, WindowRegistrationHandle,
 };
 use smos_common::returns::*;
 
@@ -26,6 +26,10 @@ pub enum SMOSReply {
     },
     WindowRegister {
         hndl: LocalHandle<WindowRegistrationHandle>,
+    },
+    IRQRegister {
+        hndl: LocalHandle<IRQRegistrationHandle>,
+        badge_bit: u8,
     },
     ConnOpen,
     ConnClose,
@@ -124,6 +128,11 @@ pub fn handle_reply(ipc_buf: &mut sel4::IpcBuffer, reply_type: SMOSReply) -> sel
         SMOSReply::WindowRegister { hndl } => {
             msginfo = msginfo.length(1);
             ipc_buf.msg_regs_mut()[0] = hndl.idx as u64;
+        }
+        SMOSReply::IRQRegister { hndl, badge_bit } => {
+            msginfo = msginfo.length(2);
+            ipc_buf.msg_regs_mut()[0] = hndl.idx as u64;
+            ipc_buf.msg_regs_mut()[1] = badge_bit as u64;
         }
         SMOSReply::ConnRegister { hndl } => {
             msginfo = msginfo.length(1);

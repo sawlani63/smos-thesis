@@ -41,7 +41,7 @@ fn forward_vm_fault(
     // associated with it will no longer be backed by it. @alwin: Make sure to actually implement this
     unsafe { enqueue_ntfn_buffer_msg(server.borrow().ntfn_buffer_addr, msg) };
 
-    server.borrow().badged_ntfn.signal();
+    server.borrow().ntfn_dispatch.rs_badged_ntfn().signal();
     borrowed_view.pending_fault = Some((reply, info, p.vspace.0))
 }
 
@@ -225,7 +225,8 @@ pub fn handle_vm_fault(
     /* Maybe should return None here and possibly clean up the process? */
     if window.is_none() {
         warn_rs!(
-            "Process faulted at vaddr: 0x{:x}, which is not inside a window",
+            "Process {} faulted at vaddr: 0x{:x}, which is not inside a window",
+            proc.pid,
             fault_info.addr()
         );
         return Some(FaultReply::VMFault { resume: false });

@@ -140,12 +140,9 @@ fn syscall_loop(
         let label = msg.label();
 
         reply_msg_info = match decode_entry_type(badge.try_into().unwrap()) {
-            EntryType::Irq => {
-                badge = irq_dispatch.handle_irq(badge as usize);
+            EntryType::Notification(badge) => {
+                irq_dispatch.handle_irq(badge.into_inner());
                 None
-            }
-            EntryType::Signal => {
-                panic!("RS shouldn't recieve signals");
             }
             EntryType::Invocation(pid) => {
                 /* We recieved a syscall from something in the system*/
@@ -211,7 +208,7 @@ extern "C" fn main_continued(
     let mut irq_dispatch = IRQDispatch::new(
         sel4::init_thread::slot::IRQ_CONTROL.cap(),
         ntfn,
-        NTFN_IRQ_BITS,
+        NTFN_BIT,
         IRQ_IDENT_BADGE_BITS,
     );
 

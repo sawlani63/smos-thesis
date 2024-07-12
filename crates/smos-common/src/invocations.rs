@@ -41,4 +41,5 @@ pub enum SMOSInvocation {
     PageMap,
     PageUnmap,
     LoadComplete,
+    IRQRegister,
 }

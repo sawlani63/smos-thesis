@@ -157,6 +157,13 @@ pub struct ServerHandleCapCreate {
     pub ident: usize,
 }
 
+#[derive(Debug)]
+pub struct IRQRegister {
+    pub publish_hndl: ReceivedHandle,
+    pub irq_num: usize,
+    pub edge_triggered: bool,
+}
+
 // General invocation enum
 #[derive(Debug)]
 pub enum SMOS_Invocation<'a> {
@@ -185,6 +192,7 @@ pub enum SMOS_Invocation<'a> {
     WindowDeregister(WindowDeregister),
     PageMap(PageMap),
     LoadComplete(LoadComplete),
+    IRQRegister(IRQRegister),
 }
 
 impl<'a> SMOS_Invocation<'a> {
@@ -392,7 +400,7 @@ mod SMOS_Invocation_Raw {
                     rights: sel4::CapRights::from_inner(sel4_sys::seL4_CapRights {
                         0: Bitfield::new([f_msg(ObjCreateArgs::Rights as u64)]),
                     }),
-                    attributes:  ObjAttributes::from_inner(f_msg(ObjCreateArgs::Attributes as u64)),
+                    attributes: ObjAttributes::from_inner(f_msg(ObjCreateArgs::Attributes as u64)),
                     return_cap: f_msg(ObjCreateArgs::ReturnCap as u64) != 0,
                 }))
             }
@@ -575,6 +583,17 @@ mod SMOS_Invocation_Raw {
                     client_id: f_msg(1) as usize,
                 }))
             }
+            SMOSInvocation::IRQRegister => {
+                if info.length() != 3 {
+                    return Err(InvocationError::InvalidArguments);
+                }
+
+                Ok(SMOS_Invocation::IRQRegister(IRQRegister {
+                    publish_hndl: ReceivedHandle::new(f_msg(0) as usize),
+                    irq_num: f_msg(1) as usize,
+                    edge_triggered: f_msg(2) != 0,
+                }))
+            }
             SMOSInvocation::ReplyCreate => Ok(SMOS_Invocation::ReplyCreate),
             SMOSInvocation::ServerHandleCapCreate => {
                 if info.length() != 2 {
@@ -617,7 +636,9 @@ mod SMOS_Invocation_Raw {
                 Ok(SMOS_Invocation::ProcessSpawn(ProcessSpawn {
                     exec_name: exec_name,
                     fs_name: fs_name,
-                    prio: f_msg(1).try_into().expect("@alwin: This should not be an assert"),
+                    prio: f_msg(1)
+                        .try_into()
+                        .expect("@alwin: This should not be an assert"),
                     args: args,
                 }))
             }

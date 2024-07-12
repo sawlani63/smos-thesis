@@ -1,5 +1,6 @@
 use crate::connection::{Connection, Server};
 use crate::cspace::{CSpace, CSpaceTrait};
+use crate::irq::IRQRegistration;
 use crate::object::AnonymousMemoryObject;
 use crate::proc::ProcessType;
 use crate::ut::UTWrapper;
@@ -10,6 +11,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use smos_server::handle::HandleInner;
 use smos_server::handle_capability::HandleCapability;
+use smos_server::syscalls::IRQRegister;
 
 const MAX_HANDLE_CAPS: usize = 256;
 
@@ -52,6 +54,7 @@ pub enum RootServerResource {
     Object(Rc<RefCell<AnonymousMemoryObject>>),
     ConnRegistration(Rc<RefCell<Connection>>),
     WindowRegistration(Rc<RefCell<View>>),
+    IRQRegistration(Rc<RefCell<IRQRegistration>>),
     View(Rc<RefCell<View>>),
     Connection(Rc<RefCell<Connection>>), // Does this need a refcell?
     Server(Rc<RefCell<Server>>),

@@ -2,6 +2,7 @@ use crate::connection::*;
 use crate::cspace::{CSpace, CSpaceTrait};
 use crate::frame_table::FrameTable;
 use crate::handle::RootServerResource;
+use crate::irq::handle_irq_register;
 use crate::object::*;
 use crate::proc::{
     handle_load_complete, handle_process_exit, handle_process_spawn, handle_process_wait,
@@ -90,9 +91,12 @@ pub fn handle_syscall(
             handle_window_destroy(cspace, &mut p, handle_cap_table, &t)
         }
         SMOS_Invocation::WindowRegister(t) => handle_window_register(&mut p, handle_cap_table, &t),
+        SMOS_Invocation::IRQRegister(t) => handle_irq_register(cspace, &mut p, &t),
         SMOS_Invocation::ConnCreate(t) => handle_conn_create(cspace, &mut p, &t),
         SMOS_Invocation::ConnDestroy(t) => handle_conn_destroy(cspace, &mut p, &t),
-        SMOS_Invocation::ObjCreate(t) => handle_obj_create(cspace, frame_table, ut_table, &mut p, handle_cap_table, &t),
+        SMOS_Invocation::ObjCreate(t) => {
+            handle_obj_create(cspace, frame_table, ut_table, &mut p, handle_cap_table, &t)
+        }
         SMOS_Invocation::ObjDestroy(t) => {
             handle_obj_destroy(cspace, frame_table, &mut p, handle_cap_table, &t)
         }
