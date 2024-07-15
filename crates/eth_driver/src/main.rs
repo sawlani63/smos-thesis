@@ -66,7 +66,13 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     sel4::debug_println!("magic is {:x}", magic);
 
     /* Register for the IRQ  */
-    rs_conn.irq_register(&listen_conn.hndl(), 79, true);
+    let irq_handler_slot = cspace.alloc_slot().expect("Did not have enough slots");
+    rs_conn.irq_register(
+        &listen_conn.hndl(),
+        79,
+        true,
+        &cspace.to_absolute_cptr(irq_handler_slot),
+    );
 
     /* Map in the recieve DMA region */
     let dma_win_hndl = rs_conn

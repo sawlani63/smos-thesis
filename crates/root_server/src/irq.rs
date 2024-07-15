@@ -263,7 +263,7 @@ impl UserNotificationDispatch {
         cspace: &mut CSpace,
         irq_num: usize,
         edge_triggered: bool,
-    ) -> Result<u8, InvocationError> {
+    ) -> Result<(u8, sel4::cap::IrqHandler), InvocationError> {
         // Allocate a bit
         let ident_bit = self
             .alloc_ntfn_bit()
@@ -315,7 +315,7 @@ impl UserNotificationDispatch {
         self.badged_ntfns[ident_bit] = Some(ntfn);
         self.irq_handler_caps[ident_bit] = Some(handler);
 
-        return Ok(ident_bit.try_into().unwrap());
+        return Ok((ident_bit.try_into().unwrap(), handler));
     }
 
     fn alloc_ntfn_bit(self: &mut Self) -> Result<usize, sel4::Error> {
@@ -343,7 +343,7 @@ pub fn handle_irq_register(
         _ => Err(InvocationError::InvalidHandle { which_arg: 0 }),
     }?;
 
-    let badge_bit = server.borrow_mut().ntfn_dispatch.irq_register(
+    let (badge_bit, irq_handler) = server.borrow_mut().ntfn_dispatch.irq_register(
         cspace,
         args.irq_num,
         args.edge_triggered,
@@ -359,6 +359,7 @@ pub fn handle_irq_register(
 
     return Ok(SMOSReply::IRQRegister {
         hndl: LocalHandle::new(idx),
+        irq_handler: irq_handler,
         badge_bit: badge_bit,
     });
 }

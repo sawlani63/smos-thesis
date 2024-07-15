@@ -29,6 +29,7 @@ pub enum SMOSReply {
     },
     IRQRegister {
         hndl: LocalHandle<IRQRegistrationHandle>,
+        irq_handler: sel4::cap::IrqHandler,
         badge_bit: u8,
     },
     ConnOpen,
@@ -129,10 +130,15 @@ pub fn handle_reply(ipc_buf: &mut sel4::IpcBuffer, reply_type: SMOSReply) -> sel
             msginfo = msginfo.length(1);
             ipc_buf.msg_regs_mut()[0] = hndl.idx as u64;
         }
-        SMOSReply::IRQRegister { hndl, badge_bit } => {
-            msginfo = msginfo.length(2);
+        SMOSReply::IRQRegister {
+            hndl,
+            irq_handler,
+            badge_bit,
+        } => {
+            msginfo = msginfo.length(2).extra_caps(1);
             ipc_buf.msg_regs_mut()[0] = hndl.idx as u64;
             ipc_buf.msg_regs_mut()[1] = badge_bit as u64;
+            ipc_buf.caps_or_badges_mut()[0] = irq_handler.bits();
         }
         SMOSReply::ConnRegister { hndl } => {
             msginfo = msginfo.length(1);

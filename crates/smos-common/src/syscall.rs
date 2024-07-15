@@ -97,7 +97,15 @@ pub trait RootServerInterface: ClientConnection {
         publish_hndl: &LocalHandle<ConnectionHandle>,
         irq_num: usize,
         edge_triggered: bool,
-    ) -> Result<(LocalHandle<IRQRegistrationHandle>, u8), InvocationError> {
+        irq_handler_slot: &AbsoluteCPtr,
+    ) -> Result<
+        (
+            LocalHandle<IRQRegistrationHandle>,
+            u8,
+            sel4::cap::IrqHandler,
+        ),
+        InvocationError,
+    > {
         let mut msginfo = sel4::MessageInfoBuilder::default()
             .label(SMOSInvocation::IRQRegister as u64)
             .length(3)
@@ -107,12 +115,15 @@ pub trait RootServerInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[0] = publish_hndl.idx as u64;
             ipc_buf.msg_regs_mut()[1] = irq_num as u64;
             ipc_buf.msg_regs_mut()[2] = edge_triggered.into();
+            ipc_buf.set_recv_slot(irq_handler_slot);
 
             msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
             Ok((
                 LocalHandle::new(ipc_buf.msg_regs()[0] as usize),
                 ipc_buf.msg_regs()[1].try_into().unwrap(),
+                sel4::CPtr::from_bits(irq_handler_slot.path().bits())
+                    .cast::<sel4::cap_type::IrqHandler>(),
             ))
         });
     }
