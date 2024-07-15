@@ -105,6 +105,7 @@ pub fn handle_syscall(
             handle_cap_table,
             &t,
         ),
+        SMOS_Invocation::ObjStat(t) => handle_obj_stat(dma_pool, &mut p, handle_cap_table, &t),
         SMOS_Invocation::ObjDestroy(t) => {
             handle_obj_destroy(cspace, frame_table, &mut p, handle_cap_table, &t)
         }

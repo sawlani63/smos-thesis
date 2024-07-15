@@ -706,6 +706,11 @@ pub trait ObjectServerInterface: ClientConnection {
 
             return Ok(ObjStat {
                 size: ipc_buf.msg_regs()[ObjStatReturn::Size as usize] as usize,
+                paddr: if ipc_buf.msg_regs_mut()[ObjStatReturn::Paddr as usize] == 0 {
+                    None
+                } else {
+                    Some(ipc_buf.msg_regs_mut()[ObjStatReturn::Paddr as usize] as usize)
+                },
             });
         });
     }

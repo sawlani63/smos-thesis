@@ -160,7 +160,10 @@ fn handle_obj_stat(
 
     let size = object.borrow().file.data.len();
     Ok(SMOSReply::ObjStat {
-        data: smos_common::returns::ObjStat { size: size },
+        data: smos_common::returns::ObjStat {
+            size: size,
+            paddr: None,
+        },
     })
 }
 

@@ -92,5 +92,13 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
         )
         .expect("Failed to view DMA object");
 
+    let stat = rs_conn
+        .obj_stat(&dma_obj_hndl)
+        .expect("Failed to stat object");
+    sel4::debug_println!(
+        "DMA regions is at physical address: {:#x}",
+        stat.paddr.unwrap()
+    );
+
     unreachable!()
 }

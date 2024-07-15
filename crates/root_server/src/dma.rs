@@ -75,6 +75,10 @@ impl DMAPool {
         return self.vstart + (phys - self.pstart);
     }
 
+    pub fn allocation_paddr(&self, alloc: &Allocation) -> usize {
+        return self.pstart + (alloc.offset as usize) * PAGE_SIZE_4K;
+    }
+
     pub fn allocate_contig_pages(
         &mut self,
         n_pages: u32,

@@ -15,6 +15,7 @@ use offset_allocator::Allocation;
 use smos_common::error::InvocationError;
 use smos_common::local_handle::{HandleOrHandleCap, ObjectHandle};
 use smos_common::obj_attributes::{self, ObjAttributes};
+use smos_common::returns::ObjStat as ObjStatReturn;
 use smos_common::util::BIT;
 use smos_server::handle::{
     generic_allocate_handle, generic_cleanup_handle, generic_get_handle,
@@ -23,7 +24,7 @@ use smos_server::handle::{
 use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
 use smos_server::handle_capability::HandleCapabilityTable;
 use smos_server::reply::SMOSReply;
-use smos_server::syscalls::{ObjCreate, ObjDestroy};
+use smos_server::syscalls::{ObjCreate, ObjDestroy, ObjStat};
 
 /* Each level of the page table uses 9 bits, just like the underlying page table structure. Realistically,
 this is kind of unnecessary, because no objects of this size should ever need to be allocated, but
@@ -318,4 +319,31 @@ pub fn handle_obj_destroy(
     generic_cleanup_handle(p, handle_cap_table, args.hndl, 0)?;
 
     return Ok(SMOSReply::ObjDestroy);
+}
+
+pub fn handle_obj_stat(
+    dma_pool: &mut DMAPool,
+    p: &mut UserProcess,
+    handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
+    args: &ObjStat,
+) -> Result<SMOSReply, InvocationError> {
+    /* Check that the passed in handle/cap is within bounds */
+    let handle_ref = generic_get_handle(p, handle_cap_table, args.hndl, 0)?;
+
+    /* Check that the handle refers to is an object */
+    let object = match handle_ref.as_ref().unwrap().inner() {
+        RootServerResource::Object(obj) => Ok(obj.clone()),
+        _ => Err(generic_invalid_handle_error(args.hndl, 0)),
+    }?;
+
+    return Ok(SMOSReply::ObjStat {
+        data: ObjStatReturn {
+            size: object.borrow().size,
+            paddr: if object.borrow().dma_allocation.is_some() {
+                Some(dma_pool.allocation_paddr(object.borrow().dma_allocation.as_ref().unwrap()))
+            } else {
+                None
+            },
+        },
+    });
 }

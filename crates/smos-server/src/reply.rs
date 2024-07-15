@@ -145,6 +145,10 @@ pub fn handle_reply(ipc_buf: &mut sel4::IpcBuffer, reply_type: SMOSReply) -> sel
         SMOSReply::ObjStat { data } => {
             msginfo = msginfo.length(ObjStatReturn::Length as usize);
             ipc_buf.msg_regs_mut()[0] = data.size as u64;
+            ipc_buf.msg_regs_mut()[1] = match data.paddr {
+                Some(x) => x as u64,
+                None => 0 as u64,
+            };
             // @alwin: it would be nice to do this with serde or something?
         }
         SMOSReply::WindowDestroy
