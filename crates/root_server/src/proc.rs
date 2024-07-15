@@ -22,6 +22,7 @@ use core::cell::RefCell;
 use elf::ElfBytes;
 use smos_common::error::InvocationError;
 use smos_common::local_handle;
+use smos_common::obj_attributes::ObjAttributes;
 use smos_common::string::copy_terminated_rust_string_to_buffer;
 use smos_common::util::BIT;
 use smos_common::util::{ROUND_DOWN, ROUND_UP};
@@ -514,6 +515,7 @@ fn init_process_stack(
     let mut object = Rc::new(RefCell::new(AnonymousMemoryObject::new(
         vmem_layout::STACK_PAGES * PAGE_SIZE_4K,
         sel4::CapRights::all(),
+        ObjAttributes::DEFAULT,
     )));
 
     let mut view = Rc::new(RefCell::new(View::new(

@@ -59,9 +59,10 @@ use crate::tests::run_tests;
 use crate::uart::uart_init;
 use crate::ut::{UTTable, UTWrapper};
 use crate::util::alloc_retype;
+use dma::DMAPool;
 use sel4::cap::VSpace;
 use sel4::{BootInfo, BootInfoPtr};
-use sel4_root_task::{root_task, Never};
+use sel4_root_task::{declare_root_task, root_task, Never};
 use smos_server::event::*;
 use smos_server::handle_capability::HandleCapabilityTable;
 use vmem_layout::PROCESS_STACK_TOP;
@@ -107,6 +108,7 @@ pub type RSReplyWrapper = (sel4::cap::Reply, UTWrapper);
 fn syscall_loop(
     cspace: &mut CSpace,
     ut_table: &mut UTTable,
+    dma_pool: &mut DMAPool,
     frame_table: &mut FrameTable,
     handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
     ep: sel4::cap::Endpoint,
@@ -152,6 +154,7 @@ fn syscall_loop(
                     cspace,
                     frame_table,
                     ut_table,
+                    dma_pool,
                     handle_cap_table,
                     sched_control,
                     ep,
@@ -188,6 +191,7 @@ extern "C" fn main_continued(
     bootinfo_raw: *const BootInfo,
     cspace_ptr: *mut CSpace,
     ut_table_ptr: *mut UTTable,
+    dma_pool: *mut DMAPool,
 ) -> ! {
     log_rs!("Switched to new stack...");
 
@@ -201,6 +205,7 @@ extern "C" fn main_continued(
 
     let cspace = unsafe { &mut *cspace_ptr };
     let ut_table = unsafe { &mut *ut_table_ptr };
+    let dma_pool = unsafe { &mut *dma_pool };
 
     let (ipc_ep, ntfn) = ipc_init(cspace, ut_table).expect("Failed to initialize IPC");
     let mut frame_table = FrameTable::init(sel4::init_thread::slot::VSPACE.cap());
@@ -213,6 +218,9 @@ extern "C" fn main_continued(
     );
 
     initialise_heap(cspace, ut_table).expect("Failed to initialize heap!");
+
+    /* Finish initializing the DMA pool now that the heap is set up */
+    dma_pool.init();
 
     /* Set up the handle capability table*/
     let mut handle_cap_table = HandleCapabilityTable::new(
@@ -246,6 +254,7 @@ extern "C" fn main_continued(
     syscall_loop(
         cspace,
         ut_table,
+        dma_pool,
         &mut frame_table,
         &mut handle_cap_table,
         ipc_ep,
@@ -261,7 +270,7 @@ extern "C" fn main_continued(
     unreachable!()
 }
 
-#[root_task]
+declare_root_task!(main = main, stack_size = 0x200000);
 fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
     sel4::debug_println!("Starting...");
     debug_print_bootinfo(bootinfo);
@@ -270,7 +279,7 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
     sel4::init_thread::slot::TCB.cap().debug_name(b"SMOS:root");
 
     /* Set up CSpce and untyped tables */
-    let (mut cspace, mut ut_table) = smos_bootstrap(bootinfo)?;
+    let (mut cspace, mut ut_table, mut dma_pool) = smos_bootstrap(bootinfo)?;
 
     /* Setup the uart driver and configure printing with it  */
     let uart_printer = uart_init(&mut cspace, &mut ut_table)?;
@@ -308,7 +317,14 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
 
     log_rs!("Switching to new stack (stack_top = 0x{:x})...", vaddr);
 
-    stack::utils_run_on_stack(vaddr, main_continued, bootinfo, &mut cspace, &mut ut_table);
+    stack::utils_run_on_stack(
+        vaddr,
+        main_continued,
+        bootinfo,
+        &mut cspace,
+        &mut ut_table,
+        &mut dma_pool,
+    );
 
     sel4::init_thread::slot::TCB.cap().tcb_suspend()?;
     unreachable!()

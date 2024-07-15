@@ -10,6 +10,7 @@ use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use smos_common::obj_attributes::ObjAttributes;
 use smos_common::util::ROUND_DOWN;
 
 fn rights_from_elf_flags(flags: u32) -> sel4::CapRights {
@@ -127,6 +128,7 @@ fn load_segment_into_vspace(
     let mut object = Rc::new(RefCell::new(AnonymousMemoryObject::new(
         total_size.try_into().unwrap(),
         rights_from_elf_flags(segment.p_flags),
+        ObjAttributes::DEFAULT,
     )));
 
     /* Create a view corresponding to this segment */

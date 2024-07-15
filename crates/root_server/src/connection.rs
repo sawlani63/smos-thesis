@@ -19,6 +19,7 @@ use core::cell::RefCell;
 use smos_common::error::InvocationError;
 use smos_common::local_handle;
 use smos_common::local_handle::LocalHandle;
+use smos_common::obj_attributes::ObjAttributes;
 use smos_common::util::BIT;
 use smos_server::event::{INVOCATION_EP_BITS, IRQ_IDENT_BADGE_BITS, NTFN_BIT};
 use smos_server::handle::HandleAllocater;
@@ -329,6 +330,7 @@ pub fn handle_conn_publish(
     let object = Rc::new(RefCell::new(AnonymousMemoryObject::new(
         PAGE_SIZE_4K,
         sel4::CapRights::all(),
+        ObjAttributes::DEFAULT,
     )));
 
     let view = Rc::new(RefCell::new(View::new(

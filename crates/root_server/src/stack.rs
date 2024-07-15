@@ -2,14 +2,16 @@ use core::arch::asm;
 use sel4::{BootInfo, BootInfoPtr};
 
 use crate::cspace::CSpace;
+use crate::dma::DMAPool;
 use crate::ut::UTTable;
 
 pub fn utils_run_on_stack(
     stack_top: usize,
-    func: unsafe extern "C" fn(*const BootInfo, *mut CSpace, *mut UTTable) -> !,
+    func: unsafe extern "C" fn(*const BootInfo, *mut CSpace, *mut UTTable, *mut DMAPool) -> !,
     bootinfo: &sel4::BootInfoPtr,
     cspace: &mut CSpace,
     ut_table: &mut UTTable,
+    dma_pool: &mut DMAPool,
 ) {
     unsafe {
         asm!(
@@ -22,6 +24,7 @@ pub fn utils_run_on_stack(
             in("x0") bootinfo.ptr(),
             in("x1") cspace as *mut CSpace,
             in("x2") ut_table as *mut UTTable,
+            in("x3") dma_pool as *mut DMAPool,
         )
 
         /* @alwin: This doesn't work for some reason - seems like same reg is

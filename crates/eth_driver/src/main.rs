@@ -13,6 +13,7 @@ use smos_common::syscall::{ObjectServerInterface, RootServerInterface};
 
 const ntfn_buffer: *mut u8 = 0xB0000 as *mut u8;
 const regs_base: *const u32 = 0xB000000 as *const u32;
+const recv_dma_reg: *const u8 = 0xB001000 as *const u8;
 
 #[smos_declare_main]
 fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Result<Never> {
@@ -32,7 +33,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
         .expect("Could not publish as server");
 
     /* Map in the ethernet registers */
-    let win_hndl = rs_conn
+    let reg_win_hndl = rs_conn
         .window_create(regs_base as usize, 4096, None)
         .expect("Failed to create window for eth registers");
 
@@ -48,7 +49,14 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
         .expect("Could not create obect for eth registers");
 
     rs_conn
-        .view(&win_hndl, &eth_obj_hndl, 0, 0, 4096, sel4::CapRights::all())
+        .view(
+            &reg_win_hndl,
+            &eth_obj_hndl,
+            0,
+            0,
+            4096,
+            sel4::CapRights::all(),
+        )
         .expect("Could not view eth registers");
 
     let regs = unsafe { regs_base.byte_add(0xe00) };
@@ -57,7 +65,32 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     let magic: u32 = unsafe { *regs };
     sel4::debug_println!("magic is {:x}", magic);
 
+    /* Register for the IRQ  */
     rs_conn.irq_register(&listen_conn.hndl(), 79, true);
+
+    /* Map in the recieve DMA region */
+    let dma_win_hndl = rs_conn
+        .window_create(recv_dma_reg as usize, 0x2_200_000, None)
+        .expect("Failed to create DMA region window");
+    let dma_obj_hndl = rs_conn
+        .obj_create(
+            None,
+            0x2_200_000,
+            sel4::CapRights::all(),
+            ObjAttributes::CONTIGUOUS,
+            None,
+        )
+        .expect("Failed to create DMA object");
+    let dma_view_hndl = rs_conn
+        .view(
+            &dma_win_hndl,
+            &dma_obj_hndl,
+            0,
+            0,
+            0x2_200_000,
+            sel4::CapRights::all(),
+        )
+        .expect("Failed to view DMA object");
 
     unreachable!()
 }

@@ -552,7 +552,7 @@ fn syscall_loop<T: ServerConnection>(
 
         match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Notification(bits) => {
-            EntryType::Signal => {
+                // @alwin: This doesn't work with multiple being set, implement an iterator
                 for bit in bits.into_iter() {
                     match bit {
                         0 => handle_notification(&rs_conn, &mut window_allocator),

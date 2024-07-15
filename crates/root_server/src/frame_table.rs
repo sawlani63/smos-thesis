@@ -3,10 +3,10 @@ use crate::mapping::map_frame;
 use crate::page::PAGE_SIZE_4K;
 use crate::ut::UTTable;
 use crate::vmem_layout;
+use alloc::vec::Vec;
 use core::mem::size_of;
 use sel4::CPtr;
 use smos_common::util::BIT;
-use alloc::vec::Vec;
 
 type FrameData = [u8; PAGE_SIZE_4K];
 
@@ -256,43 +256,29 @@ impl FrameTable {
         return Some(self.ref_from_frame(&frame.unwrap()));
     }
 
-    pub fn alloc_frames_contig(self: &mut Self, cspace: &mut CSpace, ut_table: &mut UTTable, num: usize) -> Option<Vec<FrameRef>> {
-        let mut prev_frame_address: Option<*mut Frame> = None;
-        let mut ret = Vec::new();
-
-        for i in 0..num {
-            let frame = self.alloc_fresh_frame(cspace, ut_table).or_else(|_| {
-                for frame_ref in &ret {
-                    self.free_frame(*frame_ref);
-                }
-
-                Err(())
-            }).ok()?;
-
-            match prev_frame_address {
-                None => {},
-                Some(x) => assert!(frame.frame == unsafe { x.add(PAGE_SIZE_4K) }),
-            }
-
-            ret.push(self.ref_from_frame(&frame));
-            prev_frame_address = Some(frame.frame);
-        }
-
-        Some(ret)
-    }
-
     // @alwin: This whole function is a disgusting hack
-    pub fn alloc_device_mem(self: &mut Self, cspace: &mut CSpace, ut_table: &mut UTTable,
-                            paddr: usize, size: usize) -> Option<Vec<(sel4::cap::SmallPage, u32)>> {
-
+    pub fn alloc_device_mem(
+        self: &mut Self,
+        cspace: &mut CSpace,
+        ut_table: &mut UTTable,
+        paddr: usize,
+        size: usize,
+    ) -> Option<Vec<(sel4::cap::SmallPage, u32)>> {
         let mut vec = Vec::new();
         for curr in (paddr..paddr + size).step_by(PAGE_SIZE_4K) {
-            let ut = ut_table.alloc_4k_device(curr).expect("@alwin: This should not be an expect");
-            let frame_slot = cspace.alloc_slot().expect("@alwin: This should not be an expect");
-            cspace.untyped_retype(&ut.get_cap(),
-                                  sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
-                                  frame_slot);
-            let frame = CPtr::from_bits(frame_slot.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
+            let ut = ut_table
+                .alloc_4k_device(curr)
+                .expect("@alwin: This should not be an expect");
+            let frame_slot = cspace
+                .alloc_slot()
+                .expect("@alwin: This should not be an expect");
+            cspace.untyped_retype(
+                &ut.get_cap(),
+                sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
+                frame_slot,
+            );
+            let frame =
+                CPtr::from_bits(frame_slot.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
             vec.push((frame, 0));
         }
         Some(vec)

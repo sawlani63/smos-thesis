@@ -1,18 +1,20 @@
 use crate::cspace::{CSpace, CSpaceTrait};
+use crate::dma::DMAPool;
 use crate::frame_table::FrameRef;
 use crate::frame_table::FrameTable;
 use crate::handle::RootServerResource;
 use crate::proc::UserProcess;
 use crate::ut::UTTable;
 use crate::view::View;
-use crate::PAGE_SIZE_4K;
+use crate::{dma, PAGE_SIZE_4K};
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use offset_allocator::Allocation;
 use smos_common::error::InvocationError;
 use smos_common::local_handle::{HandleOrHandleCap, ObjectHandle};
-use smos_common::obj_attributes::ObjAttributes;
+use smos_common::obj_attributes::{self, ObjAttributes};
 use smos_common::util::BIT;
 use smos_server::handle::{
     generic_allocate_handle, generic_cleanup_handle, generic_get_handle,
@@ -62,15 +64,23 @@ pub struct AnonymousMemoryObject {
     // sid
     frames: Vec<Option<ObjectFrameTableEntry>>,
     pub associated_views: Vec<Rc<RefCell<View>>>,
+    pub attributes: ObjAttributes,
+    pub dma_allocation: Option<Allocation>,
 }
 
 impl AnonymousMemoryObject {
-    pub fn new(size: usize, rights: sel4::CapRights) -> AnonymousMemoryObject {
+    pub fn new(
+        size: usize,
+        rights: sel4::CapRights,
+        obj_attributes: ObjAttributes,
+    ) -> AnonymousMemoryObject {
         AnonymousMemoryObject {
             size: size,
             rights: rights,
             frames: vec![None; OBJ_LVL_MAX],
             associated_views: Vec::new(),
+            attributes: obj_attributes,
+            dma_allocation: None,
         }
     }
 
@@ -181,9 +191,10 @@ impl AnonymousMemoryObject {
 }
 
 pub fn handle_obj_create(
-	cspace: &mut CSpace,
-	frame_table: &mut FrameTable,
-	ut_table: &mut UTTable,
+    cspace: &mut CSpace,
+    frame_table: &mut FrameTable,
+    ut_table: &mut UTTable,
+    dma_pool: &mut DMAPool,
     p: &mut UserProcess,
     handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
     args: &ObjCreate,
@@ -199,44 +210,60 @@ pub fn handle_obj_create(
         return Err(InvocationError::InvalidArguments);
     }
 
-	 /* Make sure the object is smaller than the max size */
-	if args.size / PAGE_SIZE_4K >= MAX_OBJ_SIZE {
-	     return Err(InvocationError::InvalidArguments);
-	 }
+    /* Make sure the object is smaller than the max size */
+    if args.size / PAGE_SIZE_4K >= MAX_OBJ_SIZE {
+        return Err(InvocationError::InvalidArguments);
+    }
 
-	let mem_obj = Rc::new(RefCell::new(AnonymousMemoryObject::new(
+    let mem_obj = Rc::new(RefCell::new(AnonymousMemoryObject::new(
         args.size,
         args.rights.clone(),
+        args.attributes,
     )));
 
     if args.attributes.has(ObjAttributes::DEVICE) {
-    	let paddr = args.name.expect("@alwin: This should not be an expect").parse::<usize>().expect("@alwin: This should not be an expect");
-    	let frames = frame_table.alloc_device_mem(cspace, ut_table, paddr, args.size).expect("@alwin: This should not be an expect");
-		let mut offset = 0;
-		for frame in frames {
-			mem_obj.borrow_mut().insert_frame_at(offset, frame);
-			offset += PAGE_SIZE_4K;
-		}
+        /* @alwin: This really probably shouldn't be a string */
+        let paddr = args
+            .name
+            .expect("@alwin: This should not be an expect")
+            .parse::<usize>()
+            .expect("@alwin: This should not be an expect");
+        let frames = frame_table
+            .alloc_device_mem(cspace, ut_table, paddr, args.size)
+            .expect("@alwin: This should not be an expect");
+        let mut offset = 0;
+        for frame in frames {
+            mem_obj.borrow_mut().insert_frame_at(offset, frame);
+            offset += PAGE_SIZE_4K;
+        }
     } else {
-    	let frames = if args.attributes.has(ObjAttributes::CONTIGUOUS) {
-    		frame_table.alloc_frames_contig(cspace, ut_table, args.size / PAGE_SIZE_4K).expect("@alwin: This should not be an expect")
-    	} else if args.attributes.has(ObjAttributes::EAGER) {
-    		let mut vec = Vec::new();
-    		for i in 0..(args.size / PAGE_SIZE_4K) {
-    			vec.push(frame_table.alloc_frame(cspace, ut_table).expect("@alwin: This should not be an expect"));
-    		}
-    		vec
-    	} else {
-    		Vec::new()
-    	};
+        let n_pages = args.size / PAGE_SIZE_4K;
 
-    	if frames.len() != 0 {
-    		let mut offset = 0;
-    		for frame in frames {
-    			mem_obj.borrow_mut().insert_frame_at(offset, (frame_table.frame_from_ref(frame).get_cap(), frame));
-    			offset += PAGE_SIZE_4K;
-    		}
-    	}
+        if args.attributes.has(ObjAttributes::CONTIGUOUS) && n_pages > 1 {
+            let (allocation, frames) = dma_pool
+                .allocate_contig_pages(n_pages.try_into().unwrap())
+                .expect("@alwin: This should not be an expect");
+            mem_obj.borrow_mut().dma_allocation = Some(allocation);
+
+            for (i, frame) in frames.iter().enumerate() {
+                mem_obj
+                    .borrow_mut()
+                    .insert_frame_at(i * PAGE_SIZE_4K, (frame.cast(), 0));
+            }
+        } else if (args.attributes.has(ObjAttributes::CONTIGUOUS) && n_pages == 1)
+            || args.attributes.has(ObjAttributes::EAGER)
+        {
+            for i in 0..n_pages {
+                let frame = frame_table
+                    .alloc_frame(cspace, ut_table)
+                    .expect("@alwin: This should not be an exepct");
+
+                mem_obj.borrow_mut().insert_frame_at(
+                    i * PAGE_SIZE_4K,
+                    (frame_table.frame_from_ref(frame).get_cap(), frame),
+                );
+            }
+        }
     }
 
     let (idx, handle_ref, cptr) = generic_allocate_handle(p, handle_cap_table, args.return_cap)?;

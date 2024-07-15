@@ -2,7 +2,7 @@ use crate::cspace::{
     BotLvlNodeT, CSpace, CSpaceTrait, BOT_LVL_INDEX, BOT_LVL_PER_NODE, CNODE_INDEX,
     CNODE_SIZE_BITS, CNODE_SLOTS, CNODE_SLOT_BITS, NODE_INDEX, TOP_LVL_INDEX, WATERMARK_SLOTS,
 };
-use crate::dma::DMA;
+use crate::dma::{DMAPool, DMA_RESERVATION_NUM_PAGES, DMA_RESERVATION_SIZE_BITS};
 use crate::page::{BYTES_TO_4K_PAGES, BYTES_TO_SIZE_BITS, PAGE_SIZE_4K};
 use crate::ut::{UTRegion, UTTable, UT};
 use crate::util::{ALIGN_DOWN, ALIGN_UP};
@@ -15,7 +15,6 @@ use smos_common::util::ROUND_UP;
 
 use sel4_config::sel4_cfg_usize;
 
-const SOS_DMA_SIZE_BITS: u32 = sel4_sys::seL4_LargePageBits;
 const PHYSICAL_ADDRESS_LIMIT: usize = 0xdfffffff;
 const MAX_PHYSICAL_SIZE_BITS: usize = 32;
 pub const INITIAL_TASK_CNODE_SIZE_BITS: usize = 18;
@@ -117,7 +116,7 @@ struct BootstrapCSpace {
 }
 
 // pub fn smos_bootstrap(bi: &sel4::BootInfo) -> CSpace{
-pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Error> {
+pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool), sel4::Error> {
     let mut bootinfo_avail_bytes: [usize; sel4_cfg_usize!(MAX_NUM_BOOTINFO_UNTYPED_CAPS)] =
         [0; sel4_cfg_usize!(MAX_NUM_BOOTINFO_UNTYPED_CAPS)];
 
@@ -153,13 +152,18 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     size += n_pts * BIT(sel4_sys::seL4_PageTableBits as usize);
     n_slots += n_pts;
 
+    /* We will need a few more for the page tables of the DMA region */
+    let n_dma_pts = (DMA_RESERVATION_NUM_PAGES >> sel4_sys::seL4_PageTableIndexBits);
+    size += n_dma_pts * BIT(sel4_sys::seL4_PageTableBits as usize);
+    n_slots += n_dma_pts;
+
     /* and the other paging structures */
     size += BIT(sel4_sys::seL4_PUDBits as usize);
     size += BIT(sel4_sys::seL4_PageDirBits as usize);
     n_slots += 2;
 
-    /* 1 cptr for dma */
-    n_slots += 1;
+    /* NUM_PAGES cptrs for dma */
+    n_slots += DMA_RESERVATION_NUM_PAGES;
 
     /* now work out the number of slots required to retype the untyped memory provided by
      * boot info into 4K untyped objects. We aren't going to initialise these objects yet,
@@ -169,7 +173,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
     n_slots += calculate_ut_caps(bi, sel4_sys::seL4_PageBits, &mut bootinfo_avail_bytes);
 
     /* subtract what we don't need for dma */
-    n_slots -= BIT((SOS_DMA_SIZE_BITS - sel4_sys::seL4_PageBits) as usize);
+    n_slots -= BIT((DMA_RESERVATION_SIZE_BITS - sel4_sys::seL4_PageBits) as usize);
 
     /* now work out how many 2nd level nodes are required - with a buffer */
     let n_cnodes = n_slots / CNODE_SLOTS(CNODE_SIZE_BITS) + 2;
@@ -365,22 +369,26 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
         bootstrap_data.next_free_vaddr += PAGE_SIZE_4K;
     }
 
-    /* before we add all the 4k untypeds to the ut table, steal some for DMA */
-    // @alwin: understand what this is doing better
+    /* before we add all the 4k untypeds to the ut table, steal 64MB that can be used for DMA */
     let (dma_ut, dma_paddr) = steal_untyped(
         bi,
-        SOS_DMA_SIZE_BITS.try_into().unwrap(),
+        DMA_RESERVATION_SIZE_BITS.try_into().unwrap(),
         &mut bootinfo_avail_bytes,
     )
     .ok_or(sel4::Error::NotEnoughMemory)?;
-    cspace.untyped_retype(
-        &dma_ut,
-        sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::LargePage),
-        first_free_slot,
-    )?;
-    let dma_page =
-        CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::LargePage>();
-    first_free_slot += 1;
+
+    let mut dma_pages: [sel4::cap::UnspecifiedFrame; DMA_RESERVATION_NUM_PAGES] =
+        [CPtr::from_bits(0).cast(); DMA_RESERVATION_NUM_PAGES];
+    for i in 0..DMA_RESERVATION_NUM_PAGES {
+        cspace.untyped_retype(
+            &dma_ut,
+            sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
+            first_free_slot,
+        )?;
+        dma_pages[i] = CPtr::from_bits(first_free_slot.try_into().unwrap())
+            .cast::<sel4::cap_type::UnspecifiedFrame>();
+        first_free_slot += 1;
+    }
 
     let mut ut_table = UTTable::new(UT_TABLE, memory, bootstrap_data.next_free_vaddr);
 
@@ -462,16 +470,42 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
         ut_table.next_free_vaddr + PAGE_SIZE_4K,
         BIT(sel4_sys::seL4_LargePageBits.try_into().unwrap()),
     );
-    let _dma = DMA::new(
+
+    /* Map in the extra page tables to cover the DMA region */
+    // @alwin: Is this a hack? I don't THINK so?
+    for i in 0..(DMA_RESERVATION_NUM_PAGES >> sel4_sys::seL4_PageTableIndexBits) {
+        cspace.untyped_retype(
+            &ut,
+            sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::PT),
+            first_free_slot,
+        )?;
+        let vaddr = dma_vaddr
+            + i * (BIT(
+                (sel4_sys::seL4_PageTableIndexBits + sel4_sys::seL4_PageBits)
+                    .try_into()
+                    .unwrap(),
+            ));
+
+        let pt = CPtr::from_bits(first_free_slot.try_into().unwrap()).cast::<sel4::cap_type::PT>();
+        pt.pt_map(
+            sel4::init_thread::slot::VSPACE.cap(),
+            vaddr,
+            sel4::VmAttributes::DEFAULT,
+        )?;
+        first_free_slot += 1;
+    }
+
+    let dma = DMAPool::new(
         &mut cspace,
         &mut ut_table,
         bootstrap_data.vspace,
-        dma_page,
+        dma_ut,
+        dma_pages,
         dma_paddr,
         dma_vaddr,
     )?;
-    ut_table.next_free_vaddr =
-        dma_vaddr + BIT(sel4_sys::seL4_LargePageBits.try_into().unwrap()) + PAGE_SIZE_4K;
+
+    ut_table.next_free_vaddr = dma_vaddr + (DMA_RESERVATION_NUM_PAGES + 1) * PAGE_SIZE_4K;
 
     /* now record all the cptrs we have already used to bootstrap */
     for i in (0..ALIGN_DOWN(first_free_slot, slots_per_cnode)).step_by(slots_per_cnode) {
@@ -505,5 +539,5 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable), sel4::Er
         cspace.watermark[i] = cspace.alloc_slot()?;
     }
 
-    return Ok((cspace, ut_table));
+    return Ok((cspace, ut_table, dma));
 }

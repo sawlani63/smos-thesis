@@ -136,7 +136,7 @@ qemu_cmd := \
 		-nographic \
 		-kernel $(image)
 
- #		-s -S 
+# 		-s -S \
 
 .PHONY: run
 run: $(image)
