@@ -159,7 +159,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
             + (segment.p_vaddr % PAGE_SIZE_4K)
             + (PAGE_SIZE_4K - ((segment.p_vaddr + segment.p_memsz) % PAGE_SIZE_4K));
 
-        let segment_hndl = rs_conn.window_create(
+        let mut segment_hndl = rs_conn.window_create(
             ROUND_DOWN(
                 segment.p_vaddr as usize,
                 sel4_sys::seL4_PageBits.try_into().unwrap(),
@@ -168,13 +168,35 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
             None,
         );
 
+        let mut curr_start_vaddr = segment.p_vaddr;
+        let mut curr_size = total_size;
+        while segment_hndl.is_err() {
+            let remaining_page = PAGE_SIZE_4K - (curr_start_vaddr % PAGE_SIZE_4K);
+            curr_start_vaddr += remaining_page;
+            if curr_size < remaining_page {
+                break;
+            }
+            curr_size -= remaining_page;
+            segment_hndl = rs_conn.window_create(
+                curr_start_vaddr as usize,
+                ROUND_UP(
+                    curr_size as usize,
+                    sel4_sys::seL4_PageBits.try_into().unwrap(),
+                ),
+                None,
+            );
+        }
+
         // @alwin: Trying to handle overlapping windows but kind of dodgy. Should probably try and make another window from the next page instead
         // as well as having a more specific DeleteFirst error of some kind. Also be careful with checking perms
         if segment_hndl.is_ok() {
             let mem_obj_hndl = rs_conn
                 .obj_create(
                     None,
-                    total_size as usize,
+                    ROUND_UP(
+                        curr_size as usize,
+                        sel4_sys::seL4_PageBits.try_into().unwrap(),
+                    ),
                     sel4::CapRights::all(),
                     ObjAttributes::DEFAULT,
                     None,
@@ -186,7 +208,10 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
                     &mem_obj_hndl,
                     0,
                     0,
-                    total_size as usize,
+                    ROUND_UP(
+                        curr_size as usize,
+                        sel4_sys::seL4_PageBits.try_into().unwrap(),
+                    ),
                     sel4::CapRights::all(),
                 )
                 .expect("Failed to create view");
@@ -194,7 +219,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
                 win_hndl: segment_hndl.unwrap(),
                 obj_hndl: mem_obj_hndl,
                 view_hndl: view_hndl,
-                size: total_size as usize,
+                size: curr_size as usize,
                 rights: rights_from_elf_flags(segment.p_flags),
             })
         }
@@ -348,7 +373,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     // @alwin: Closing the object might gc any views that are associated with it?
     fs_conn.unview(elf_view);
     fs_conn.obj_close(file_hndl);
-    rs_conn.window_destroy(elf_window_hndl_cap);
+    rs_conn.window_destroy(elf_window_hndl_cap, &mut cspace);
 
     /* Clean up the FS connection */
     // @alwin: This conn_close is not really mandatory, as conn_destroy will notify the
@@ -359,12 +384,12 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     // from the RS, the operation will fail.
     fs_conn.conn_close();
     // @alwin: Really only this one should be necessary, as this will result in a ntfn to the server
-    rs_conn.conn_destroy(fs_conn);
+    rs_conn.conn_destroy(fs_conn, &mut cspace);
 
     /* Clean up the shared buffer */
     rs_conn.unview(shared_buf_view);
-    rs_conn.obj_destroy(shared_buf_obj);
-    rs_conn.window_destroy(shared_buffer_win_hndl);
+    rs_conn.obj_destroy(shared_buf_obj, &mut cspace);
+    rs_conn.window_destroy(shared_buffer_win_hndl, &mut cspace);
 
     sel4::debug_println!("About to jump to executable at addr {:x}", start_vaddr);
 

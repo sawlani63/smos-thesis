@@ -119,6 +119,8 @@ pub trait RootServerInterface: ClientConnection {
 
             msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+            assert!(msginfo.extra_caps() == 1);
+            assert!(msginfo.caps_unwrapped() == 0);
             Ok((
                 LocalHandle::new(ipc_buf.msg_regs()[0] as usize),
                 ipc_buf.msg_regs()[1].try_into().unwrap(),
@@ -181,7 +183,11 @@ pub trait RootServerInterface: ClientConnection {
         ));
     }
 
-    fn conn_destroy<T: ClientConnection>(&self, conn: T) -> Result<(), InvocationError> {
+    fn conn_destroy<T: ClientConnection>(
+        &self,
+        conn: T,
+        cspace: &mut SMOSUserCSpace,
+    ) -> Result<(), InvocationError> {
         sel4::with_ipc_buffer_mut(|ipc_buf| {
             let mut msginfo = sel4::MessageInfoBuilder::default()
                 .label(SMOSInvocation::ConnDestroy as u64)
@@ -193,6 +199,9 @@ pub trait RootServerInterface: ClientConnection {
                 conn.hndl().idx.try_into().unwrap();
             msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+
+            cspace.delete(conn.ep().bits() as usize);
+            cspace.free_slot(conn.ep().bits() as usize);
             return Ok(());
         })
     }
@@ -322,12 +331,13 @@ pub trait RootServerInterface: ClientConnection {
 
     fn window_destroy(
         &self,
-        handle: HandleOrHandleCap<WindowHandle>,
+        hndl: HandleOrHandleCap<WindowHandle>,
+        cspace: &mut SMOSUserCSpace,
     ) -> Result<(), InvocationError> {
         let mut msginfo_builder =
             sel4::MessageInfoBuilder::default().label(SMOSInvocation::WindowDestroy as u64);
         return sel4::with_ipc_buffer_mut(|ipc_buf| {
-            msginfo_builder = match handle {
+            msginfo_builder = match hndl {
                 HandleOrHandleCap::Handle(LocalHandle { idx, .. }) => {
                     ipc_buf.msg_regs_mut()[WindowDestroyArgs::Handle as usize] =
                         idx.try_into().unwrap();
@@ -342,6 +352,14 @@ pub trait RootServerInterface: ClientConnection {
 
             let msginfo = self.ep().call(msginfo_builder.build());
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+
+            match hndl {
+                HandleOrHandleCap::HandleCap(HandleCap { cptr, .. }) => {
+                    cspace.delete(cptr.path().bits() as usize);
+                    cspace.free_slot(cptr.path().bits() as usize);
+                }
+                _ => {}
+            }
 
             Ok(())
         });
@@ -674,7 +692,11 @@ pub trait ObjectServerInterface: ClientConnection {
     }
 
     // @alwin: Is obj_destroy actually needed?
-    fn obj_destroy(&self, hndl: HandleOrHandleCap<ObjectHandle>) -> Result<(), InvocationError> {
+    fn obj_destroy(
+        &self,
+        hndl: HandleOrHandleCap<ObjectHandle>,
+        cspace: &mut SMOSUserCSpace,
+    ) -> Result<(), InvocationError> {
         let mut msginfo_builder =
             sel4::MessageInfoBuilder::default().label(SMOSInvocation::ObjDestroy as u64);
         return sel4::with_ipc_buffer_mut(|ipc_buf| {
@@ -692,6 +714,13 @@ pub trait ObjectServerInterface: ClientConnection {
             let msginfo = self.ep().call(msginfo_builder.build());
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
+            match hndl {
+                HandleOrHandleCap::HandleCap(HandleCap { cptr, .. }) => {
+                    cspace.delete(cptr.path().bits() as usize);
+                    cspace.free_slot(cptr.path().bits() as usize);
+                }
+                _ => {}
+            }
             Ok(())
         });
     }

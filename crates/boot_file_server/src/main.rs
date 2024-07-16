@@ -389,6 +389,7 @@ fn handle_conn_close(
     rs_conn: &RootServerConnection,
     window_allocator: &mut Allocator,
     client: &mut Client,
+    cspace: &mut SMOSUserCSpace,
 ) -> Result<SMOSReply, InvocationError> {
     for handle in client.handle_table() {
         if handle.is_some() {
@@ -402,7 +403,7 @@ fn handle_conn_close(
             .unview(client.shared_buffer.as_ref().unwrap().3.clone())
             .expect("Failed to unview");
         rs_conn
-            .window_destroy(client.shared_buffer.as_ref().unwrap().2.clone())
+            .window_destroy(client.shared_buffer.as_ref().unwrap().2.clone(), cspace)
             .expect("Failed to destroy window");
         window_allocator.free(client.shared_buffer.as_ref().unwrap().4);
     }
@@ -455,6 +456,7 @@ fn handle_conn_destroy_ntfn(
     rs_conn: &RootServerConnection,
     window_allocator: &mut Allocator,
     args: ConnDestroyNotification,
+    cspace: &mut SMOSUserCSpace,
 ) {
     let client = find_client_from_id(args.conn_id)
         .expect("BFS corruption: Invalid client ID")
@@ -474,7 +476,7 @@ fn handle_conn_destroy_ntfn(
             .unview(client.shared_buffer.as_ref().unwrap().3.clone())
             .expect("Failed to unview");
         rs_conn
-            .window_destroy(client.shared_buffer.as_ref().unwrap().2.clone())
+            .window_destroy(client.shared_buffer.as_ref().unwrap().2.clone(), cspace)
             .expect("Failed to destroy window");
         window_allocator.free(client.shared_buffer.as_ref().unwrap().4);
     }
@@ -513,12 +515,16 @@ fn handle_win_destroy_ntfn(rs_conn: &RootServerConnection, args: WindowDestroyNo
     *view_ref = None;
 }
 
-fn handle_notification(rs_conn: &RootServerConnection, window_allocator: &mut Allocator) {
+fn handle_notification(
+    rs_conn: &RootServerConnection,
+    window_allocator: &mut Allocator,
+    cspace: &mut SMOSUserCSpace,
+) {
     while let Some(msg) = unsafe { dequeue_ntfn_buffer_msg(ntfn_buffer) } {
         match msg {
             NotificationType::VMFaultNotification(data) => handle_vm_fault(rs_conn, data),
             NotificationType::ConnDestroyNotification(data) => {
-                handle_conn_destroy_ntfn(rs_conn, window_allocator, data)
+                handle_conn_destroy_ntfn(rs_conn, window_allocator, data, cspace)
             }
             NotificationType::WindowDestroyNotification(data) => {
                 handle_win_destroy_ntfn(rs_conn, data)
@@ -558,7 +564,7 @@ fn syscall_loop<T: ServerConnection>(
                 // @alwin: This doesn't work with multiple being set, implement an iterator
                 for bit in bits.into_iter() {
                     match bit {
-                        0 => handle_notification(&rs_conn, &mut window_allocator),
+                        0 => handle_notification(&rs_conn, &mut window_allocator, &mut cspace),
                         _ => panic!("Don't know how to handle any other notifications {}", badge),
                     }
                 }
@@ -635,9 +641,12 @@ fn syscall_loop<T: ServerConnection>(
                         SMOS_Invocation::ConnOpen(_) => {
                             panic!("conn_open should never be handled here")
                         }
-                        SMOS_Invocation::ConnClose => {
-                            handle_conn_close(&rs_conn, &mut window_allocator, client_unwrapped)
-                        }
+                        SMOS_Invocation::ConnClose => handle_conn_close(
+                            &rs_conn,
+                            &mut window_allocator,
+                            client_unwrapped,
+                            &mut cspace,
+                        ),
                         SMOS_Invocation::ObjOpen(t) => {
                             handle_obj_open(client_unwrapped, &mut handle_cap_table, &t)
                         }
