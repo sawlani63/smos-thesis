@@ -14,11 +14,11 @@ meson-build
 Rust toolchain: Installed by loader.sh script
 
 ## Building
-
+```
 ./loader.sh
 meson setup --cross-file meson-toolchain.txt build
 meson compile -C build
-
+```
 ## Running (QEMU-only)
 ```
 ./run-qemu
