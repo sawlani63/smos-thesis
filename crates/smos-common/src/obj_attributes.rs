@@ -1,34 +1,33 @@
-use core::ops::{BitOr, BitOrAssign, BitAnd, BitAndAssign};
+use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct ObjAttributes(u64);
 
 impl ObjAttributes {
+    pub const fn from_inner(inner: u64) -> Self {
+        Self(inner)
+    }
 
-	pub const fn from_inner(inner: u64) -> Self {
-		Self(inner)
-	}
+    pub const fn into_inner(self) -> u64 {
+        self.0
+    }
 
-	pub const fn into_inner(self) -> u64 {
-		self.0
-	}
+    pub const fn inner(&self) -> &u64 {
+        &self.0
+    }
 
-	pub const fn inner(&self) -> &u64 {
-		&self.0
-	}
-
-	pub fn inner_mut(&mut self) -> &mut u64 {
-		&mut self.0
-	}
+    pub fn inner_mut(&mut self) -> &mut u64 {
+        &mut self.0
+    }
 
     pub const fn has(self, rhs: Self) -> bool {
         self.into_inner() & rhs.into_inner() != 0
     }
 
-	pub const DEFAULT: Self = Self::from_inner(0);
-	pub const CONTIGUOUS: Self = Self::from_inner(1);
-	pub const DEVICE: Self = Self::from_inner(2);
-	pub const EAGER: Self = Self::from_inner(4);
+    pub const DEFAULT: Self = Self::from_inner(0);
+    pub const CONTIGUOUS: Self = Self::from_inner(1);
+    pub const DEVICE: Self = Self::from_inner(2);
+    pub const EAGER: Self = Self::from_inner(4);
 }
 
 impl BitOr for ObjAttributes {
