@@ -318,7 +318,7 @@ $(smos_loader): $(smos_loader).intermediate
 .INTERMDIATE: $(smos_loader).intermediate
 $(smos_loader).intermediate:
 	SEL4_PREFIX=$(sel4_prefix) \
-	LINKER_SCRIPT=$(shell pwd)/crates/smos-loader/custom.ld \
+	LOADER_LINKER_SCRIPT=$(shell pwd)/crates/smos-loader/custom.ld \
 		cargo build \
 			-Z build-std=core,alloc,compiler_builtins \
 			-Z build-std-features=compiler-builtins-mem \
@@ -353,7 +353,8 @@ $(root_server).intermediate: $(bfs) $(smos_loader)
 
 image := $(BUILD_DIR)/image.elf
 # Append the payload to the loader using the loader CLI
-$(image): $(root_server)
+#$(image): $(root_server)
+build/image.elf: $(root_server)
 	$(loader_cli) \
 		--loader $(loader) \
 		--sel4-prefix $(sel4_prefix) \

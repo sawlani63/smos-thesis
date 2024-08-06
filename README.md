@@ -9,13 +9,17 @@ A rewrite of the Secure Multiserver Operating System (SMOS) project using rust-s
 ## Dependencies
 
 seL4 host dependencies: https://docs.sel4.systems/projects/buildsystem/host-dependencies.html
-
+meson-build
 `qemu-system-aarch64`
-
 Rust toolchain: Installed by loader.sh script
 
-## Running
-```
+## Building
+
 ./loader.sh
-make run
+meson setup --cross-file meson-toolchain.txt build
+meson compile -C build
+
+## Running (QEMU-only)
+```
+./run-qemu
 ```

@@ -1,0 +1,13 @@
+#!/bin/bash
+
+meson compile -C build || exit 1
+
+qemu-system-aarch64 \
+	-machine virt,virtualization=on \
+	-cpu cortex-a57 -m size=2G \
+	-serial mon:stdio \
+	-device virtio-net-device,netdev=netdev0 \
+	-netdev user,id=netdev0,hostfwd=tcp::1236-:1236,hostfwd=udp::1235-:1235 \
+	-global virtio-mmio.force-legacy=false \
+	-nographic \
+	-kernel build/image.elf
