@@ -126,6 +126,7 @@ libecho_server = static_library('echo_server',
 
 # Define environment variables
 cargo_env = environment()
+cargo_env.set('CARGO_TERM_COLOR', 'always')
 cargo_env.set('SEL4_PREFIX', meson.source_root() / 'deps/seL4/install')
 cargo_env.set('LOADER_ELF', meson.current_build_dir() / 'smos-loader.elf')
 cargo_env.set('BOOT_FS_ELF', meson.current_build_dir() / 'boot_file_server.elf')
