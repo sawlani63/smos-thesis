@@ -7,6 +7,8 @@ use sel4_shared_ring_buffer::{InitialState, InitializationStrategy, RawRingBuffe
 use smos_common::local_handle::{LocalHandle, WindowRegistrationHandle};
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
+const NTFN_BUFFER_CAPACITY: usize = 64;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, AsBytes, FromBytes, FromZeroes)]
 pub struct NtfnBufferData {
@@ -149,9 +151,14 @@ impl Into<NtfnBufferData> for WindowDestroyNotification {
 /* Methods */
 
 pub unsafe fn init_ntfn_buffer(raw_ntfn_buffer_addr: *mut u8) {
-    let ntfn_buffer_addr =
-        NonNull::new_unchecked(raw_ntfn_buffer_addr as *mut RawRingBuffer<NtfnBufferData>);
-    let ntfn_buffer = RingBuffer::<sel4_shared_ring_buffer::roles::Write, NtfnBufferData>::new(
+    let ntfn_buffer_addr = NonNull::new_unchecked(
+        raw_ntfn_buffer_addr as *mut RawRingBuffer<NtfnBufferData, NTFN_BUFFER_CAPACITY>,
+    );
+    let ntfn_buffer = RingBuffer::<
+        sel4_shared_ring_buffer::roles::Write,
+        NtfnBufferData,
+        NTFN_BUFFER_CAPACITY,
+    >::new(
         ExternallySharedRef::new(ntfn_buffer_addr),
         InitializationStrategy::UseAndWriteState(InitialState::new(0, 0)),
     );
@@ -163,9 +170,14 @@ pub unsafe fn enqueue_ntfn_buffer_msg(
     raw_ntfn_buffer_addr: *mut u8,
     msg: NotificationType,
 ) -> Result<(), NtfnBufferData> {
-    let ntfn_buffer_addr =
-        NonNull::new_unchecked(raw_ntfn_buffer_addr as *mut RawRingBuffer<NtfnBufferData>);
-    let mut ntfn_buffer = RingBuffer::<sel4_shared_ring_buffer::roles::Write, NtfnBufferData>::new(
+    let ntfn_buffer_addr = NonNull::new_unchecked(
+        raw_ntfn_buffer_addr as *mut RawRingBuffer<NtfnBufferData, NTFN_BUFFER_CAPACITY>,
+    );
+    let mut ntfn_buffer = RingBuffer::<
+        sel4_shared_ring_buffer::roles::Write,
+        NtfnBufferData,
+        NTFN_BUFFER_CAPACITY,
+    >::new(
         ExternallySharedRef::new(ntfn_buffer_addr),
         InitializationStrategy::ReadState,
     );
@@ -176,9 +188,14 @@ pub unsafe fn enqueue_ntfn_buffer_msg(
 }
 
 pub unsafe fn dequeue_ntfn_buffer_msg(raw_ntfn_buffer_addr: *mut u8) -> Option<NotificationType> {
-    let ntfn_buffer_addr =
-        NonNull::new_unchecked(raw_ntfn_buffer_addr as *mut RawRingBuffer<NtfnBufferData>);
-    let mut ntfn_buffer = RingBuffer::<sel4_shared_ring_buffer::roles::Read, NtfnBufferData>::new(
+    let ntfn_buffer_addr = NonNull::new_unchecked(
+        raw_ntfn_buffer_addr as *mut RawRingBuffer<NtfnBufferData, NTFN_BUFFER_CAPACITY>,
+    );
+    let mut ntfn_buffer = RingBuffer::<
+        sel4_shared_ring_buffer::roles::Read,
+        NtfnBufferData,
+        NTFN_BUFFER_CAPACITY,
+    >::new(
         ExternallySharedRef::new(ntfn_buffer_addr),
         InitializationStrategy::ReadState,
     );
