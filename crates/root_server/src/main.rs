@@ -174,6 +174,11 @@ fn syscall_loop(
             }
         };
 
+        // @alwin: Check me
+        sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.set_recv_slot(&recv_slot);
+        });
+
         /* Should you always do this if reply_msg_info is none? */
         if reply_msg_info.is_none() {
             reply = alloc_retype::<sel4::cap_type::Reply>(
@@ -240,7 +245,7 @@ extern "C" fn main_continued(
         ut_table,
         &mut frame_table,
         bootinfo.sched_control().index(0).cap(),
-        "test_app",
+        "boot_file_server",
         ipc_ep,
         BFS_CONTENTS,
         None,
@@ -279,7 +284,8 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
     sel4::init_thread::slot::TCB.cap().debug_name(b"SMOS:root");
 
     /* Set up CSpce and untyped tables */
-    let (mut cspace, mut ut_table, mut dma_pool) = smos_bootstrap(bootinfo)?;
+    let (mut cspace, mut ut_table, mut dma_pool) =
+        smos_bootstrap(bootinfo).expect("Failed to bootstrap");
 
     /* Setup the uart driver and configure printing with it  */
     let uart_printer = uart_init(&mut cspace, &mut ut_table)?;

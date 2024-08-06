@@ -345,7 +345,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
             sel4::init_thread::slot::VSPACE.cap(),
             vaddr,
             sel4::VmAttributes::DEFAULT,
-        )?;
+        );
         first_free_slot += 1;
     }
 

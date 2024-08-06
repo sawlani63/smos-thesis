@@ -1,15 +1,17 @@
 use crate::args::*;
+use crate::channel::Channel;
 use crate::client_connection::*;
 use crate::connection::*;
 use crate::error::*;
 use crate::invocations::SMOSInvocation;
 use crate::local_handle::{
-    ConnRegistrationHandle, ConnectionHandle, HandleCap, HandleCapHandle, HandleOrHandleCap,
-    IRQRegistrationHandle, LocalHandle, ObjectHandle, ProcessHandle, PublishHandle, ViewHandle,
-    WindowHandle, WindowRegistrationHandle,
+    ChannelAuthorityHandle, ConnRegistrationHandle, ConnectionHandle, HandleCap, HandleCapHandle,
+    HandleOrHandleCap, IRQRegistrationHandle, LocalHandle, ObjectHandle, ProcessHandle,
+    PublishHandle, ViewHandle, WindowHandle, WindowRegistrationHandle,
 };
 use crate::obj_attributes::ObjAttributes;
 use crate::returns::*;
+use crate::sddf::{QueueType, VirtType};
 use crate::server_connection::*;
 use crate::string::copy_terminated_rust_string_to_buffer;
 use core::marker::PhantomData;
@@ -57,6 +59,7 @@ pub trait RootServerInterface: ClientConnection {
                 .build();
             msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+            assert!(msginfo.extra_caps() == 1 && msginfo.caps_unwrapped() == 0);
             return Ok((
                 ipc_buf.msg_regs()[ConnectionCreateReturn::ConnectionHandle as usize],
                 sel4::CPtr::from_bits(slot.path().bits()).cast::<sel4::cap_type::Endpoint>(),
@@ -514,6 +517,57 @@ pub trait RootServerInterface: ClientConnection {
             Ok(())
         });
     }
+
+    fn channel_open(
+        &self,
+        channel_hndl_cap: HandleCap<ChannelAuthorityHandle>,
+        ntfn_slot: &AbsoluteCPtr,
+    ) -> Result<Channel, InvocationError> {
+        let mut msginfo = sel4::MessageInfoBuilder::default()
+            .label(SMOSInvocation::ChannelOpen as u64)
+            .length(0)
+            .extra_caps(1)
+            .build();
+
+        return sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.set_recv_slot(ntfn_slot);
+            ipc_buf.caps_or_badges_mut()[0] = channel_hndl_cap.cptr.path().bits();
+
+            let msginfo = self.ep().call(msginfo);
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+
+            assert!(msginfo.extra_caps() == 1 && msginfo.caps_unwrapped() == 0);
+            Ok(Channel {
+                ntfn: sel4::CPtr::from_bits(ntfn_slot.path().bits())
+                    .cast::<sel4::cap_type::Notification>(),
+                // hndl: LocalHandle::new(ipc_buf.msg_regs()[0] as usize),
+            })
+        });
+    }
+
+    fn server_channel_create(
+        &self,
+        publish_hndl: &LocalHandle<ConnectionHandle>,
+        channel_slot: &AbsoluteCPtr,
+    ) -> Result<(u8, HandleCap<ChannelAuthorityHandle>), InvocationError> {
+        let mut msginfo = sel4::MessageInfoBuilder::default()
+            .label(SMOSInvocation::ServerCreateChannel as u64)
+            .length(1)
+            .build();
+
+        return sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.set_recv_slot(channel_slot);
+            ipc_buf.msg_regs_mut()[0] = publish_hndl.idx as u64;
+            let msginfo = self.ep().call(msginfo);
+
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+            assert!(msginfo.extra_caps() == 1 && msginfo.caps_unwrapped() == 0);
+            Ok((
+                ipc_buf.msg_regs()[0].try_into().expect("Invalid badge bit"),
+                HandleCap::new(*channel_slot),
+            ))
+        });
+    }
 }
 
 pub struct ReplyWrapper {
@@ -521,7 +575,7 @@ pub struct ReplyWrapper {
     pub cap: sel4::cap::Reply,
 }
 
-pub trait ObjectServerInterface: ClientConnection {
+pub trait NonRootServerInterface: ClientConnection {
     fn conn_open(
         &mut self,
         shared_buf: Option<(HandleOrHandleCap<ObjectHandle>, (*mut u8, usize))>,
@@ -571,7 +625,9 @@ pub trait ObjectServerInterface: ClientConnection {
             return Ok(());
         });
     }
+}
 
+pub trait ObjectServerInterface: ClientConnection {
     fn obj_create(
         &self,
         name_opt: Option<&str>,
@@ -829,26 +885,128 @@ pub trait ObjectServerInterface: ClientConnection {
     }
 }
 
-pub trait FileServerInterface: ClientConnection {
-    fn file_open(&self) -> Result<(), InvocationError> {
-        sel4::with_ipc_buffer_mut(|ipc_buf| {
-            ipc_buf.msg_regs_mut()[0] = 100;
-            let mut msginfo = sel4::MessageInfoBuilder::default()
-                .label(SMOSInvocation::TestSimple as u64)
-                .length(1)
-                .build();
+/* @alwin: This feels like it should not be in this crate, but I don't know how to pry it out yet */
+pub trait sDDFInterface: ClientConnection {
+    fn sddf_channel_register_bidirectional(
+        &self,
+        hndl_cap: HandleCap<ChannelAuthorityHandle>,
+        kind: Option<VirtType>,
+        recv_slot: &AbsoluteCPtr,
+    ) -> Result<HandleCap<ChannelAuthorityHandle>, InvocationError> {
+        let length = if kind.is_some() { 1 } else { 0 };
+
+        let mut msginfo = sel4::MessageInfoBuilder::default()
+            .label(SMOSInvocation::sDDFChannelRegisterBidirectional as u64)
+            .length(length)
+            .extra_caps(1)
+            .build();
+
+        return sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.set_recv_slot(recv_slot);
+
+            if kind.is_some() {
+                ipc_buf.msg_regs_mut()[0] = kind.unwrap().into();
+            }
+            ipc_buf.caps_or_badges_mut()[0] = hndl_cap.cptr.path().bits();
+
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf.msg_regs());
-            return Ok(());
-        })
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+
+            assert!(msginfo.extra_caps() == 1 && msginfo.caps_unwrapped() == 0);
+
+            return Ok(HandleCap::new(*recv_slot));
+        });
     }
-    fn file_read() {
-        todo!()
+
+    fn sddf_channel_register_recv_only(
+        &self,
+        hndl_cap: HandleCap<ChannelAuthorityHandle>,
+    ) -> Result<(), InvocationError> {
+        let mut msginfo = sel4::MessageInfoBuilder::default()
+            .label(SMOSInvocation::sDDFChannelRegisterRecieveOnly as u64)
+            .extra_caps(1)
+            .build();
+
+        return sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.caps_or_badges_mut()[0] = hndl_cap.cptr.path().bits();
+
+            msginfo = self.ep().call(msginfo);
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+
+            Ok(())
+        });
     }
-    fn file_write() {
-        todo!()
+
+    fn sddf_queue_register(
+        &self,
+        obj_hndl_cap: HandleOrHandleCap<ObjectHandle>,
+        size: usize,
+        kind: QueueType,
+    ) -> Result<(), InvocationError> {
+        let mut msginfo = sel4::MessageInfoBuilder::default()
+            .label(SMOSInvocation::sDDFQueueRegister as u64)
+            .length(2)
+            .extra_caps(1)
+            .build();
+
+        return sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.msg_regs_mut()[0] = size as u64;
+            ipc_buf.msg_regs_mut()[1] = kind.into();
+            match obj_hndl_cap {
+                HandleOrHandleCap::Handle(x) => return Err(InvocationError::InvalidArguments),
+                HandleOrHandleCap::HandleCap(x) => {
+                    ipc_buf.caps_or_badges_mut()[0] = x.cptr.path().bits()
+                }
+            }
+            let msginfo = self.ep().call(msginfo);
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+
+            Ok(())
+        });
     }
-    fn file_close() {
-        todo!()
+
+    fn sddf_get_data_region(
+        &self,
+        slot: &AbsoluteCPtr,
+    ) -> Result<HandleOrHandleCap<ObjectHandle>, InvocationError> {
+        let mut msginfo = sel4::MessageInfoBuilder::default()
+            .label(SMOSInvocation::sDDFGetDataRegion as u64)
+            .build();
+
+        return sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.set_recv_slot(slot);
+
+            let msginfo = self.ep().call(msginfo);
+
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+            assert!(
+                msginfo.length() == 0 && msginfo.extra_caps() == 1 && msginfo.caps_unwrapped() == 0
+            );
+
+            Ok(HandleOrHandleCap::new_handle_cap(*slot))
+        });
+    }
+
+    fn sddf_data_region_provide(
+        &self,
+        obj: HandleOrHandleCap<ObjectHandle>,
+    ) -> Result<(), InvocationError> {
+        let mut msginfo = sel4::MessageInfoBuilder::default()
+            .label(SMOSInvocation::sDDFProvideDataRegion as u64)
+            .extra_caps(1)
+            .build();
+
+        if let HandleOrHandleCap::HandleCap(hndl_cap) = obj {
+            return sel4::with_ipc_buffer_mut(|ipc_buf| {
+                ipc_buf.caps_or_badges_mut()[0] = hndl_cap.cptr.path().bits();
+
+                let msginfo = self.ep().call(msginfo);
+
+                try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
+                Ok(())
+            });
+        } else {
+            return Err(InvocationError::InvalidArguments);
+        }
     }
 }

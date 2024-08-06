@@ -11,7 +11,7 @@ use smos_common::local_handle::{
 };
 use smos_common::obj_attributes::ObjAttributes;
 use smos_common::string::copy_terminated_rust_string_to_buffer;
-use smos_common::syscall::{ObjectServerInterface, RootServerInterface};
+use smos_common::syscall::{NonRootServerInterface, ObjectServerInterface, RootServerInterface};
 use smos_common::util::{ROUND_DOWN, ROUND_UP};
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::{smos_declare_main, Never};

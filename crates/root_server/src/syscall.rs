@@ -118,6 +118,10 @@ pub fn handle_syscall(
         SMOS_Invocation::ServerHandleCapCreate(t) => {
             handle_server_handle_cap_create(cspace, &mut p, &t)
         }
+        SMOS_Invocation::ServerCreateChannel(t) => {
+            handle_server_create_channel(cspace, handle_cap_table, &mut p, &t)
+        }
+        SMOS_Invocation::ChannelOpen(t) => handle_channel_open(&mut p, handle_cap_table, &t),
         SMOS_Invocation::ProcessSpawn(t) => {
             handle_process_spawn(cspace, ut_table, frame_table, sched_control, ep, &mut p, t)
         }

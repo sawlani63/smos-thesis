@@ -60,7 +60,12 @@ macro_rules! generate_connection_impl {
 generate_connection_impl! {RootServerConnection}
 impl RootServerInterface for RootServerConnection {}
 impl ObjectServerInterface for RootServerConnection {}
-impl FileServerInterface for RootServerConnection {}
 
 generate_connection_impl! {ObjectServerConnection}
+impl NonRootServerInterface for ObjectServerConnection {}
 impl ObjectServerInterface for ObjectServerConnection {}
+
+/* @alwin: This should not be here */
+generate_connection_impl! {sDDFConnection}
+impl NonRootServerInterface for sDDFConnection {}
+impl sDDFInterface for sDDFConnection {}

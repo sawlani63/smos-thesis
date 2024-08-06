@@ -57,6 +57,18 @@ impl ServerReceivedHandleOrHandleCap {
     }
 }
 
+impl<A: HandleType> From<WrappedHandleCap> for HandleCap<A> {
+    fn from(val: WrappedHandleCap) -> Self {
+        HandleCap::new(val.cptr)
+    }
+}
+
+impl<A: HandleType> From<WrappedHandleCap> for HandleOrHandleCap<A> {
+    fn from(val: WrappedHandleCap) -> Self {
+        return HandleOrHandleCap::new_handle_cap(val.cptr);
+    }
+}
+
 impl<A: HandleType> TryFrom<ServerReceivedHandleOrHandleCap> for HandleCap<A> {
     type Error = ();
 

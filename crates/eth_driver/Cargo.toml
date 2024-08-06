@@ -11,3 +11,5 @@ sel4-panicking = { git = "https://github.com/seL4/rust-sel4" }
 smos-runtime = { path = "../smos-runtime" }
 smos-cspace = { path = "../smos-cspace" }
 smos-common = { path = "../smos-common"}
+smos-server = { path = "../smos-server" }
+smos-sddf = { path = "../smos-sddf" }

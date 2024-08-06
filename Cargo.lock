@@ -155,6 +155,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
+name = "echo_server"
+version = "0.1.0"
+dependencies = [
+ "sel4",
+ "sel4-config",
+ "sel4-panicking",
+ "sel4-sys",
+ "smos-common",
+ "smos-cspace",
+ "smos-runtime",
+ "smos-sddf",
+ "smos-server",
+]
+
+[[package]]
 name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -177,6 +192,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "eth_copier"
+version = "0.1.0"
+dependencies = [
+ "sel4",
+ "sel4-config",
+ "sel4-panicking",
+ "sel4-sys",
+ "smos-common",
+ "smos-cspace",
+ "smos-runtime",
+ "smos-sddf",
+ "smos-server",
+]
+
+[[package]]
 name = "eth_driver"
 version = "0.1.0"
 dependencies = [
@@ -187,15 +217,39 @@ dependencies = [
  "smos-common",
  "smos-cspace",
  "smos-runtime",
+ "smos-sddf",
+ "smos-server",
 ]
 
 [[package]]
 name = "eth_virt_rx"
 version = "0.1.0"
+dependencies = [
+ "sel4",
+ "sel4-config",
+ "sel4-panicking",
+ "sel4-sys",
+ "smos-common",
+ "smos-cspace",
+ "smos-runtime",
+ "smos-sddf",
+ "smos-server",
+]
 
 [[package]]
 name = "eth_virt_tx"
 version = "0.1.0"
+dependencies = [
+ "sel4",
+ "sel4-config",
+ "sel4-panicking",
+ "sel4-sys",
+ "smos-common",
+ "smos-cspace",
+ "smos-runtime",
+ "smos-sddf",
+ "smos-server",
+]
 
 [[package]]
 name = "fallible-iterator"
@@ -914,6 +968,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "smos-sddf"
+version = "0.1.0"
+dependencies = [
+ "sel4",
+ "sel4-config",
+ "sel4-panicking",
+ "sel4-sys",
+ "smos-common",
+ "smos-cspace",
+ "smos-runtime",
+ "smos-server",
+]
+
+[[package]]
 name = "smos-server"
 version = "0.1.0"
 dependencies = [
@@ -977,6 +1045,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.70",
+]
+
+[[package]]
+name = "timer"
+version = "0.1.0"
+dependencies = [
+ "sel4",
+ "sel4-config",
+ "sel4-panicking",
+ "sel4-sys",
+ "smos-common",
+ "smos-cspace",
+ "smos-runtime",
+ "smos-sddf",
+ "smos-server",
 ]
 
 [[package]]

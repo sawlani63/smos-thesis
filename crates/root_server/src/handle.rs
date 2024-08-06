@@ -61,6 +61,7 @@ pub enum RootServerResource {
     Process(Rc<RefCell<ProcessType>>),
     Reply((sel4::cap::Reply, UTWrapper)),
     HandleCap(sel4::cap::Endpoint),
+    ChannelAuthority((sel4::cap::Notification, u8)),
 }
 
 impl HandleInner for RootServerResource {}

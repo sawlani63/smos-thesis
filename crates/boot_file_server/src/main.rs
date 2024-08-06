@@ -40,9 +40,14 @@ use smos_server::ntfn_buffer::*;
 // to prevent information leakage. Maybe if another page aligned 'guard page' is added? Kinda
 // relying on the behaviour of the compiler
 
-const NUM_FILES: usize = 2;
+const NUM_FILES: usize = 7;
 const INIT_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("INIT_ELF"));
 const ETH_DRIVER_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("ETH_DRIVER_ELF"));
+const ETH_VIRT_RX_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("ETH_VIRT_RX_ELF"));
+const ETH_VIRT_TX_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("ETH_VIRT_TX_ELF"));
+const ETH_COPIER_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("ETH_COPIER_ELF"));
+const ECHO_SERVER_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("ECHO_SERVER_ELF"));
+const TIMER_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("TIMER_ELF"));
 
 #[derive(Debug, Copy, Clone)]
 struct File {
@@ -561,7 +566,6 @@ fn syscall_loop<T: ServerConnection>(
 
         match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Notification(bits) => {
-                // @alwin: This doesn't work with multiple being set, implement an iterator
                 for bit in bits.into_iter() {
                     match bit {
                         0 => handle_notification(&rs_conn, &mut window_allocator, &mut cspace),
@@ -672,6 +676,9 @@ fn syscall_loop<T: ServerConnection>(
                 is their responsibility to copy it somewhere else */
                 if consumed_cap {
                     recv_slot.delete();
+                    sel4::with_ipc_buffer_mut(|ipc_buf| {
+                        ipc_buf.set_recv_slot(&recv_slot);
+                    });
                 }
 
                 reply_msg_info = match ret {
@@ -693,6 +700,26 @@ fn init_file_table() {
             name: "eth_driver",
             data: ETH_DRIVER_ELF_CONTENTS,
         });
+        files[2] = Some(File {
+            name: "eth_virt_rx",
+            data: ETH_VIRT_RX_ELF_CONTENTS,
+        });
+        files[3] = Some(File {
+            name: "eth_virt_tx",
+            data: ETH_VIRT_TX_ELF_CONTENTS,
+        });
+        files[4] = Some(File {
+            name: "eth_copier",
+            data: ETH_COPIER_ELF_CONTENTS,
+        });
+        files[5] = Some(File {
+            name: "echo_server",
+            data: ECHO_SERVER_ELF_CONTENTS,
+        });
+        files[6] = Some(File {
+            name: "timer",
+            data: TIMER_ELF_CONTENTS,
+        })
     }
 }
 
@@ -739,7 +766,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
 
     /* Start the other relavant processes */
     rs_conn
-        .process_spawn("init", "BOOT_FS", 252, None)
+        .process_spawn("init", "BOOT_FS", 250, None)
         .expect("Failed to spawn init");
 
     let reply_cptr = cspace.alloc_slot().expect("Could not get a slot");

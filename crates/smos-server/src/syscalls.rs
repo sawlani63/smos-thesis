@@ -1,4 +1,6 @@
-use crate::handle_arg::{ReceivedHandle, ServerReceivedHandleOrHandleCap, UnwrappedHandleCap};
+use crate::handle_arg::{
+    ReceivedHandle, ServerReceivedHandleOrHandleCap, UnwrappedHandleCap, WrappedHandleCap,
+};
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -10,6 +12,7 @@ use sel4_bitfield_ops::Bitfield;
 use sel4_sys::seL4_MessageInfo;
 use smos_common::local_handle::{HandleOrHandleCap, ObjectHandle, WindowHandle};
 use smos_common::obj_attributes::ObjAttributes;
+use smos_common::sddf::{QueueType, VirtType};
 use smos_common::server_connection::ServerConnection;
 use smos_common::string::rust_str_from_buffer;
 use smos_common::util::BIT;
@@ -164,6 +167,40 @@ pub struct IRQRegister {
     pub edge_triggered: bool,
 }
 
+#[derive(Debug)]
+pub struct sDDFChannelRegisterBidirectional {
+    pub channel_hndl_cap: WrappedHandleCap,
+    pub virt_type: Option<VirtType>,
+}
+
+#[derive(Debug)]
+pub struct sDDFChannelRegisterRecvOnly {
+    pub channel_hndl_cap: WrappedHandleCap,
+}
+
+#[derive(Debug)]
+pub struct ChannelOpen {
+    pub hndl_cap: UnwrappedHandleCap,
+}
+
+#[derive(Debug)]
+pub struct sDDFQueueRegister {
+    pub hndl_cap: WrappedHandleCap,
+    pub size: usize,
+    pub queue_type: QueueType,
+}
+
+#[derive(Debug)]
+pub struct sDDFProvideDataRegion {
+    pub hndl_cap: WrappedHandleCap,
+    // pub size: usize,
+}
+
+#[derive(Debug)]
+pub struct ServerCreateChannel {
+    pub publish_hndl: ReceivedHandle,
+}
+
 // General invocation enum
 #[derive(Debug)]
 pub enum SMOS_Invocation<'a> {
@@ -193,6 +230,13 @@ pub enum SMOS_Invocation<'a> {
     PageMap(PageMap),
     LoadComplete(LoadComplete),
     IRQRegister(IRQRegister),
+    sDDFChannelRegisterBidirectional(sDDFChannelRegisterBidirectional),
+    sDDFChannelRegisterRecvOnly(sDDFChannelRegisterRecvOnly),
+    sDDFQueueRegister(sDDFQueueRegister),
+    sDDFGetDataRegion,
+    sDDFProvideDataRegion(sDDFProvideDataRegion),
+    ServerCreateChannel(ServerCreateChannel),
+    ChannelOpen(ChannelOpen),
 }
 
 impl<'a> SMOS_Invocation<'a> {
@@ -332,6 +376,62 @@ mod SMOS_Invocation_Raw {
 
                 Ok(SMOS_Invocation::ObjDestroy(ObjDestroy { hndl: val }))
             }
+            SMOSInvocation::sDDFChannelRegisterBidirectional => {
+                if info.length() > 1 || info.extra_caps() != 1 || info.caps_unwrapped() != 0 {
+                    return Err(InvocationError::InvalidArguments);
+                }
+
+                Ok(SMOS_Invocation::sDDFChannelRegisterBidirectional(
+                    sDDFChannelRegisterBidirectional {
+                        channel_hndl_cap: WrappedHandleCap::new(recv_slot),
+                        virt_type: if info.length() == 1 {
+                            Some(
+                                f_msg(0)
+                                    .try_into()
+                                    .or(Err(InvocationError::InvalidArguments))?,
+                            )
+                        } else {
+                            None
+                        },
+                    },
+                ))
+            }
+            SMOSInvocation::sDDFChannelRegisterRecieveOnly => {
+                if info.extra_caps() != 1 || info.caps_unwrapped() != 0 {
+                    return Err(InvocationError::InvalidArguments);
+                }
+
+                Ok(SMOS_Invocation::sDDFChannelRegisterRecvOnly(
+                    sDDFChannelRegisterRecvOnly {
+                        channel_hndl_cap: WrappedHandleCap::new(recv_slot),
+                    },
+                ))
+            }
+            SMOSInvocation::sDDFQueueRegister => {
+                if info.length() != 2 || info.extra_caps() != 1 || info.caps_unwrapped() != 0 {
+                    return Err(InvocationError::InvalidArguments);
+                }
+
+                Ok(SMOS_Invocation::sDDFQueueRegister(sDDFQueueRegister {
+                    hndl_cap: WrappedHandleCap::new(recv_slot),
+                    size: f_msg(0) as usize,
+                    queue_type: f_msg(1)
+                        .try_into()
+                        .or(Err(InvocationError::InvalidArguments))?,
+                }))
+            }
+            SMOSInvocation::sDDFProvideDataRegion => {
+                if info.extra_caps() != 1 || info.caps_unwrapped() != 0 {
+                    return Err(InvocationError::InvalidArguments);
+                }
+
+                Ok(SMOS_Invocation::sDDFProvideDataRegion(
+                    sDDFProvideDataRegion {
+                        hndl_cap: WrappedHandleCap::new(recv_slot),
+                    },
+                ))
+            }
+            SMOSInvocation::sDDFGetDataRegion => Ok(SMOS_Invocation::sDDFGetDataRegion),
             SMOSInvocation::WindowRegister => {
                 if info.extra_caps() != 1 || info.caps_unwrapped() != 1 || info.length() != 3 {
                     return Err(InvocationError::InvalidArguments);
@@ -342,6 +442,24 @@ mod SMOS_Invocation_Raw {
                     window_hndl: UnwrappedHandleCap::new(f_cap(0) as usize),
                     client_id: f_msg(1) as usize,
                     reference: f_msg(2) as usize,
+                }))
+            }
+            SMOSInvocation::ServerCreateChannel => {
+                if info.length() != 1 {
+                    return Err(InvocationError::InvalidArguments);
+                }
+
+                Ok(SMOS_Invocation::ServerCreateChannel(ServerCreateChannel {
+                    publish_hndl: ReceivedHandle::new(f_msg(0) as usize),
+                }))
+            }
+            SMOSInvocation::ChannelOpen => {
+                if info.extra_caps() != 1 && info.caps_unwrapped() != 1 {
+                    return Err(InvocationError::InvalidArguments);
+                }
+
+                Ok(SMOS_Invocation::ChannelOpen(ChannelOpen {
+                    hndl_cap: UnwrappedHandleCap::new(f_cap(0) as usize),
                 }))
             }
             SMOSInvocation::WindowDeregister => {
@@ -626,9 +744,9 @@ mod SMOS_Invocation_Raw {
                 } else {
                     let mut args_inner = Vec::new();
                     for i in 0..f_msg(0) {
-                        let (arg_tmp, ref mut data_buffer_ref) =
-                            rust_str_from_buffer(data_buffer_ref)?;
+                        let (arg_tmp, buf_tmp) = rust_str_from_buffer(data_buffer_ref)?;
                         args_inner.push(arg_tmp);
+                        *data_buffer_ref = buf_tmp;
                     }
                     Some(args_inner)
                 };
@@ -655,6 +773,7 @@ mod SMOS_Invocation_Raw {
             SMOSInvocation::TestSimple => {
                 panic!("Okay got to test simple");
             }
+
             _ => {
                 panic!("Not handled {:?}", SMOSInvocation::try_from(info.label()));
             }

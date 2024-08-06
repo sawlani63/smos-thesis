@@ -226,7 +226,10 @@ impl UserNotificationDispatch {
         dealloc_retyped(cspace, ut_table, self.ntfn);
     }
 
-    pub fn ntfn_register(&mut self, cspace: &mut CSpace) -> Result<u8, InvocationError> {
+    pub fn ntfn_register(
+        &mut self,
+        cspace: &mut CSpace,
+    ) -> Result<(u8, sel4::cap::Notification), InvocationError> {
         // Allocate a  bit
         let ident_bit = self
             .alloc_ntfn_bit()
@@ -248,7 +251,7 @@ impl UserNotificationDispatch {
 
         self.badged_ntfns[ident_bit] = Some(ntfn);
 
-        return Ok(ident_bit.try_into().unwrap());
+        return Ok((ident_bit.try_into().unwrap(), ntfn));
     }
 
     pub fn rs_badged_ntfn(&self) -> sel4::cap::Notification {

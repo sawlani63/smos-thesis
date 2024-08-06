@@ -1,8 +1,8 @@
 use smos_common::error::InvocationErrorLabel;
 use smos_common::local_handle::{
-    ConnRegistrationHandle, ConnectionHandle, HandleCap, HandleCapHandle, HandleOrHandleCap,
-    HandleType, IRQRegistrationHandle, LocalHandle, ObjectHandle, ProcessHandle, ReplyHandle,
-    ViewHandle, WindowHandle, WindowRegistrationHandle,
+    ChannelAuthorityHandle, ConnRegistrationHandle, ConnectionHandle, HandleCap, HandleCapHandle,
+    HandleOrHandleCap, HandleType, IRQRegistrationHandle, LocalHandle, ObjectHandle, ProcessHandle,
+    ReplyHandle, ViewHandle, WindowHandle, WindowRegistrationHandle,
 };
 use smos_common::returns::*;
 
@@ -20,6 +20,7 @@ pub enum SMOSReply {
     ConnDestroy,
     ConnDeregister,
     LoadComplete,
+    sDDFProvideDataRegion,
     ProcessWait, // @alwin: This should probably have some kind of return code
     ConnRegister {
         hndl: LocalHandle<ConnRegistrationHandle>,
@@ -65,6 +66,21 @@ pub enum SMOSReply {
     ObjStat {
         data: ObjStat,
     },
+    sDDFChannelRegisterBidirectional {
+        hndl_cap: HandleCap<ChannelAuthorityHandle>,
+    },
+    sDDFChannelRegisterRecvOnly,
+    sDDFGetDataRegion {
+        hndl_cap: HandleCap<ObjectHandle>,
+    },
+    sDDFQueueRegister,
+    ServerCreateChannel {
+        bit: u8,
+        hndl_cap: HandleCap<ChannelAuthorityHandle>,
+    },
+    ChannelOpen {
+        ntfn: sel4::cap::Notification,
+    },
 }
 
 #[derive(Debug)]
@@ -106,6 +122,23 @@ pub fn handle_reply(ipc_buf: &mut sel4::IpcBuffer, reply_type: SMOSReply) -> sel
             msginfo = msginfo.length(1).extra_caps(1);
             ipc_buf.msg_regs_mut()[0] = hndl.idx as u64;
             ipc_buf.caps_or_badges_mut()[0] = ep.bits();
+        }
+        SMOSReply::ServerCreateChannel { bit, hndl_cap } => {
+            msginfo = msginfo.length(1).extra_caps(1);
+            ipc_buf.msg_regs_mut()[0] = bit as u64;
+            ipc_buf.caps_or_badges_mut()[0] = hndl_cap.cptr.path().bits();
+        }
+        SMOSReply::sDDFChannelRegisterBidirectional { hndl_cap } => {
+            msginfo = msginfo.length(0).extra_caps(1);
+            ipc_buf.caps_or_badges_mut()[0] = hndl_cap.cptr.path().bits();
+        }
+        SMOSReply::sDDFGetDataRegion { hndl_cap } => {
+            msginfo = msginfo.extra_caps(1);
+            ipc_buf.caps_or_badges_mut()[0] = hndl_cap.cptr.path().bits();
+        }
+        SMOSReply::ChannelOpen { ntfn } => {
+            msginfo = msginfo.length(0).extra_caps(1);
+            ipc_buf.caps_or_badges_mut()[0] = ntfn.bits();
         }
         SMOSReply::ServerHandleCapCreate { hndl, cap } => {
             msginfo = msginfo.length(1).extra_caps(1);
@@ -167,6 +200,9 @@ pub fn handle_reply(ipc_buf: &mut sel4::IpcBuffer, reply_type: SMOSReply) -> sel
         | SMOSReply::ObjDestroy
         | SMOSReply::ConnDestroy
         | SMOSReply::LoadComplete
+        | SMOSReply::sDDFChannelRegisterRecvOnly
+        | SMOSReply::sDDFQueueRegister
+        | SMOSReply::sDDFProvideDataRegion
         | SMOSReply::ConnDeregister => {}
         _ => panic!("Not handled yet"),
     }

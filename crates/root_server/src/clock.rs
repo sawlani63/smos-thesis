@@ -181,21 +181,22 @@ pub fn register_timer(
     return Ok(());
 }
 
+// @alwin: We now have the clock in a user-level server
 pub fn clock_init(
     cspace: &mut CSpace,
     irq_dispatch: &mut IRQDispatch,
     ntfn: sel4::cap::Notification,
 ) -> Result<(), sel4::Error> {
-    plat_timer_init();
-    irq_dispatch.register_irq_handler(
-        cspace,
-        TIMEOUT_IRQ,
-        true,
-        timer_irq,
-        core::ptr::null() as *const (),
-        ntfn,
-    )?;
+    // plat_timer_init();
+    // irq_dispatch.register_irq_handler(
+    //     cspace,
+    //     TIMEOUT_IRQ,
+    //     true,
+    //     timer_irq,
+    //     core::ptr::null() as *const (),
+    //     ntfn,
+    // )?;
 
-    timeouts_init();
+    // timeouts_init();
     Ok(())
 }

@@ -42,4 +42,11 @@ pub enum SMOSInvocation {
     PageUnmap,
     LoadComplete,
     IRQRegister,
+    sDDFChannelRegisterBidirectional,
+    sDDFChannelRegisterRecieveOnly,
+    sDDFQueueRegister,
+    sDDFGetDataRegion,
+    sDDFProvideDataRegion,
+    ServerCreateChannel,
+    ChannelOpen,
 }

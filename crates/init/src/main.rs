@@ -11,7 +11,7 @@ use sel4_panicking::catch_unwind;
 use smos_common::client_connection::ClientConnection;
 use smos_common::connection::{ObjectServerConnection, RootServerConnection};
 use smos_common::obj_attributes::ObjAttributes;
-use smos_common::syscall::{FileServerInterface, ObjectServerInterface, RootServerInterface};
+use smos_common::syscall::{NonRootServerInterface, ObjectServerInterface, RootServerInterface};
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::{smos_declare_main, Never};
 extern crate alloc;
@@ -23,11 +23,35 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     /* Start the ethernet driver */
     rs_conn.process_spawn("eth_driver", "BOOT_FS", 254, Some(&["eth0"]));
 
-    // /* Start the virt tx */
-    // rs_conn.process_spawn("eth_virt_tx", "BOOT_FS", 253, Some(&["tx_eth0", "eth0"]));
+    /* Start the timer driver */
+    rs_conn.process_spawn("timer", "BOOT_FS", 254, Some(&["timer0"]));
 
-    // /* Start the virt rx */
-    // rs_conn.process_spawn("eth_virt_rx", "BOOT_FS", 253, Some(&["rx_eth0", "eth0"]));
+    /* Start the virt rx */
+    rs_conn.process_spawn("eth_virt_rx", "BOOT_FS", 253, Some(&["rx_eth0", "eth0"]));
+
+    /* Start the virt tx */
+    rs_conn.process_spawn("eth_virt_tx", "BOOT_FS", 253, Some(&["tx_eth0", "eth0"]));
+
+    /* Start the copier */
+    rs_conn.process_spawn(
+        "eth_copier",
+        "BOOT_FS",
+        252,
+        Some(&["cli0_copy_eth0", "rx_eth0"]),
+    );
+
+    /* Start the client */
+
+    rs_conn.process_spawn(
+        "echo_server",
+        "BOOT_FS",
+        251,
+        Some(&["cli0_copy_eth0", "tx_eth0", "timer0"]),
+    );
+
+    loop {}
+
+    // rs_conn.process_spawn("eth_virt_tx", "BOOT_FS", 253, Some(&["tx_eth0", "eth0"]));
 
     // /* Start a user application */
     // rs_conn.process_spawn("test_app", "BOOT_FS", 252, None);

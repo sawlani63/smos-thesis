@@ -6,7 +6,7 @@ use sel4::cap::Endpoint;
 // trait impls and stuff in smos-client and smos-server
 macro_rules! generate_connection_type {
     ($name:ident) => {
-        #[derive(Debug)]
+        #[derive(Debug, Copy, Clone)]
         pub struct $name {
             pub ep: Endpoint,
             pub conn_hndl: LocalHandle<ConnectionHandle>,
@@ -17,3 +17,5 @@ macro_rules! generate_connection_type {
 
 generate_connection_type!(RootServerConnection);
 generate_connection_type!(ObjectServerConnection);
+// @alwin: This should not be here
+generate_connection_type!(sDDFConnection);

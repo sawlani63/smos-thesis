@@ -193,6 +193,9 @@ impl UserProcess {
                 RootServerResource::IRQRegistration(irq_reg) => {
                     todo!()
                 }
+                RootServerResource::ChannelAuthority(_) => {
+                    todo!()
+                }
             }
         }
 
@@ -225,7 +228,7 @@ impl UserProcess {
             let window_borrowed = window.borrow();
             if (start >= window_borrowed.start
                 && start < window_borrowed.start + window_borrowed.size)
-                || (start + size >= window_borrowed.start
+                || (start + size > window_borrowed.start
                     && start + size < window_borrowed.start + window_borrowed.size)
             {
                 return Some(window.clone());

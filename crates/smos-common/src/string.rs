@@ -24,6 +24,6 @@ pub fn rust_str_from_buffer<'a>(buffer: &'a [u8]) -> Result<(&'a str, &'a [u8]),
 
     return Ok((
         core::str::from_utf8(&buffer[0..index]).or(Err(InvocationError::InvalidArguments))?,
-        &buffer[index + 1..length],
+        &buffer[(index + 1)..length],
     ));
 }

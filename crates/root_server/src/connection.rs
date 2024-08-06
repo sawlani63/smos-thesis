@@ -17,20 +17,21 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use smos_common::error::InvocationError;
-use smos_common::local_handle;
-use smos_common::local_handle::LocalHandle;
+use smos_common::local_handle::{HandleCap, LocalHandle};
 use smos_common::obj_attributes::ObjAttributes;
 use smos_common::util::BIT;
 use smos_server::event::{INVOCATION_EP_BITS, IRQ_IDENT_BADGE_BITS, NTFN_BIT};
 use smos_server::handle::HandleAllocater;
 use smos_server::handle::ServerHandle;
+use smos_server::handle_capability::HandleCapabilityTable;
 use smos_server::ntfn_buffer::{
     enqueue_ntfn_buffer_msg, init_ntfn_buffer, ConnDestroyNotification, NotificationType,
     NtfnBufferData,
 };
 use smos_server::reply::SMOSReply;
 use smos_server::syscalls::{
-    ConnCreate, ConnDeregister, ConnDestroy, ConnPublish, ConnRegister, ServerHandleCapCreate,
+    ChannelOpen, ConnCreate, ConnDeregister, ConnDestroy, ConnPublish, ConnRegister,
+    ServerCreateChannel, ServerHandleCapCreate,
 };
 
 #[derive(Debug, Clone)]
@@ -121,6 +122,13 @@ pub fn handle_conn_create(
     let pid = p.pid;
 
     let server = find_server_with_name(args.name).ok_or(InvocationError::InvalidArguments)?;
+
+    //  Don't let a process connect to itself
+    if server.borrow_mut().pid == p.pid {
+        warn_rs!("Attempting to create a connection with self");
+        return Err(InvocationError::InvalidArguments);
+    }
+
     // @alwin: Ideally we would want to partition the RS cspace to prevent any one process from
     // being able to consume too much of it.
 
@@ -245,6 +253,61 @@ pub fn handle_server_handle_cap_create(
     return Ok(SMOSReply::ServerHandleCapCreate {
         hndl: LocalHandle::new(idx),
         cap: badged_cap,
+    });
+}
+
+pub fn handle_server_create_channel(
+    cspace: &mut CSpace,
+    handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
+    p: &mut UserProcess,
+    args: &ServerCreateChannel,
+) -> Result<SMOSReply, InvocationError> {
+    let server_ref = p
+        .get_handle_mut(args.publish_hndl.idx)
+        .or(Err(InvocationError::InvalidHandle { which_arg: 0 }))?;
+    let server: Rc<RefCell<Server>> = match server_ref.as_ref().unwrap().inner() {
+        RootServerResource::Server(sv) => Ok(sv.clone()),
+        _ => Err(InvocationError::InvalidHandle { which_arg: 0 }),
+    }?;
+
+    let (idx, handle_ref, cptr) = handle_cap_table.allocate_handle_cap()?;
+
+    let (bit, ntfn_cap) = server.borrow_mut().ntfn_dispatch.ntfn_register(cspace)?;
+
+    let channel_auth = (ntfn_cap, bit);
+
+    *handle_ref = Some(ServerHandle::new(RootServerResource::ChannelAuthority(
+        channel_auth,
+    )));
+
+    p.created_handle_caps.push(idx);
+
+    return Ok(SMOSReply::ServerCreateChannel {
+        bit: bit,
+        hndl_cap: HandleCap::new(cptr.unwrap()),
+    });
+}
+
+pub fn handle_channel_open(
+    p: &mut UserProcess,
+    handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
+    args: &ChannelOpen,
+) -> Result<SMOSReply, InvocationError> {
+    let channel_auth_ref = handle_cap_table
+        .get_handle_cap_mut(args.hndl_cap.idx)
+        .or(Err(InvocationError::InvalidHandleCapability {
+            which_arg: 0,
+        }))?;
+
+    let channel_auth = match channel_auth_ref.as_ref().unwrap().inner() {
+        RootServerResource::ChannelAuthority(ca) => Ok(ca),
+        _ => Err(InvocationError::InvalidHandleCapability { which_arg: 0 }),
+    }?;
+
+    // @alwin: Should this return a handle?
+
+    return Ok(SMOSReply::ChannelOpen {
+        ntfn: channel_auth.0,
     });
 }
 
@@ -375,7 +438,7 @@ pub fn handle_conn_publish(
     *handle_ref = Some(ServerHandle::new(RootServerResource::Server(server)));
 
     return Ok(SMOSReply::ConnPublish {
-        hndl: local_handle::LocalHandle::new(idx),
+        hndl: LocalHandle::new(idx),
         ep: ep.0,
     });
 }

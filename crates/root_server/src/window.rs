@@ -46,10 +46,18 @@ pub fn handle_window_create(
     }
 
     /* Ensure that the window does not overlap with any other windows */
-    if p.overlapping_window(args.base_vaddr.try_into().unwrap(), args.size)
-        .is_some()
+    if let Some(overlapping_window) =
+        p.overlapping_window(args.base_vaddr.try_into().unwrap(), args.size)
     {
-        warn_rs!("Window overlaps with an existing window");
+        let start = overlapping_window.borrow_mut().start;
+        let size = overlapping_window.borrow_mut().size;
+        warn_rs!(
+            "Window ({:#x} -> {:#x}) overlaps with an existing window at: {:#x} -> {:#x}",
+            args.base_vaddr as usize,
+            args.base_vaddr as usize + args.size,
+            start,
+            start + size
+        );
         return Err(InvocationError::InvalidArguments);
     }
 
