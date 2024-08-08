@@ -3,7 +3,7 @@ project('smos-rs', ['c'])
 ### SETUP PATHS
 
 sddf = 'sddf'
-sel4_install_dir = 'deps/sel4/install'
+sel4_install_dir = 'deps/seL4/install'
 echo_server_dir = sddf / 'examples/echo_server'
 eth_driver_dir = sddf / 'drivers/network/virtio'
 net_components_dir = sddf / 'network/components'
