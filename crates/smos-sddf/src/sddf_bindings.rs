@@ -54,7 +54,7 @@ pub unsafe extern "C" fn __assert_fail(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sddf_notify_delayed(id: u32) {
+pub unsafe extern "C" fn sddf_deferred_notify(id: u32) {
     sddf_notify(id)
 }
 
@@ -64,7 +64,7 @@ pub unsafe extern "C" fn sddf_notify(id: u32) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sddf_notify_delayed_curr() -> u32 {
+pub unsafe extern "C" fn sddf_deferred_notify_curr() -> u32 {
     return u32::MAX;
 }
 
@@ -95,7 +95,7 @@ pub unsafe extern "C" fn sddf_irq_ack(id: u32) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn sddf_irq_ack_delayed(id: u32) {
+pub unsafe extern "C" fn sddf_deferred_irq_ack(id: u32) {
     channels[&(id as usize)].irq_ack();
 }
 

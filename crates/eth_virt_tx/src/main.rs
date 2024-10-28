@@ -63,6 +63,7 @@ struct Resources {
     tx_active_drv: u64,
     drv_queue_size: u64,
     drv_ch: u8,
+    num_network_clients: u8,
     clients: [Client; 1],
 }
 
@@ -370,6 +371,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
             tx_active_drv: drv_active as u64,
             drv_queue_size: drv_queue_capacity as u64,
             drv_ch: drv_channel.from_bit.unwrap(),
+            num_network_clients: 1,
             clients: [Client {
                 tx_free: cli0_free as u64,
                 tx_active: cli0_active as u64,

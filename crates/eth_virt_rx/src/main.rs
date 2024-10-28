@@ -65,6 +65,7 @@ struct Resources {
     buffer_data_paddr: u64,
 
     driver_id: u8,
+    num_network_clients: u8,
 
     clients: [Client; 1],
 }
@@ -389,6 +390,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
             buffer_data_paddr: rcv_dma_region.paddr as u64,
 
             driver_id: drv_channel.from_bit.unwrap(),
+            num_network_clients: 1,
 
             clients: [Client {
                 rx_free: cpy_free as u64,
