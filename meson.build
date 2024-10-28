@@ -119,7 +119,7 @@ netif_files = lwip_dir / 'netif/ethernet.c'
 
 # Build lib echo server
 libecho_server = static_library('echo_server',
-                                [corefiles,core4files, api_files, netif_files, echo_server_dir / 'lwip.c', echo_server_dir / 'udp_echo_socket.c'],
+                                [corefiles,core4files, api_files, netif_files, echo_server_dir / 'lwip.c', echo_server_dir / 'udp_echo_socket.c', echo_server_dir / 'tcp_echo_socket.c' ],
                                 link_with: [newlib],
                                 include_directories: [sddf_include_directories, lwip_include_directories]
 )
