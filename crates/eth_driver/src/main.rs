@@ -27,6 +27,7 @@ use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_notified, sddf_s
 use smos_sddf::sddf_channel::sDDFChannel;
 use smos_server::error::handle_error;
 use smos_server::event::{decode_entry_type, EntryType};
+use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
 use smos_server::reply::{handle_reply, SMOSReply};
 use smos_server::syscalls::{
     sDDFChannelRegisterBidirectional, sDDFQueueRegister, ConnOpen, SMOS_Invocation,
@@ -114,7 +115,7 @@ fn handle_conn_open(
     rs_conn: &RootServerConnection,
     publish_hndl: &LocalHandle<ConnectionHandle>,
     id: usize,
-    args: ConnOpen,
+    args: &ConnOpen,
 ) -> Result<SMOSReply, InvocationError> {
     let slot = find_client_slot().ok_or(InvocationError::InsufficientResources)?;
 
@@ -268,13 +269,7 @@ fn pre_init<T: ServerConnection>(
     });
 
     loop {
-        let (msg, mut badge) = if reply_msg_info.is_some() {
-            listen_conn
-                .ep()
-                .reply_recv(reply_msg_info.unwrap(), reply.cap)
-        } else {
-            listen_conn.ep().recv(reply.cap)
-        };
+        let (msg, mut badge) = smos_serv_replyrecv(listen_conn, reply, reply_msg_info);
 
         match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Fault(_) => panic!("Driver does not expect to handle faults"),
@@ -285,17 +280,10 @@ fn pre_init<T: ServerConnection>(
             EntryType::Invocation(id) => {
                 let client = find_client_from_id(id);
 
-                let (invocation, consumed_cap) = sel4::with_ipc_buffer(|buf| {
-                    SMOS_Invocation::new::<sDDFConnection>(buf, &msg, None, recv_slot)
-                });
-
-                if invocation.is_err() {
-                    if consumed_cap {
-                        recv_slot.delete();
-                    }
-                    reply_msg_info = Some(sel4::with_ipc_buffer_mut(|buf| {
-                        handle_error(buf, invocation.unwrap_err())
-                    }));
+                let invocation =
+                    smos_serv_decode_invocation::<sDDFConnection>(&msg, recv_slot, None);
+                if let Err(e) = invocation {
+                    reply_msg_info = e;
                     continue;
                 }
 
@@ -308,16 +296,16 @@ fn pre_init<T: ServerConnection>(
                 }
 
                 let ret = if matches!(invocation, Ok(SMOS_Invocation::ConnOpen(ref t))) {
-                    match invocation.unwrap() {
+                    match invocation.as_ref().unwrap() {
                         SMOS_Invocation::ConnOpen(t) => {
-                            handle_conn_open(&rs_conn, listen_conn.hndl(), id, t)
+                            handle_conn_open(&rs_conn, listen_conn.hndl(), id, &t)
                         }
                         _ => panic!("No invocations besides conn_open should be handled here"),
                     }
                 } else {
                     let client_unwrapped = client.unwrap().as_mut().unwrap();
 
-                    match invocation.unwrap() {
+                    match invocation.as_ref().unwrap() {
                         SMOS_Invocation::ConnOpen(_) => {
                             panic!("conn_open should never be handled here")
                         }
@@ -339,17 +327,7 @@ fn pre_init<T: ServerConnection>(
 
                 /* We delete any cap that was recieved. If a handler wants to hold onto a cap, it
                 is their responsibility to copy it somewhere else */
-                if consumed_cap {
-                    recv_slot.delete();
-                    sel4::with_ipc_buffer_mut(|ipc_buf| {
-                        ipc_buf.set_recv_slot(&recv_slot);
-                    });
-                }
-
-                reply_msg_info = match ret {
-                    Ok(x) => Some(sel4::with_ipc_buffer_mut(|buf| handle_reply(buf, x))),
-                    Err(x) => Some(sel4::with_ipc_buffer_mut(|buf| handle_error(buf, x))),
-                }
+                reply_msg_info = smos_serv_cleanup(invocation.unwrap(), recv_slot, ret);
             }
         }
 

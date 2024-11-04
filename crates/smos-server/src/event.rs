@@ -1,4 +1,11 @@
+use crate::error::handle_error;
+use crate::reply::{handle_reply, SMOSReply};
+use crate::syscalls::SMOS_Invocation;
 use alloc::vec::Vec;
+use sel4::MessageInfo;
+use smos_common::error::InvocationError;
+use smos_common::server_connection::ServerConnection;
+use smos_common::syscall::ReplyWrapper;
 use smos_common::util::BIT;
 
 /* We set the top bit to differentiate between messages from notifications  and EPs */
@@ -79,5 +86,60 @@ pub fn decode_entry_type(badge: usize) -> EntryType {
         INVOCATION_VALUE => EntryType::Invocation(pid),
         FAULT_VALUE => EntryType::Fault(pid),
         _ => panic!("An unexpected endpoint capability was invoked!"),
+    }
+}
+
+pub fn smos_serv_replyrecv<T: ServerConnection>(
+    listen_conn: &T,
+    reply: &ReplyWrapper,
+    reply_msg_info: Option<MessageInfo>,
+) -> (MessageInfo, u64) {
+    if reply_msg_info.is_some() {
+        listen_conn
+            .ep()
+            .reply_recv(reply_msg_info.as_ref().unwrap().clone(), reply.cap)
+    } else {
+        listen_conn.ep().recv(reply.cap)
+    }
+}
+
+pub fn smos_serv_decode_invocation<'a, T: ServerConnection>(
+    msg: &MessageInfo,
+    recv_slot: sel4::AbsoluteCPtr,
+    data_buffer: Option<&'a [u8]>,
+) -> Result<SMOS_Invocation<'a>, Option<MessageInfo>> {
+    let (invocation, consumed_cap) =
+        sel4::with_ipc_buffer(|buf| SMOS_Invocation::new::<T>(buf, &msg, data_buffer, recv_slot));
+
+    if invocation.is_err() {
+        if consumed_cap {
+            recv_slot.delete();
+        }
+        sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.set_recv_slot(&recv_slot);
+        });
+        return Err(Some(sel4::with_ipc_buffer_mut(|buf| {
+            handle_error(buf, invocation.unwrap_err())
+        })));
+    }
+
+    return Ok(invocation.unwrap());
+}
+
+pub fn smos_serv_cleanup(
+    invocation: SMOS_Invocation,
+    recv_slot: sel4::AbsoluteCPtr,
+    ret: Result<SMOSReply, InvocationError>,
+) -> Option<MessageInfo> {
+    if invocation.contains_cap() {
+        recv_slot.delete();
+        sel4::with_ipc_buffer_mut(|ipc_buf| {
+            ipc_buf.set_recv_slot(&recv_slot);
+        });
+    }
+
+    match ret {
+        Ok(x) => Some(sel4::with_ipc_buffer_mut(|buf| handle_reply(buf, x))),
+        Err(x) => Some(sel4::with_ipc_buffer_mut(|buf| handle_error(buf, x))),
     }
 }

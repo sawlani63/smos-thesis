@@ -34,9 +34,10 @@ use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::ptr::NonNull;
 use offset_allocator::{Allocation, Allocator};
+use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
 use smos_server::ntfn_buffer::*;
 
-// @alwin: Should really make sure nothing else starts on the same page as this ELF finishes
+// @alwin: Should really make sure nothing else starts on the same page as each ELF finishes
 // to prevent information leakage. Maybe if another page aligned 'guard page' is added? Kinda
 // relying on the behaviour of the compiler
 
@@ -556,13 +557,7 @@ fn syscall_loop<T: ServerConnection>(
     let mut window_allocator = Allocator::with_max_allocs(MAX_CLIENTS as u32, MAX_CLIENTS as u32);
 
     loop {
-        let (msg, mut badge) = if reply_msg_info.is_some() {
-            listen_conn
-                .ep()
-                .reply_recv(reply_msg_info.unwrap(), reply.cap)
-        } else {
-            listen_conn.ep().recv(reply.cap)
-        };
+        let (msg, mut badge) = smos_serv_replyrecv(&listen_conn, &reply, reply_msg_info);
 
         match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Notification(bits) => {
@@ -595,18 +590,11 @@ fn syscall_loop<T: ServerConnection>(
                     }
                 };
 
-                let (invocation, consumed_cap) = sel4::with_ipc_buffer(|buf| {
-                    SMOS_Invocation::new::<ObjectServerConnection>(buf, &msg, shared_buf, recv_slot)
-                });
-
-                /* Deal with the case where an invalid invocation was done*/
-                if invocation.is_err() {
-                    if consumed_cap {
-                        recv_slot.delete();
-                    }
-                    reply_msg_info = Some(sel4::with_ipc_buffer_mut(|buf| {
-                        handle_error(buf, invocation.unwrap_err())
-                    }));
+                let invocation = smos_serv_decode_invocation::<ObjectServerConnection>(
+                    &msg, recv_slot, shared_buf,
+                );
+                if let Err(e) = invocation {
+                    reply_msg_info = e;
                     continue;
                 }
 
@@ -626,9 +614,10 @@ fn syscall_loop<T: ServerConnection>(
                 }
 
                 let ret = if matches!(invocation, Ok(SMOS_Invocation::ConnOpen(ref t))) {
-                    match invocation.unwrap() {
+                    match invocation.as_ref().unwrap() {
                         SMOS_Invocation::ConnOpen(t) => handle_conn_open(
                             &rs_conn,
+                            &mut cspace,
                             listen_conn.hndl(),
                             &mut window_allocator,
                             id,
@@ -641,7 +630,7 @@ fn syscall_loop<T: ServerConnection>(
                     // by the conn_open case above.
                     let client_unwrapped = client.unwrap().as_mut().unwrap();
 
-                    match invocation.unwrap() {
+                    match invocation.as_ref().unwrap() {
                         SMOS_Invocation::ConnOpen(_) => {
                             panic!("conn_open should never be handled here")
                         }
@@ -674,17 +663,7 @@ fn syscall_loop<T: ServerConnection>(
 
                 /* We delete any cap that was recieved. If a handler wants to hold onto a cap, it
                 is their responsibility to copy it somewhere else */
-                if consumed_cap {
-                    recv_slot.delete();
-                    sel4::with_ipc_buffer_mut(|ipc_buf| {
-                        ipc_buf.set_recv_slot(&recv_slot);
-                    });
-                }
-
-                reply_msg_info = match ret {
-                    Ok(x) => Some(sel4::with_ipc_buffer_mut(|buf| handle_reply(buf, x))),
-                    Err(x) => Some(sel4::with_ipc_buffer_mut(|buf| handle_error(buf, x))),
-                }
+                reply_msg_info = smos_serv_cleanup(invocation.unwrap(), recv_slot, ret);
             }
         }
     }

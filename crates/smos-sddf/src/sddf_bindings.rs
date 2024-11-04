@@ -4,7 +4,7 @@ use core::ffi::{c_char, CStr};
 use smos_common::client_connection::ClientConnection;
 use smos_common::connection::sDDFConnection;
 use smos_common::syscall::ReplyWrapper;
-use smos_server::event::{decode_entry_type, EntryType};
+use smos_server::event::{decode_entry_type, smos_serv_replyrecv, EntryType};
 
 const MAX_CHANNELS: usize = 64;
 
@@ -133,13 +133,7 @@ pub fn sddf_event_loop_ppc(listen_conn: sDDFConnection, reply: ReplyWrapper) -> 
 pub fn sddf_event_loop(listen_conn: sDDFConnection, reply: ReplyWrapper) -> ! {
     let mut reply_msg_info = None;
     loop {
-        let (msg, mut badge) = if reply_msg_info.is_some() {
-            listen_conn
-                .ep()
-                .reply_recv(reply_msg_info.unwrap(), reply.cap)
-        } else {
-            listen_conn.ep().recv(reply.cap)
-        };
+        let (msg, mut badge) = smos_serv_replyrecv(&listen_conn, &reply, reply_msg_info);
 
         match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Notification(bits) => {

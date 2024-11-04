@@ -32,6 +32,7 @@ use smos_sddf::sddf_bindings::{
 use smos_sddf::sddf_channel::sDDFChannel;
 use smos_server::error::handle_error;
 use smos_server::event::{decode_entry_type, EntryType};
+use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
 use smos_server::reply::{handle_reply, SMOSReply};
 use smos_server::syscalls::SMOS_Invocation;
 use smos_server::syscalls::{
@@ -62,7 +63,7 @@ fn handle_conn_open(
     rs_conn: &RootServerConnection,
     publish_hndl: &LocalHandle<ConnectionHandle>,
     id: usize,
-    args: ConnOpen,
+    args: &ConnOpen,
     slot: &mut Option<Client>,
 ) -> Result<SMOSReply, InvocationError> {
     /* The virtualizer does not support a shared buffer */
@@ -86,7 +87,6 @@ fn handle_conn_open(
 
 fn handle_client_register(
     rs_conn: &RootServerConnection,
-    publish_hndl: &LocalHandle<ConnectionHandle>,
     cspace: &mut SMOSUserCSpace,
     client: &mut Client,
     args: &sDDFChannelRegisterRecvOnly,
@@ -118,64 +118,33 @@ fn pre_init<T: ServerConnection>(
     });
 
     loop {
-        // @alwin: Put this in a generic function
-        let (msg, mut badge) = if reply_msg_info.is_some() {
-            listen_conn
-                .ep()
-                .reply_recv(reply_msg_info.unwrap(), reply.cap)
-        } else {
-            listen_conn.ep().recv(reply.cap)
-        };
+        let (msg, badge) = smos_serv_replyrecv(listen_conn, reply, reply_msg_info);
 
         if let EntryType::Invocation(id) = decode_entry_type(badge.try_into().unwrap()) {
-            let (invocation, consumed_cap) = sel4::with_ipc_buffer(|buf| {
-                SMOS_Invocation::new::<sDDFConnection>(buf, &msg, None, recv_slot)
-            });
-
-            // @alwin: Put this in a generic function
-            if invocation.is_err() {
-                if consumed_cap {
-                    recv_slot.delete();
-                }
-                reply_msg_info = Some(sel4::with_ipc_buffer_mut(|buf| {
-                    handle_error(buf, invocation.unwrap_err())
-                }));
+            let invocation = smos_serv_decode_invocation::<sDDFConnection>(&msg, recv_slot, None);
+            if let Err(e) = invocation {
+                reply_msg_info = e;
                 continue;
             }
 
             let ret = if client.is_none() {
-                match invocation.unwrap() {
+                match invocation.as_ref().unwrap() {
                     SMOS_Invocation::ConnOpen(t) => {
                         handle_conn_open(&rs_conn, listen_conn.hndl(), id, t, &mut client)
                     }
                     _ => todo!(), // @alwin: Client calls something before opening connection
                 }
             } else {
-                match invocation.unwrap() {
+                match invocation.as_ref().unwrap() {
                     SMOS_Invocation::ConnOpen(_) => todo!(), // @alwin: Client calls conn_open again
-                    SMOS_Invocation::sDDFChannelRegisterRecvOnly(t) => handle_client_register(
-                        rs_conn,
-                        listen_conn.hndl(),
-                        cspace,
-                        &mut client.as_mut().unwrap(),
-                        &t,
-                    ),
+                    SMOS_Invocation::sDDFChannelRegisterRecvOnly(t) => {
+                        handle_client_register(rs_conn, cspace, &mut client.as_mut().unwrap(), &t)
+                    }
                     _ => panic!("Should not get any other invocations!"),
                 }
             };
 
-            // @alwin: put this in a generic function
-            if consumed_cap {
-                recv_slot.delete();
-                sel4::with_ipc_buffer_mut(|ipc_buf| {
-                    ipc_buf.set_recv_slot(&recv_slot);
-                });
-            }
-
-            reply_msg_info = match ret {
-                Ok(x) => Some(sel4::with_ipc_buffer_mut(|buf| handle_reply(buf, x))),
-                Err(x) => Some(sel4::with_ipc_buffer_mut(|buf| handle_error(buf, x))),
-            };
+            reply_msg_info = smos_serv_cleanup(invocation.unwrap(), recv_slot, ret);
         } else {
             reply_msg_info = None;
         }

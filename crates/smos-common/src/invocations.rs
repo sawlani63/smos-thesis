@@ -50,3 +50,17 @@ pub enum SMOSInvocation {
     ServerCreateChannel,
     ChannelOpen,
 }
+
+impl SMOSInvocation {
+    pub fn can_contain_wrapped_cap(&self) -> bool {
+        match self {
+            SMOSInvocation::sDDFChannelRegisterBidirectional
+            | SMOSInvocation::sDDFChannelRegisterRecieveOnly
+            | SMOSInvocation::sDDFQueueRegister
+            | SMOSInvocation::sDDFProvideDataRegion
+            | SMOSInvocation::View
+            | SMOSInvocation::ConnOpen => return true,
+            _ => return false,
+        }
+    }
+}

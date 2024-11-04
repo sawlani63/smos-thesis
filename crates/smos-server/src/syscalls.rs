@@ -253,6 +253,63 @@ impl<'a> SMOS_Invocation<'a> {
             recv_slot,
         );
     }
+
+    pub fn contains_cap(&self) -> bool {
+        match self {
+            SMOS_Invocation::WindowCreate(_)
+            | SMOS_Invocation::WindowCreate(_)
+            | SMOS_Invocation::WindowDestroy(_)
+            | SMOS_Invocation::ObjCreate(_)
+            | SMOS_Invocation::ObjOpen(_)
+            | SMOS_Invocation::ObjStat(_)
+            | SMOS_Invocation::ObjClose(_)
+            | SMOS_Invocation::ObjDestroy(_)
+            | SMOS_Invocation::Unview(_)
+            | SMOS_Invocation::ConnCreate(_)
+            | SMOS_Invocation::ConnDestroy(_)
+            | SMOS_Invocation::ConnClose
+            | SMOS_Invocation::ConnPublish(_)
+            | SMOS_Invocation::ConnRegister(_)
+            | SMOS_Invocation::ConnDeregister(_)
+            | SMOS_Invocation::ReplyCreate
+            | SMOS_Invocation::ServerHandleCapCreate(_)
+            | SMOS_Invocation::ProcessSpawn(_)
+            | SMOS_Invocation::ProcessWait(_)
+            | SMOS_Invocation::ProcessExit
+            | SMOS_Invocation::WindowRegister(_)
+            | SMOS_Invocation::WindowDeregister(_)
+            | SMOS_Invocation::PageMap(_)
+            | SMOS_Invocation::LoadComplete(_)
+            | SMOS_Invocation::IRQRegister(_)
+            | SMOS_Invocation::sDDFGetDataRegion
+            | SMOS_Invocation::ServerCreateChannel(_)
+            | SMOS_Invocation::ChannelOpen(_) => {
+                return false;
+            }
+            SMOS_Invocation::sDDFChannelRegisterBidirectional(_)
+            | SMOS_Invocation::sDDFChannelRegisterRecvOnly(_)
+            | SMOS_Invocation::sDDFQueueRegister(_)
+            | SMOS_Invocation::sDDFProvideDataRegion(_) => {
+                return true;
+            }
+            SMOS_Invocation::View(x) => {
+                if let ServerReceivedHandleOrHandleCap::WrappedHandleCap(_) = x.window {
+                    return true;
+                }
+                return false;
+            }
+            SMOS_Invocation::ConnOpen(x) => {
+                if x.shared_buf_obj.is_none() {
+                    return false;
+                } else if let ServerReceivedHandleOrHandleCap::WrappedHandleCap(_) =
+                    x.shared_buf_obj.unwrap().0
+                {
+                    return true;
+                }
+                return false;
+            }
+        }
+    }
 }
 
 mod SMOS_Invocation_Raw {
@@ -274,9 +331,7 @@ mod SMOS_Invocation_Raw {
         /* Did we recieve a capability? */
         if info.extra_caps() > 0 {
             // @alwin: Double check the correctness of this
-            if info.caps_unwrapped() & (BIT(info.extra_caps() + 1) - 1)
-                != BIT(info.extra_caps() + 1) - 1
-            {
+            if info.caps_unwrapped() & (BIT(info.extra_caps()) - 1) != BIT(info.extra_caps()) - 1 {
                 /* This means there was a capability that was transferred as opposed to being unwrapped */
                 consumed_recv_slot = true;
             }
@@ -316,11 +371,17 @@ mod SMOS_Invocation_Raw {
         recv_slot: AbsoluteCPtr,
         consumed_recv_slot: &mut bool,
     ) -> Result<SMOS_Invocation<'a>, InvocationError> {
-        match info
+        let label: SMOSInvocation = info
             .label()
             .try_into()
-            .or(Err(InvocationError::InvalidInvocation))?
-        {
+            .or(Err(InvocationError::InvalidInvocation))?;
+
+        /* Make sure we only recieve capabilities if we are expected to for a particular invocation*/
+        if !label.can_contain_wrapped_cap() && *consumed_recv_slot {
+            return Err(InvocationError::InvalidArguments);
+        }
+
+        match label {
             SMOSInvocation::WindowCreate => {
                 Ok(SMOS_Invocation::WindowCreate(WindowCreate {
                     base_vaddr: f_msg(WindowCreateArgs::Base_Vaddr as u64)
