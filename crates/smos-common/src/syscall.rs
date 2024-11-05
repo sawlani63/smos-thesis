@@ -1,23 +1,20 @@
 use crate::args::*;
 use crate::channel::Channel;
 use crate::client_connection::*;
-use crate::connection::*;
 use crate::error::*;
 use crate::invocations::SMOSInvocation;
 use crate::local_handle::{
     ChannelAuthorityHandle, ConnRegistrationHandle, ConnectionHandle, HandleCap, HandleCapHandle,
-    HandleOrHandleCap, IRQRegistrationHandle, LocalHandle, ObjectHandle, ProcessHandle,
-    PublishHandle, ViewHandle, WindowHandle, WindowRegistrationHandle,
+    HandleOrHandleCap, IRQRegistrationHandle, LocalHandle, ObjectHandle, ProcessHandle, ViewHandle,
+    WindowHandle, WindowRegistrationHandle,
 };
 use crate::obj_attributes::ObjAttributes;
 use crate::returns::*;
 use crate::sddf::{QueueType, VirtType};
 use crate::server_connection::*;
 use crate::string::copy_terminated_rust_string_to_buffer;
-use core::marker::PhantomData;
 use core::slice;
-use sel4::cap::Endpoint;
-use sel4::{AbsoluteCPtr, IpcBuffer};
+use sel4::AbsoluteCPtr;
 use smos_cspace::SMOSUserCSpace;
 
 /*
@@ -78,7 +75,7 @@ pub trait RootServerInterface: ClientConnection {
         &self,
         publish_hndl: &LocalHandle<ConnectionHandle>,
         id: usize,
-    ) -> Result<(LocalHandle<ConnRegistrationHandle>), InvocationError> {
+    ) -> Result<LocalHandle<ConnRegistrationHandle>, InvocationError> {
         let mut msginfo = sel4::MessageInfoBuilder::default()
             .label(SMOSInvocation::ConnRegister as u64)
             .length(2)
@@ -203,7 +200,9 @@ pub trait RootServerInterface: ClientConnection {
             msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
-            cspace.delete(conn.ep().bits() as usize);
+            cspace
+                .delete(conn.ep().bits() as usize)
+                .expect("Failed to destroy endpoint cap");
             cspace.free_slot(conn.ep().bits() as usize);
             return Ok(());
         })
@@ -217,7 +216,7 @@ pub trait RootServerInterface: ClientConnection {
                 .length(1)
                 .build();
             msginfo = self.ep().call(msginfo);
-            try_unpack_error(msginfo.label(), ipc_buf.msg_regs());
+            try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
             return Ok(());
         })
     }
@@ -358,7 +357,9 @@ pub trait RootServerInterface: ClientConnection {
 
             match hndl {
                 HandleOrHandleCap::HandleCap(HandleCap { cptr, .. }) => {
-                    cspace.delete(cptr.path().bits() as usize);
+                    cspace
+                        .delete(cptr.path().bits() as usize)
+                        .expect("Failed to destroy window handle cap");
                     cspace.free_slot(cptr.path().bits() as usize);
                 }
                 _ => {}
@@ -381,8 +382,7 @@ pub trait RootServerInterface: ClientConnection {
             msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
-            if (msginfo.extra_caps() != 1 || msginfo.caps_unwrapped() != 0 || msginfo.length() != 1)
-            {
+            if msginfo.extra_caps() != 1 || msginfo.caps_unwrapped() != 0 || msginfo.length() != 1 {
                 return Err(InvocationError::ServerError);
             }
 
@@ -464,7 +464,7 @@ pub trait RootServerInterface: ClientConnection {
             msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
-            Ok(LocalHandle::new((ipc_buf.msg_regs()[0] as usize)))
+            Ok(LocalHandle::new(ipc_buf.msg_regs()[0] as usize))
         });
     }
 
@@ -489,7 +489,7 @@ pub trait RootServerInterface: ClientConnection {
             .label(SMOSInvocation::ProcExit as u64)
             .build();
 
-        sel4::with_ipc_buffer_mut(|ipc_buf| {
+        sel4::with_ipc_buffer_mut(|_ipc_buf| {
             // @alwin: error code?
             // ipc_buf.msg_regs_mut[0] = match err {
             // Some(x) => x as u64,
@@ -511,7 +511,7 @@ pub trait RootServerInterface: ClientConnection {
         return sel4::with_ipc_buffer_mut(|ipc_buf| {
             ipc_buf.msg_regs_mut()[0] = entry_point as u64;
             ipc_buf.msg_regs_mut()[1] = sp as u64;
-            let msginfo = self.ep().call(msginfo);
+            msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             Ok(())
@@ -533,7 +533,7 @@ pub trait RootServerInterface: ClientConnection {
             ipc_buf.set_recv_slot(ntfn_slot);
             ipc_buf.caps_or_badges_mut()[0] = channel_hndl_cap.cptr.path().bits();
 
-            let msginfo = self.ep().call(msginfo);
+            msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             assert!(msginfo.extra_caps() == 1 && msginfo.caps_unwrapped() == 0);
@@ -558,7 +558,7 @@ pub trait RootServerInterface: ClientConnection {
         return sel4::with_ipc_buffer_mut(|ipc_buf| {
             ipc_buf.set_recv_slot(channel_slot);
             ipc_buf.msg_regs_mut()[0] = publish_hndl.idx as u64;
-            let msginfo = self.ep().call(msginfo);
+            msginfo = self.ep().call(msginfo);
 
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
             assert!(msginfo.extra_caps() == 1 && msginfo.caps_unwrapped() == 0);
@@ -619,7 +619,7 @@ pub trait NonRootServerInterface: ClientConnection {
             .build();
 
         return sel4::with_ipc_buffer_mut(|ipc_buf| {
-            let msginfo = self.ep().call(msginfo);
+            msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
             self.set_buf(None);
             return Ok(());
@@ -662,7 +662,7 @@ pub trait ObjectServerInterface: ClientConnection {
                 ipc_buf.set_recv_slot(&return_cap.unwrap());
             }
 
-            let msginfo = self.ep().call(msginfo);
+            msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             if return_cap.is_some() {
@@ -706,7 +706,7 @@ pub trait ObjectServerInterface: ClientConnection {
                 ipc_buf.set_recv_slot(&return_cap.unwrap());
             }
 
-            let msginfo = self.ep().call(msginfo);
+            msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             if return_cap.is_some() {
@@ -772,7 +772,9 @@ pub trait ObjectServerInterface: ClientConnection {
 
             match hndl {
                 HandleOrHandleCap::HandleCap(HandleCap { cptr, .. }) => {
-                    cspace.delete(cptr.path().bits() as usize);
+                    cspace
+                        .delete(cptr.path().bits() as usize)
+                        .expect("Failed to destroy object handle cap");
                     cspace.free_slot(cptr.path().bits() as usize);
                 }
                 _ => {}
@@ -877,7 +879,7 @@ pub trait ObjectServerInterface: ClientConnection {
         return sel4::with_ipc_buffer_mut(|ipc_buf| {
             ipc_buf.msg_regs_mut()[0] = view.idx as u64;
 
-            let msginfo = self.ep().call(msginfo);
+            msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             return Ok(());
@@ -886,6 +888,7 @@ pub trait ObjectServerInterface: ClientConnection {
 }
 
 /* @alwin: This feels like it should not be in this crate, but I don't know how to pry it out yet */
+#[allow(non_camel_case_types)]
 pub trait sDDFInterface: ClientConnection {
     fn sddf_channel_register_bidirectional(
         &self,
@@ -923,7 +926,7 @@ pub trait sDDFInterface: ClientConnection {
         hndl_cap: HandleCap<ChannelAuthorityHandle>,
     ) -> Result<(), InvocationError> {
         let mut msginfo = sel4::MessageInfoBuilder::default()
-            .label(SMOSInvocation::sDDFChannelRegisterRecieveOnly as u64)
+            .label(SMOSInvocation::sDDFChannelRegisterReceiveOnly as u64)
             .extra_caps(1)
             .build();
 
@@ -953,12 +956,12 @@ pub trait sDDFInterface: ClientConnection {
             ipc_buf.msg_regs_mut()[0] = size as u64;
             ipc_buf.msg_regs_mut()[1] = kind.into();
             match obj_hndl_cap {
-                HandleOrHandleCap::Handle(x) => return Err(InvocationError::InvalidArguments),
+                HandleOrHandleCap::Handle(_) => return Err(InvocationError::InvalidArguments),
                 HandleOrHandleCap::HandleCap(x) => {
                     ipc_buf.caps_or_badges_mut()[0] = x.cptr.path().bits()
                 }
             }
-            let msginfo = self.ep().call(msginfo);
+            msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
 
             Ok(())
@@ -976,8 +979,7 @@ pub trait sDDFInterface: ClientConnection {
         return sel4::with_ipc_buffer_mut(|ipc_buf| {
             ipc_buf.set_recv_slot(slot);
 
-            let msginfo = self.ep().call(msginfo);
-
+            msginfo = self.ep().call(msginfo);
             try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
             assert!(
                 msginfo.length() == 0 && msginfo.extra_caps() == 1 && msginfo.caps_unwrapped() == 0
@@ -1000,7 +1002,7 @@ pub trait sDDFInterface: ClientConnection {
             return sel4::with_ipc_buffer_mut(|ipc_buf| {
                 ipc_buf.caps_or_badges_mut()[0] = hndl_cap.cptr.path().bits();
 
-                let msginfo = self.ep().call(msginfo);
+                msginfo = self.ep().call(msginfo);
 
                 try_unpack_error(msginfo.label(), ipc_buf.msg_regs())?;
                 Ok(())

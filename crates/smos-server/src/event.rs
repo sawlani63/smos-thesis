@@ -1,7 +1,6 @@
 use crate::error::handle_error;
 use crate::reply::{handle_reply, SMOSReply};
 use crate::syscalls::SMOS_Invocation;
-use alloc::vec::Vec;
 use sel4::MessageInfo;
 use smos_common::error::InvocationError;
 use smos_common::server_connection::ServerConnection;
@@ -82,7 +81,7 @@ pub fn decode_entry_type(badge: usize) -> EntryType {
     }
 
     let pid = badge & !(0x3 << EP_TYPE_SHIFT);
-    match ((badge >> EP_TYPE_SHIFT) & 0x1) {
+    match (badge >> EP_TYPE_SHIFT) & 0x1 {
         INVOCATION_VALUE => EntryType::Invocation(pid),
         FAULT_VALUE => EntryType::Fault(pid),
         _ => panic!("An unexpected endpoint capability was invoked!"),
@@ -113,7 +112,9 @@ pub fn smos_serv_decode_invocation<'a, T: ServerConnection>(
 
     if invocation.is_err() {
         if consumed_cap {
-            recv_slot.delete();
+            recv_slot
+                .delete()
+                .expect("Failed to delete capability in error case");
         }
         sel4::with_ipc_buffer_mut(|ipc_buf| {
             ipc_buf.set_recv_slot(&recv_slot);
@@ -132,7 +133,7 @@ pub fn smos_serv_cleanup(
     ret: Result<SMOSReply, InvocationError>,
 ) -> Option<MessageInfo> {
     if invocation.contains_cap() {
-        recv_slot.delete();
+        recv_slot.delete().expect("Failed to delete capability");
         sel4::with_ipc_buffer_mut(|ipc_buf| {
             ipc_buf.set_recv_slot(&recv_slot);
         });

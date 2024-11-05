@@ -60,8 +60,6 @@ fn BIT_INDEX(bit: usize) -> usize {
     bit % WORD_BITS
 }
 
-// @alwin: I had to do these to convince rust that the size of the bitfield was known at
-// compile time. It seems a bit evil? Maybe there is a better way
 #[macro_export]
 macro_rules! bitfield_type {
     ($size:expr) => {

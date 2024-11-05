@@ -1,5 +1,5 @@
 use crate::connection::*;
-use crate::cspace::{CSpace, CSpaceTrait};
+use crate::cspace::CSpace;
 use crate::dma::DMAPool;
 use crate::frame_table::FrameTable;
 use crate::handle::RootServerResource;
@@ -17,7 +17,6 @@ use crate::window::*;
 use crate::RSReplyWrapper;
 use smos_common::connection::RootServerConnection;
 use smos_common::error::InvocationError;
-use smos_common::local_handle;
 use smos_common::local_handle::LocalHandle;
 use smos_server::handle::{HandleAllocater, ServerHandle};
 use smos_server::handle_capability::HandleCapabilityTable;
@@ -71,7 +70,6 @@ pub fn handle_syscall(
        changed by an access to the frame table
     */
     let shared_buf = unsafe { &(*frame_table.frame_data_raw(p.shared_buffer.1)) };
-    let mut no_response: bool = false;
 
     let (invocation, consumed_cap) = sel4::with_ipc_buffer(|buf| {
         SMOS_Invocation::new::<RootServerConnection>(buf, &msg, Some(shared_buf), recv_slot)
@@ -80,7 +78,7 @@ pub fn handle_syscall(
     // The user provided an invalid argument
     if invocation.is_err() {
         if consumed_cap {
-            recv_slot.delete();
+            recv_slot.delete().expect("Failed to delete consumed cap");
         }
         return Some(sel4::with_ipc_buffer_mut(|buf| {
             handle_error(buf, invocation.unwrap_err())
@@ -135,8 +133,10 @@ pub fn handle_syscall(
                 Some(x) => x,
                 None => {
                     /* @alwin: how can this be done more cleanly? */
-                    if (consumed_cap) {
-                        recv_slot.delete();
+                    if consumed_cap {
+                        recv_slot
+                            .delete()
+                            .expect("Failed to delete consumed capability");
                     }
                     return None;
                 }
@@ -146,8 +146,10 @@ pub fn handle_syscall(
             handle_process_exit(cspace, ut_table, frame_table, handle_cap_table, &mut p);
 
             /* @alwin: how can this be done more cleanly? */
-            if (consumed_cap) {
-                recv_slot.delete();
+            if consumed_cap {
+                recv_slot
+                    .delete()
+                    .expect("Failed to delete consumed capability");
             }
 
             return None;
@@ -158,8 +160,10 @@ pub fn handle_syscall(
     // Have to be careful here, make sure this is always before the next bit or the ipc buffer of
     // the response will become corrupted
     // @alwin: I'm pretty sure there is never any reason for the root server to recieve capabilities
-    if (consumed_cap) {
-        recv_slot.delete();
+    if consumed_cap {
+        recv_slot
+            .delete()
+            .expect("Failed to delete consumed capability");
     }
 
     let msginfo = match ret {

@@ -3,7 +3,7 @@ use crate::cspace::{CSpace, CSpaceTrait};
 use crate::frame_table::FrameTable;
 use crate::handle::RootServerResource;
 use crate::irq::UserNotificationDispatch;
-use crate::object::{AnonymousMemoryObject, OBJ_LVL_MAX};
+use crate::object::AnonymousMemoryObject;
 use crate::page::PAGE_SIZE_4K;
 use crate::proc::{procs_get, ProcessType, UserProcess};
 use crate::ut::{UTTable, UTWrapper};
@@ -13,20 +13,17 @@ use crate::window::Window;
 use alloc::collections::btree_map::BTreeMap;
 use alloc::rc::Rc;
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use smos_common::error::InvocationError;
 use smos_common::local_handle::{HandleCap, LocalHandle};
 use smos_common::obj_attributes::ObjAttributes;
-use smos_common::util::BIT;
 use smos_server::event::{INVOCATION_EP_BITS, IRQ_IDENT_BADGE_BITS, NTFN_BIT};
 use smos_server::handle::HandleAllocater;
 use smos_server::handle::ServerHandle;
 use smos_server::handle_capability::HandleCapabilityTable;
 use smos_server::ntfn_buffer::{
     enqueue_ntfn_buffer_msg, init_ntfn_buffer, ConnDestroyNotification, NotificationType,
-    NtfnBufferData,
 };
 use smos_server::reply::SMOSReply;
 use smos_server::syscalls::{
@@ -39,6 +36,7 @@ pub struct Server {
     pid: usize,
     pub unbadged_ep: (sel4::cap::Endpoint, UTWrapper),
     pub ntfn_dispatch: UserNotificationDispatch,
+    #[allow(dead_code)] // @alwin: Not used for now
     ntfn_buffer_view: Rc<RefCell<View>>,
     pub ntfn_buffer_addr: *mut u8, //@alwin: I am unsure if this is the best way to appraoch this, but having something with a lifetime in here is extremely painful
     pub connections: Vec<Rc<RefCell<Connection>>>,
@@ -47,19 +45,17 @@ pub struct Server {
 #[derive(Clone, Debug)]
 pub struct Connection {
     id: usize,
+    #[allow(dead_code)] // @alwin: Not used for now
     client: Rc<RefCell<ProcessType>>, // @alwin: Not 100% sure if this is needed yet
     server: Rc<RefCell<Server>>,
     badged_ep: sel4::cap::Endpoint,
     registered: bool,
 }
 
-const MAX_SERVERS: usize = 10;
-
-const ARRAY_REPEAT_VALUE: Option<Rc<RefCell<Server>>> = None;
-static mut servers: BTreeMap<String, Rc<RefCell<Server>>> = BTreeMap::new();
+static mut SERVERS: BTreeMap<String, Rc<RefCell<Server>>> = BTreeMap::new();
 
 fn find_server_with_name(name: &str) -> Option<Rc<RefCell<Server>>> {
-    unsafe { Some(servers.get(name)?.clone()) }
+    unsafe { Some(SERVERS.get(name)?.clone()) }
 }
 
 pub fn handle_conn_register(
@@ -109,7 +105,8 @@ pub fn handle_conn_deregister(
     }?;
 
     conn.borrow_mut().registered = false;
-    p.cleanup_handle(args.hndl.idx);
+    p.cleanup_handle(args.hndl.idx)
+        .expect("Failed to clean up handle");
 
     return Ok(SMOSReply::ConnDeregister);
 }
@@ -188,7 +185,8 @@ pub fn handle_conn_destroy(
     cspace
         .root_cnode()
         .relative(conn.borrow().badged_ep)
-        .revoke();
+        .revoke()
+        .expect("Failed to revoke badged endpoint");
 
     /* Forward the connection destroyed notification if necessary */
     if conn.borrow().registered {
@@ -196,7 +194,10 @@ pub fn handle_conn_destroy(
             conn_id: conn.borrow().id,
         });
 
-        unsafe { enqueue_ntfn_buffer_msg(conn.borrow().server.borrow().ntfn_buffer_addr, msg) };
+        unsafe {
+            enqueue_ntfn_buffer_msg(conn.borrow().server.borrow().ntfn_buffer_addr, msg)
+                .expect("@alwin: This probably shouldn't be an expect")
+        };
 
         conn.borrow()
             .server
@@ -206,7 +207,8 @@ pub fn handle_conn_destroy(
             .signal();
     }
 
-    p.cleanup_handle(args.hndl.idx);
+    p.cleanup_handle(args.hndl.idx)
+        .expect("Failed to clean up handle");
 
     return Ok(SMOSReply::ConnDestroy);
 }
@@ -243,7 +245,9 @@ pub fn handle_server_handle_cap_create(
 
     /* Put a handle to this server-created handle cap in the handle table */
     let (idx, handle_ref) = p.allocate_handle().map_err(|e| {
-        cspace.delete_cap(badged_cap);
+        cspace
+            .delete_cap(badged_cap)
+            .expect("Failed to delete badged capability");
         cspace.free_cap(badged_cap);
         e
     })?;
@@ -289,7 +293,7 @@ pub fn handle_server_create_channel(
 }
 
 pub fn handle_channel_open(
-    p: &mut UserProcess,
+    _p: &mut UserProcess,
     handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
     args: &ChannelOpen,
 ) -> Result<SMOSReply, InvocationError> {
@@ -323,12 +327,12 @@ pub fn handle_conn_publish(
     }
 
     /* Check that we can create a window at the specified address */
-    if (args.ntfn_buffer % PAGE_SIZE_4K != 0) {
+    if args.ntfn_buffer % PAGE_SIZE_4K != 0 {
         return Err(InvocationError::AlignmentError { which_arg: 0 });
     }
 
     /* Check notification buffer is in user-addressable memory */
-    if (args.ntfn_buffer >= sel4_sys::seL4_UserTop.try_into().unwrap()) {
+    if args.ntfn_buffer >= sel4_sys::seL4_UserTop.try_into().unwrap() {
         return Err(InvocationError::InvalidArguments);
     }
 
@@ -367,7 +371,10 @@ pub fn handle_conn_publish(
 
     /* Create a badged notification cap that the RS uses to communicate with the server */
     ntfn_dispatch.ntfn_register(cspace).map_err(|_| {
-        p.tcb.0.tcb_unbind_notification();
+        p.tcb
+            .0
+            .tcb_unbind_notification()
+            .expect("Failed to unbind notification");
         dealloc_retyped(cspace, ut_table, ntfn);
         dealloc_retyped(cspace, ut_table, ep);
         InvocationError::InsufficientResources
@@ -376,7 +383,10 @@ pub fn handle_conn_publish(
     /* Pre-allocate the frame used for the notification buffer */
     let frame_ref = frame_table.alloc_frame(cspace, ut_table).ok_or_else(|| {
         ntfn_dispatch.destroy(cspace, ut_table);
-        p.tcb.0.tcb_unbind_notification();
+        p.tcb
+            .0
+            .tcb_unbind_notification()
+            .expect("Failed to unbind notification");
         dealloc_retyped(cspace, ut_table, ep);
         dealloc_retyped(cspace, ut_table, ntfn);
         InvocationError::InsufficientResources
@@ -409,7 +419,8 @@ pub fn handle_conn_publish(
     object.borrow_mut().associated_views.push(view.clone());
     object
         .borrow_mut()
-        .insert_frame_at(0, (orig_frame_cap, frame_ref));
+        .insert_frame_at(0, (orig_frame_cap, frame_ref))
+        .expect("Failed to insert frame into object");
 
     p.add_window_unchecked(window);
     p.views.push(view.clone());
@@ -434,7 +445,7 @@ pub fn handle_conn_publish(
     }));
 
     /* Put the server into the handle table and the server hashmap  */
-    unsafe { servers.insert(args.name.to_string(), server.clone()) };
+    unsafe { SERVERS.insert(args.name.to_string(), server.clone()) };
     *handle_ref = Some(ServerHandle::new(RootServerResource::Server(server)));
 
     return Ok(SMOSReply::ConnPublish {

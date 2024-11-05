@@ -4,7 +4,7 @@ use crate::bootstrap::INITIAL_TASK_CNODE_SIZE_BITS;
 use crate::page::{BYTES_TO_4K_PAGES, PAGE_SIZE_4K};
 use crate::ut::{UTTable, UTWrapper};
 use crate::util::{alloc_retype, MASK};
-use crate::{log_rs, warn_rs};
+use crate::warn_rs;
 use alloc::boxed::Box;
 use bitfield::{bf_clr_bit, bf_first_free, bf_set_bit, bitfield_init, bitfield_type};
 use core::mem::size_of;
@@ -41,6 +41,7 @@ pub const BOT_LVL_PER_NODE: usize = (PAGE_SIZE_4K - sel4::WORD_SIZE * 3) / size_
 #[derive(Copy, Clone)]
 pub struct BotLvlT {
     pub bf: bitfield_type!(CNODE_SLOTS(CNODE_SIZE_BITS)),
+    #[allow(dead_code)] // @alwin: This should hopefully be removed later
     untyped: UTWrapper,
 }
 
@@ -199,6 +200,7 @@ pub struct BotLvlNodeT {
     pub cnodes: [BotLvlT; BOT_LVL_PER_NODE],
 }
 
+#[allow(dead_code)] //@alwin: This was in the C impl, might not be needed here
 struct CSpaceAlloc {
     map_frame: fn(
         usize,
@@ -275,7 +277,7 @@ impl UserCSpace {
         } else {
             None
         };
-        let mut untyped = alloc_retype::<sel4::cap_type::CNode>(
+        let untyped = alloc_retype::<sel4::cap_type::CNode>(
             bootstrap,
             ut_table,
             ObjectBlueprint::CNode {
@@ -300,13 +302,15 @@ impl UserCSpace {
                 &bootstrap.root_cnode.relative(untyped.0),
                 sel4::CapRightsBuilder::all().build(),
                 guard.into_word(),
-            );
+            )
+            .expect("Failed to mint root cnode cap");
 
-        bootstrap.delete(untyped.0.bits().try_into().unwrap());
+        bootstrap
+            .delete(untyped.0.bits().try_into().unwrap())
+            .expect("Failed to delete untyped");
         bootstrap.free_slot(untyped.0.bits().try_into().unwrap());
 
-        let bot_lvl_node = 0;
-        if (two_lvl) {
+        if two_lvl {
             todo!();
         }
 
@@ -334,12 +338,17 @@ impl UserCSpace {
         for i in 1..BIT(CNODE_SIZE_BITS) {
             self.root_cnode
                 .relative_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE)
-                .delete();
+                .delete()
+                .expect("Failed to delete cap");
         }
 
         ut_table.free(self.untyped);
 
-        bootstrap.root_cnode().relative(self.root_cnode).delete();
+        bootstrap
+            .root_cnode()
+            .relative(self.root_cnode)
+            .delete()
+            .expect("Failed to delete root cnode");
     }
 }
 
@@ -404,7 +413,7 @@ impl<'a> CSpace<'a> {
         two_level: bool,
         top_lvl_size_bits: usize,
         bot_lvl_nodes: &'a mut [*mut BotLvlNodeT],
-        bootstrap: Option<&'a CSpace<'a>>,
+        _bootstrap: Option<&'a CSpace<'a>>,
         /* alloc : CSpaceAlloc */
     ) -> Self {
         return CSpace {
@@ -467,12 +476,9 @@ impl<'a> CSpace<'a> {
         let irq_handler =
             sel4::CPtr::from_bits(cptr.try_into().unwrap()).cast::<sel4::cap_type::IrqHandler>();
 
-        // Determine if the IRQ corresponds to a PPI or SPI
-        // https://developer.arm.com/documentation/den0024/a/AArch64-Exception-Handling/The-Generic-Interrupt-Controller
-        // @alwin: Edge triggered is expected to be a word instead of a bool for some reason. Submit a PR
-        // to rust-sel4 to fix this
         if irq >= 16 && irq < 32 {
-            self.irq_control_get_ppi(irq_control, irq, edge_triggered, irq_handler);
+            self.irq_control_get_ppi(irq_control, irq, edge_triggered, irq_handler)
+                .expect("@alwin: Should this be an assert?");
         } else if irq >= 32 && irq < 1021 {
             irq_control
                 .irq_control_get_trigger(

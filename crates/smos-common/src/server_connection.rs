@@ -38,9 +38,10 @@ const NON_ROOT_SERVER_INVOCATIONS: [SMOSInvocation; 2] =
     [SMOSInvocation::ConnOpen, SMOSInvocation::ConnClose];
 
 //@alwin: This should not be here
+#[allow(non_upper_case_globals)]
 const sDDF_INVOCATIONS: [SMOSInvocation; 5] = [
     SMOSInvocation::sDDFChannelRegisterBidirectional,
-    SMOSInvocation::sDDFChannelRegisterRecieveOnly,
+    SMOSInvocation::sDDFChannelRegisterReceiveOnly,
     SMOSInvocation::sDDFQueueRegister,
     SMOSInvocation::sDDFGetDataRegion,
     SMOSInvocation::sDDFProvideDataRegion,

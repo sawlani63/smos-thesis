@@ -110,7 +110,8 @@ pub fn try_unpack_error(label: u64, ipc_buf: &[sel4::Word]) -> Result<(), Invoca
             actual: ipc_buf[usize::from(NotEnoughCapsMessage::Actual)] as usize,
         }),
         InvocationErrorLabel::InvalidType => {
-            Err(InvocationError::InvalidType { which_arg: todo!() })
+            todo!();
+            // Err(InvocationError::InvalidType { which_arg: todo!() })
         }
         InvocationErrorLabel::CSpaceFull => Err(InvocationError::CSpaceFull),
         InvocationErrorLabel::UnsupportedInvocation => {

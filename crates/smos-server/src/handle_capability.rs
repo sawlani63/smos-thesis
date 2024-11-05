@@ -1,7 +1,5 @@
 use crate::handle::{HandleInner, ServerHandle};
-use alloc::rc::Rc;
 use alloc::vec::Vec;
-use core::cell::RefCell;
 use smos_common::error::InvocationError;
 
 pub struct HandleCapability<T: HandleInner> {
@@ -30,7 +28,7 @@ impl<T: HandleInner> HandleCapabilityTable<T> {
         InvocationError,
     > {
         for (i, handle_cap) in self.slots.iter_mut().enumerate() {
-            if (handle_cap.handle.is_none()) {
+            if handle_cap.handle.is_none() {
                 return Ok((i, &mut handle_cap.handle, handle_cap.root_cap));
             }
         }
@@ -53,7 +51,11 @@ impl<T: HandleInner> HandleCapabilityTable<T> {
 
         // @alwin: Should probs not be an assert
         assert!(self.slots[idx].root_cap.is_some());
-        self.slots[idx].root_cap.unwrap().revoke();
+        self.slots[idx]
+            .root_cap
+            .unwrap()
+            .revoke()
+            .expect("Failed to revoke handle capability");
         self.slots[idx].handle = None;
         return Ok(());
     }

@@ -8,6 +8,7 @@ use smos_common::obj_attributes::ObjAttributes;
 use smos_common::syscall::{ObjectServerInterface, RootServerInterface};
 use smos_cspace::SMOSUserCSpace;
 
+#[allow(non_camel_case_types)]
 pub trait sDDFQueueType {}
 
 #[derive(Debug, Copy, Clone)]

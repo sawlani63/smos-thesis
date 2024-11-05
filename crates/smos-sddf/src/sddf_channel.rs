@@ -2,11 +2,12 @@ use sel4::MessageInfo;
 
 use crate::irq_channel::IrqChannel;
 use crate::notification_channel::{
-    BidirectionalChannel, NotificationChannel, NotificationChannelType, PPCAllowed, PPCForbidden,
-    PPCType, RecieveOnlyChannel, SendOnlyChannel,
+    BidirectionalChannel, NotificationChannel, PPCAllowed, PPCForbidden, RecieveOnlyChannel,
+    SendOnlyChannel,
 };
 
 #[derive(Debug, Copy, Clone)]
+#[allow(non_camel_case_types)]
 pub enum sDDFChannel {
     IrqChannel(IrqChannel),
     NotificationChannelBi(NotificationChannel<BidirectionalChannel, PPCForbidden>),
@@ -24,7 +25,7 @@ impl sDDFChannel {
 
     pub fn notify(&self) {
         match self {
-            sDDFChannel::IrqChannel(ic) => panic!("Cannot notify an irq channel"),
+            sDDFChannel::IrqChannel(_) => panic!("Cannot notify an irq channel"),
             sDDFChannel::NotificationChannelBi(nc) => nc.notify(),
             sDDFChannel::NotificationChannelSend(nc) => nc.notify(),
             sDDFChannel::NotificationChannelRecvPPC(_) => {

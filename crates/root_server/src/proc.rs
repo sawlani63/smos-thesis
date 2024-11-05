@@ -1,10 +1,9 @@
-use crate::connection::{Connection, Server};
 use crate::cspace::{CSpace, CSpaceTrait, UserCSpace};
 use crate::elf_load::load_elf;
 use crate::frame_table::{FrameRef, FrameTable};
 use crate::handle::RootServerResource;
 use crate::mapping::map_frame;
-use crate::object::{handle_obj_destroy_internal, AnonymousMemoryObject, OBJ_LVL_MAX};
+use crate::object::{handle_obj_destroy_internal, AnonymousMemoryObject};
 use crate::page::PAGE_SIZE_4K;
 use crate::ut::{UTTable, UTWrapper};
 use crate::util::{alloc_retype, dealloc_retyped};
@@ -14,7 +13,6 @@ use crate::window::handle_window_destroy_internal;
 use crate::window::Window;
 use crate::RSReplyWrapper;
 use alloc::rc::Rc;
-use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use byteorder::{ByteOrder, LittleEndian};
@@ -24,20 +22,17 @@ use smos_common::error::InvocationError;
 use smos_common::local_handle;
 use smos_common::obj_attributes::ObjAttributes;
 use smos_common::string::copy_terminated_rust_string_to_buffer;
-use smos_common::util::BIT;
-use smos_common::util::{ROUND_DOWN, ROUND_UP};
+use smos_common::util::ROUND_UP;
 use smos_server::event::{FAULT_EP_BITS, INVOCATION_EP_BITS};
-use smos_server::handle::{HandleAllocater, HandleInner, ServerHandle};
-use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
+use smos_server::handle::{HandleAllocater, ServerHandle};
 use smos_server::handle_capability::HandleCapabilityTable;
 use smos_server::reply::{handle_reply, SMOSReply};
-use smos_server::syscalls::{LoadComplete, ObjDestroy, ProcessSpawn, ProcessWait, WindowDestroy};
+use smos_server::syscalls::{LoadComplete, ProcessSpawn, ProcessWait};
 
 const LOADER_CONTENTS: &[u8] = include_bytes!(env!("LOADER_ELF"));
 
 // @alwin: This should probably be unbounded
 const MAX_PROCS: usize = 64;
-pub const MAX_PID: usize = 1024;
 const MAX_HANDLES: usize = 256;
 
 #[derive(Debug)]
@@ -49,31 +44,31 @@ pub enum ProcessType {
 }
 
 const ARRAY_REPEAT_VALUE: Option<Rc<RefCell<ProcessType>>> = None;
-static mut procs: [Option<Rc<RefCell<ProcessType>>>; MAX_PROCS] = [ARRAY_REPEAT_VALUE; MAX_PROCS];
+static mut PROCS: [Option<Rc<RefCell<ProcessType>>>; MAX_PROCS] = [ARRAY_REPEAT_VALUE; MAX_PROCS];
 
 pub fn procs_get(i: usize) -> &'static Option<Rc<RefCell<ProcessType>>> {
     unsafe {
-        assert!(i < procs.len());
-        return &procs[i];
+        assert!(i < PROCS.len());
+        return &PROCS[i];
     }
 }
 
 pub fn procs_get_mut(i: usize) -> &'static mut Option<Rc<RefCell<ProcessType>>> {
     unsafe {
-        assert!(i < procs.len());
-        return &mut procs[i];
+        assert!(i < PROCS.len());
+        return &mut PROCS[i];
     }
 }
 
 pub fn procs_set(i: usize, proc: Option<Rc<RefCell<ProcessType>>>) {
     unsafe {
-        assert!(i < procs.len());
-        procs[i] = proc;
+        assert!(i < PROCS.len());
+        PROCS[i] = proc;
     }
 }
 
 pub fn find_free_proc() -> Option<usize> {
-    for i in 0..(unsafe { procs.len() }) {
+    for i in 0..(unsafe { PROCS.len() }) {
         if procs_get(i).is_none() {
             return Some(i);
         }
@@ -92,7 +87,7 @@ pub struct UserProcess {
     sched_context: (sel4::cap::SchedContext, UTWrapper),
     cspace: UserCSpace,
     fault_ep: sel4::cap::Endpoint,
-    handle_table: [Option<ServerHandle<RootServerResource>>; 256],
+    handle_table: [Option<ServerHandle<RootServerResource>>; MAX_HANDLES],
     pub created_handle_caps: Vec<usize>, // @alwin: this is a temporary hack, but doing it as Vec<HandleCapability> completely screws up the generic handle abstraction I have
     initial_windows: Vec<Rc<RefCell<Window>>>,
     windows: Vec<Rc<RefCell<Window>>>,
@@ -151,7 +146,7 @@ impl UserProcess {
         cspace: &mut CSpace,
         ut_table: &mut UTTable,
         frame_table: &mut FrameTable,
-        handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
+        _handle_cap_table: &mut HandleCapabilityTable<RootServerResource>,
     ) {
         /* Clean up the handle table */
         for handle in &self.handle_table {
@@ -166,31 +161,31 @@ impl UserProcess {
                 RootServerResource::Object(obj) => {
                     handle_obj_destroy_internal(cspace, frame_table, obj.clone(), true);
                 }
-                RootServerResource::ConnRegistration(cr) => {
+                RootServerResource::ConnRegistration(_) => {
                     todo!()
                 }
-                RootServerResource::WindowRegistration(wr) => {
+                RootServerResource::WindowRegistration(_) => {
                     todo!()
                 }
                 RootServerResource::View(view) => {
                     handle_unview_internal(cspace, view.clone());
                 }
-                RootServerResource::Connection(conn) => {
+                RootServerResource::Connection(_) => {
                     todo!()
                 }
-                RootServerResource::Server(srv) => {
+                RootServerResource::Server(_) => {
                     todo!()
                 }
-                RootServerResource::Process(proc) => {
+                RootServerResource::Process(_) => {
                     todo!()
                 }
-                RootServerResource::Reply(rply) => {
+                RootServerResource::Reply(_) => {
                     todo!()
                 }
-                RootServerResource::HandleCap(hc) => {
+                RootServerResource::HandleCap(_) => {
                     todo!()
                 }
-                RootServerResource::IRQRegistration(irq_reg) => {
+                RootServerResource::IRQRegistration(_) => {
                     todo!()
                 }
                 RootServerResource::ChannelAuthority(_) => {
@@ -210,14 +205,20 @@ impl UserProcess {
         dealloc_retyped(cspace, ut_table, self.vspace);
 
         /* @alwin: Should this just be a window/view/obj */
-        cspace.delete_cap(self.ipc_buffer.0);
+        cspace
+            .delete_cap(self.ipc_buffer.0)
+            .expect("Failed to delete IPC buffer");
         frame_table.free_frame(self.ipc_buffer.1);
 
         /* @alwin: Should this just be a window/view/obj */
-        cspace.delete_cap(self.shared_buffer.0);
+        cspace
+            .delete_cap(self.shared_buffer.0)
+            .expect("Failed to delete shared buffer");
         frame_table.free_frame(self.shared_buffer.1);
 
-        cspace.delete_cap(self.fault_ep);
+        cspace
+            .delete_cap(self.fault_ep)
+            .expect("Failed to delete fault endpoint");
 
         self.cspace.destroy(cspace, ut_table);
     }
@@ -429,7 +430,8 @@ impl UserProcess {
         copy_terminated_rust_string_to_buffer(
             &mut frame_data[offset_page..offset_page + string_len_with_null],
             string,
-        );
+        )
+        .expect("Failed to write string to stack");
     }
 
     fn write_words_to_stack(
@@ -507,21 +509,20 @@ fn init_process_stack(
     cspace: &mut CSpace,
     ut_table: &mut UTTable,
     frame_table: &mut FrameTable,
-    vspace: sel4::cap::VSpace,
 ) -> Result<(usize, Rc<RefCell<Window>>), sel4::Error> {
-    let mut window = Rc::new(RefCell::new(Window {
+    let window = Rc::new(RefCell::new(Window {
         start: vmem_layout::PROCESS_STACK_TOP - vmem_layout::STACK_PAGES * PAGE_SIZE_4K,
         size: vmem_layout::STACK_PAGES * PAGE_SIZE_4K,
         bound_view: None,
     }));
 
-    let mut object = Rc::new(RefCell::new(AnonymousMemoryObject::new(
+    let object = Rc::new(RefCell::new(AnonymousMemoryObject::new(
         vmem_layout::STACK_PAGES * PAGE_SIZE_4K,
         sel4::CapRights::all(),
         ObjAttributes::DEFAULT,
     )));
 
-    let mut view = Rc::new(RefCell::new(View::new(
+    let view = Rc::new(RefCell::new(View::new(
         window.clone(),
         Some(object.clone()),
         None,
@@ -542,18 +543,25 @@ fn init_process_stack(
         let orig_frame_cap = frame_table.frame_from_ref(frame_ref).get_cap();
         object
             .borrow_mut()
-            .insert_frame_at(i * PAGE_SIZE_4K, (orig_frame_cap, frame_ref));
+            .insert_frame_at(i * PAGE_SIZE_4K, (orig_frame_cap, frame_ref))
+            .expect("Failed to insert frame into object");
 
         let loadee_frame = sel4::CPtr::from_bits(cspace.alloc_slot()?.try_into().unwrap())
             .cast::<sel4::cap_type::UnspecifiedFrame>();
-        cspace.root_cnode().relative(loadee_frame).copy(
-            &cspace
-                .root_cnode()
-                .relative(frame_table.frame_from_ref(frame_ref).get_cap()),
-            sel4::CapRightsBuilder::all().build(),
-        );
+
+        cspace
+            .root_cnode()
+            .relative(loadee_frame)
+            .copy(
+                &cspace
+                    .root_cnode()
+                    .relative(frame_table.frame_from_ref(frame_ref).get_cap()),
+                sel4::CapRightsBuilder::all().build(),
+            )
+            .expect("Failed to copy frame");
         view.borrow_mut()
-            .insert_cap_at(i * PAGE_SIZE_4K, loadee_frame.cast());
+            .insert_cap_at(i * PAGE_SIZE_4K, loadee_frame.cast())
+            .expect("Failed to insert frame into view");
     }
 
     return Ok((vmem_layout::PROCESS_STACK_TOP, window));
@@ -577,7 +585,7 @@ pub fn start_process(
     let pos = find_free_proc().ok_or(sel4::Error::NotEnoughMemory)?;
 
     /* Create a VSpace */
-    let mut vspace = alloc_retype::<sel4::cap_type::VSpace>(
+    let vspace = alloc_retype::<sel4::cap_type::VSpace>(
         cspace,
         ut_table,
         sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SeL4Arch(
@@ -634,14 +642,14 @@ pub fn start_process(
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
             e
-        });
+        })?;
     let ipc_buffer = (ipc_buffer_cap, ipc_buffer_ref);
 
     /* allocate a new slot in the target cspace which we will mint a badged endpoint cap into --
      * the badge is used to identify the process */
     let proc_ep = proc_cspace.alloc_slot().map_err(|e| {
         err_rs!("Failed to allocate slot for user endpoint cap");
-        cspace.delete(ipc_buffer_slot);
+        cspace.delete(ipc_buffer_slot).unwrap();
         cspace.free_slot(ipc_buffer_slot);
         frame_table.free_frame(ipc_buffer_ref);
         dealloc_retyped(cspace, ut_table, vspace);
@@ -662,7 +670,7 @@ pub fn start_process(
         .map_err(|e| {
             err_rs!("Failed to mint user endpoint cap");
             proc_cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
@@ -672,9 +680,9 @@ pub fn start_process(
     /* Allocate a slot for a self-referential cspace cap */
     let proc_self_cspace = proc_cspace.alloc_slot().map_err(|e| {
         err_rs!("Failed to allocate slot for self-referential cap");
-        proc_cspace.delete(proc_ep);
+        proc_cspace.delete(proc_ep).unwrap();
         cspace.free_slot(proc_ep);
-        cspace.delete(ipc_buffer_slot);
+        cspace.delete(ipc_buffer_slot).unwrap();
         cspace.free_slot(ipc_buffer_slot);
         frame_table.free_frame(ipc_buffer_ref);
         dealloc_retyped(cspace, ut_table, vspace);
@@ -694,9 +702,9 @@ pub fn start_process(
         .map_err(|e| {
             err_rs!("Failed to copy self-refernetial cnode cap");
             proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
+            proc_cspace.delete(proc_ep).unwrap();
             cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
@@ -704,14 +712,14 @@ pub fn start_process(
         })?;
 
     /* Create a new TCB object */
-    let mut tcb = alloc_retype::<sel4::cap_type::Tcb>(cspace, ut_table, sel4::ObjectBlueprint::Tcb)
+    let tcb = alloc_retype::<sel4::cap_type::Tcb>(cspace, ut_table, sel4::ObjectBlueprint::Tcb)
         .map_err(|e| {
             err_rs!("Failed to allocate new TCB object");
-            proc_cspace.delete(proc_self_cspace);
+            proc_cspace.delete(proc_self_cspace).unwrap();
             proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
+            proc_cspace.delete(proc_ep).unwrap();
             cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
@@ -731,11 +739,11 @@ pub fn start_process(
         .map_err(|e| {
             err_rs!("Failed to configure TCB");
             dealloc_retyped(cspace, ut_table, tcb);
-            proc_cspace.delete(proc_self_cspace);
+            proc_cspace.delete(proc_self_cspace).unwrap();
             proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
+            proc_cspace.delete(proc_ep).unwrap();
             cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
@@ -743,7 +751,7 @@ pub fn start_process(
         })?;
 
     /* Create scheduling context */
-    let mut sched_context = alloc_retype::<sel4::cap_type::SchedContext>(
+    let sched_context = alloc_retype::<sel4::cap_type::SchedContext>(
         cspace,
         ut_table,
         sel4::ObjectBlueprint::SchedContext {
@@ -753,11 +761,11 @@ pub fn start_process(
     .map_err(|e| {
         err_rs!("Failed to create scheduling context");
         dealloc_retyped(cspace, ut_table, tcb);
-        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.delete(proc_self_cspace).unwrap();
         proc_cspace.free_slot(proc_self_cspace);
-        proc_cspace.delete(proc_ep);
+        proc_cspace.delete(proc_ep).unwrap();
         cspace.free_slot(proc_ep);
-        cspace.delete(ipc_buffer_slot);
+        cspace.delete(ipc_buffer_slot).unwrap();
         cspace.free_slot(ipc_buffer_slot);
         frame_table.free_frame(ipc_buffer_ref);
         dealloc_retyped(cspace, ut_table, vspace);
@@ -770,11 +778,11 @@ pub fn start_process(
         .map_err(|e| {
             err_rs!("Failed to configure scheduling context");
             dealloc_retyped(cspace, ut_table, tcb);
-            proc_cspace.delete(proc_self_cspace);
+            proc_cspace.delete(proc_self_cspace).unwrap();
             proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
+            proc_cspace.delete(proc_ep).unwrap();
             cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
@@ -787,11 +795,11 @@ pub fn start_process(
         .map_err(|e| {
             err_rs!("Failed to allocate slot for fault endpoint");
             dealloc_retyped(cspace, ut_table, tcb);
-            proc_cspace.delete(proc_self_cspace);
+            proc_cspace.delete(proc_self_cspace).unwrap();
             proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
+            proc_cspace.delete(proc_ep).unwrap();
             cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
@@ -811,11 +819,11 @@ pub fn start_process(
             err_rs!("Failed to mint badged fault endpoint");
             cspace.free_cap(fault_ep);
             dealloc_retyped(cspace, ut_table, tcb);
-            proc_cspace.delete(proc_self_cspace);
+            proc_cspace.delete(proc_self_cspace).unwrap();
             proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
+            proc_cspace.delete(proc_ep).unwrap();
             cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
@@ -833,19 +841,19 @@ pub fn start_process(
         )
         .map_err(|e| {
             err_rs!("Failed to sceduling parameters");
-            cspace.delete_cap(fault_ep);
+            cspace.delete_cap(fault_ep).unwrap();
             cspace.free_cap(fault_ep);
             dealloc_retyped(cspace, ut_table, tcb);
-            proc_cspace.delete(proc_self_cspace);
+            proc_cspace.delete(proc_self_cspace).unwrap();
             proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
+            proc_cspace.delete(proc_ep).unwrap();
             cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
             e
-        });
+        })?;
 
     tcb.0.debug_name(name.as_bytes());
 
@@ -855,14 +863,14 @@ pub fn start_process(
         .or(Err(sel4::Error::InvalidArgument))
         .map_err(|e| {
             err_rs!("Failed to parse ELF file");
-            cspace.delete_cap(fault_ep);
+            cspace.delete_cap(fault_ep).unwrap();
             cspace.free_cap(fault_ep);
             dealloc_retyped(cspace, ut_table, tcb);
-            proc_cspace.delete(proc_self_cspace);
+            proc_cspace.delete(proc_self_cspace).unwrap();
             proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
+            proc_cspace.delete(proc_ep).unwrap();
             cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
@@ -873,14 +881,14 @@ pub fn start_process(
     let mut initial_windows =
         load_elf(cspace, ut_table, frame_table, vspace.0, &elf).map_err(|e| {
             err_rs!("Failed to load ELF file");
-            cspace.delete_cap(fault_ep);
+            cspace.delete_cap(fault_ep).unwrap();
             cspace.free_cap(fault_ep);
             dealloc_retyped(cspace, ut_table, tcb);
-            proc_cspace.delete(proc_self_cspace);
+            proc_cspace.delete(proc_self_cspace).unwrap();
             proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
+            proc_cspace.delete(proc_ep).unwrap();
             cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
@@ -900,14 +908,14 @@ pub fn start_process(
     )
     .map_err(|e| {
         err_rs!("Failed to set IPC buffer");
-        cspace.delete_cap(fault_ep);
+        cspace.delete_cap(fault_ep).unwrap();
         cspace.free_cap(fault_ep);
         dealloc_retyped(cspace, ut_table, tcb);
-        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.delete(proc_self_cspace).unwrap();
         proc_cspace.free_slot(proc_self_cspace);
-        proc_cspace.delete(proc_ep);
+        proc_cspace.delete(proc_ep).unwrap();
         cspace.free_slot(proc_ep);
-        cspace.delete(ipc_buffer_slot);
+        cspace.delete(ipc_buffer_slot).unwrap();
         cspace.free_slot(ipc_buffer_slot);
         frame_table.free_frame(ipc_buffer_ref);
         dealloc_retyped(cspace, ut_table, vspace);
@@ -924,14 +932,14 @@ pub fn start_process(
         .ok_or(sel4::Error::NotEnoughMemory)
         .map_err(|e| {
             err_rs!("Failed to allocate frame for shared buffer between RS and proc");
-            cspace.delete_cap(fault_ep);
+            cspace.delete_cap(fault_ep).unwrap();
             cspace.free_cap(fault_ep);
             dealloc_retyped(cspace, ut_table, tcb);
-            proc_cspace.delete(proc_self_cspace);
+            proc_cspace.delete(proc_self_cspace).unwrap();
             proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
+            proc_cspace.delete(proc_ep).unwrap();
             cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
@@ -942,14 +950,14 @@ pub fn start_process(
     let shared_buffer_slot = cspace.alloc_slot().map_err(|e| {
         err_rs!("Failed to allocate CNode slot for shared buffer");
         frame_table.free_frame(shared_buffer_ref);
-        cspace.delete_cap(fault_ep);
+        cspace.delete_cap(fault_ep).unwrap();
         cspace.free_cap(fault_ep);
         dealloc_retyped(cspace, ut_table, tcb);
-        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.delete(proc_self_cspace).unwrap();
         proc_cspace.free_slot(proc_self_cspace);
-        proc_cspace.delete(proc_ep);
+        proc_cspace.delete(proc_ep).unwrap();
         cspace.free_slot(proc_ep);
-        cspace.delete(ipc_buffer_slot);
+        cspace.delete(ipc_buffer_slot).unwrap();
         cspace.free_slot(ipc_buffer_slot);
         frame_table.free_frame(ipc_buffer_ref);
         dealloc_retyped(cspace, ut_table, vspace);
@@ -972,19 +980,19 @@ pub fn start_process(
             err_rs!("Failed to copy frame cap for user shared buffer mapping");
             cspace.free_slot(shared_buffer_slot);
             frame_table.free_frame(shared_buffer_ref);
-            cspace.delete_cap(fault_ep);
+            cspace.delete_cap(fault_ep).unwrap();
             cspace.free_cap(fault_ep);
             dealloc_retyped(cspace, ut_table, tcb);
-            proc_cspace.delete(proc_self_cspace);
+            proc_cspace.delete(proc_self_cspace).unwrap();
             proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
+            proc_cspace.delete(proc_ep).unwrap();
             cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
+            cspace.delete(ipc_buffer_slot).unwrap();
             cspace.free_slot(ipc_buffer_slot);
             frame_table.free_frame(ipc_buffer_ref);
             dealloc_retyped(cspace, ut_table, vspace);
             e
-        });
+        })?;
     let shared_buffer = (shared_buffer_cap, shared_buffer_ref);
 
     /* Map in the shared page used for communication between this process and the root server */
@@ -1000,17 +1008,17 @@ pub fn start_process(
     )
     .map_err(|e| {
         err_rs!("Failed to map shared buffer");
-        cspace.delete(shared_buffer_slot);
+        cspace.delete(shared_buffer_slot).unwrap();
         cspace.free_slot(shared_buffer_slot);
         frame_table.free_frame(shared_buffer_ref);
-        cspace.delete_cap(fault_ep);
+        cspace.delete_cap(fault_ep).unwrap();
         cspace.free_cap(fault_ep);
         dealloc_retyped(cspace, ut_table, tcb);
-        proc_cspace.delete(proc_self_cspace);
+        proc_cspace.delete(proc_self_cspace).unwrap();
         proc_cspace.free_slot(proc_self_cspace);
-        proc_cspace.delete(proc_ep);
+        proc_cspace.delete(proc_ep).unwrap();
         cspace.free_slot(proc_ep);
-        cspace.delete(ipc_buffer_slot);
+        cspace.delete(ipc_buffer_slot).unwrap();
         cspace.free_slot(ipc_buffer_slot);
         frame_table.free_frame(ipc_buffer_ref);
         dealloc_retyped(cspace, ut_table, vspace);
@@ -1018,22 +1026,21 @@ pub fn start_process(
     })?;
 
     /* Set up the process stack */
-    let (mut sp, stack_window) = init_process_stack(cspace, ut_table, frame_table, vspace.0)
-        .map_err(|e| {
-            err_rs!("Failed to initialize stack");
-            cspace.delete_cap(fault_ep);
-            cspace.free_cap(fault_ep);
-            dealloc_retyped(cspace, ut_table, tcb);
-            proc_cspace.delete(proc_self_cspace);
-            proc_cspace.free_slot(proc_self_cspace);
-            proc_cspace.delete(proc_ep);
-            cspace.free_slot(proc_ep);
-            cspace.delete(ipc_buffer_slot);
-            cspace.free_slot(ipc_buffer_slot);
-            frame_table.free_frame(ipc_buffer_ref);
-            dealloc_retyped(cspace, ut_table, vspace);
-            e
-        })?;
+    let (_, stack_window) = init_process_stack(cspace, ut_table, frame_table).map_err(|e| {
+        err_rs!("Failed to initialize stack");
+        cspace.delete_cap(fault_ep).unwrap();
+        cspace.free_cap(fault_ep);
+        dealloc_retyped(cspace, ut_table, tcb);
+        proc_cspace.delete(proc_self_cspace).unwrap();
+        proc_cspace.free_slot(proc_self_cspace);
+        proc_cspace.delete(proc_ep).unwrap();
+        cspace.free_slot(proc_ep);
+        cspace.delete(ipc_buffer_slot).unwrap();
+        cspace.free_slot(ipc_buffer_slot);
+        frame_table.free_frame(ipc_buffer_ref);
+        dealloc_retyped(cspace, ut_table, vspace);
+        e
+    })?;
 
     initial_windows.push(stack_window.clone());
 
@@ -1049,7 +1056,7 @@ pub fn start_process(
         initial_windows,
     );
 
-    sp = proc.write_args_to_stack(frame_table, stack_window, loader_args, exec_args);
+    let sp = proc.write_args_to_stack(frame_table, stack_window, loader_args, exec_args);
 
     let mut user_context = sel4::UserContext::default();
     *user_context.pc_mut() = elf.ehdr.e_entry;

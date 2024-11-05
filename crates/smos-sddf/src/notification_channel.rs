@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 use smos_common::channel::Channel;
 use smos_common::client_connection::ClientConnection;
-use smos_common::connection::{self, sDDFConnection, RootServerConnection};
+use smos_common::connection::{sDDFConnection, RootServerConnection};
 use smos_common::error::InvocationError;
 use smos_common::local_handle::{ChannelAuthorityHandle, ConnectionHandle, HandleCap, LocalHandle};
 use smos_common::sddf::VirtType;
@@ -51,7 +51,7 @@ impl<T: NotificationChannelType, U: PPCType> NotificationChannel<T, U> {
 }
 
 impl<T: NotificationChannelType> NotificationChannel<T, PPCAllowed> {
-    pub fn ppcall(&self, mut msginfo: sel4::MessageInfo) -> sel4::MessageInfo {
+    pub fn ppcall(&self, msginfo: sel4::MessageInfo) -> sel4::MessageInfo {
         return self.ppc_connection.as_ref().unwrap().ep().call(msginfo);
     }
 }

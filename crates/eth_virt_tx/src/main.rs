@@ -1,30 +1,27 @@
 #![no_std]
 #![no_main]
 
-use core::ffi::{c_char, CStr};
 use smos_common::client_connection::ClientConnection;
-use smos_common::connection::{sDDFConnection, ObjectServerConnection, RootServerConnection};
+use smos_common::connection::{sDDFConnection, RootServerConnection};
 use smos_common::error::InvocationError;
 use smos_common::local_handle::{
     ConnRegistrationHandle, ConnectionHandle, HandleOrHandleCap, LocalHandle, ObjectHandle,
 };
-use smos_common::obj_attributes::ObjAttributes;
 use smos_common::sddf::{QueueType, VirtType};
 use smos_common::server_connection::ServerConnection;
 use smos_common::syscall::{
-    sDDFInterface, NonRootServerInterface, ObjectServerInterface, ReplyWrapper, RootServerInterface,
+    sDDFInterface, NonRootServerInterface, ReplyWrapper, RootServerInterface,
 };
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::smos_declare_main;
 use smos_sddf::dma_region::DMARegion;
 use smos_sddf::notification_channel::{BidirectionalChannel, NotificationChannel, PPCForbidden};
 use smos_sddf::queue::{ActiveQueue, FreeQueue, Queue, QueuePair};
-use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_notified, sddf_set_channel};
+use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_set_channel};
 use smos_sddf::sddf_channel::sDDFChannel;
-use smos_server::error::handle_error;
 use smos_server::event::{decode_entry_type, EntryType};
 use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
-use smos_server::reply::{handle_reply, SMOSReply};
+use smos_server::reply::SMOSReply;
 use smos_server::syscalls::{
     sDDFChannelRegisterBidirectional, sDDFProvideDataRegion, sDDFQueueRegister, ConnOpen,
     SMOS_Invocation,
@@ -33,19 +30,19 @@ use smos_server::syscalls::{
 extern crate alloc;
 use alloc::vec::Vec;
 
-const ntfn_buffer: *mut u8 = 0xB0000 as *mut u8;
+const NTFN_BUFFER: *mut u8 = 0xB0000 as *mut u8;
 
-const drv_free: usize = 0x3_000_000;
-const drv_active: usize = 0x3_200_000;
+const DRV_FREE: usize = 0x3_000_000;
+const DRV_ACTIVE: usize = 0x3_200_000;
 
-const cli0_active: usize = 0x3_400_000;
-const cli0_free: usize = 0x3_600_000;
-const cli0_tx_dma_region: usize = 0x3_800_000;
+const CLI0_ACTIVE: usize = 0x3_400_000;
+const CLI0_FREE: usize = 0x3_600_000;
+const CLI0_TX_DMA_REGION: usize = 0x3_800_000;
 
-const drv_queue_size: usize = 0x200_000;
-const drv_queue_capacity: usize = 512;
-const cli_queue_size: usize = 0x200_000;
-const cli_queue_capacity: usize = 512;
+const DRV_QUEUE_SIZE: usize = 0x200_000;
+const DRV_QUEUE_CAPACITY: usize = 512;
+const CLI_QUEUE_SIZE: usize = 0x200_000;
+const CLI_QUEUE_CAPACITY: usize = 512;
 // const rcv_dma_region_size: usize = 0x2_200_000;
 
 #[repr(C)]
@@ -69,11 +66,13 @@ struct Resources {
 }
 
 extern "C" {
-    pub static mut resources: Resources;
+    static mut resources: Resources;
 }
 
 struct CliConn {
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     id: usize,
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     conn_registration_hndl: LocalHandle<ConnRegistrationHandle>,
     active: Option<Queue<ActiveQueue>>,
     free: Option<Queue<FreeQueue>>,
@@ -146,7 +145,7 @@ fn handle_queue_register(
         return Err(InvocationError::InvalidArguments);
     }
 
-    if args.size != cli_queue_size {
+    if args.size != CLI_QUEUE_SIZE {
         return Err(InvocationError::InvalidArguments);
     }
 
@@ -158,7 +157,7 @@ fn handle_queue_register(
 
             client.active = Some(Queue::<ActiveQueue>::open(
                 rs_conn,
-                cli0_active,
+                CLI0_ACTIVE,
                 args.size,
                 HandleOrHandleCap::<ObjectHandle>::from(args.hndl_cap),
             )?);
@@ -170,7 +169,7 @@ fn handle_queue_register(
 
             client.free = Some(Queue::<FreeQueue>::open(
                 rs_conn,
-                cli0_free,
+                CLI0_FREE,
                 args.size,
                 HandleOrHandleCap::<ObjectHandle>::from(args.hndl_cap),
             )?);
@@ -191,7 +190,7 @@ fn handle_provide_data_region(
     client.data = Some(DMARegion::open(
         rs_conn,
         HandleOrHandleCap::<ObjectHandle>::from(args.hndl_cap),
-        cli0_tx_dma_region,
+        CLI0_TX_DMA_REGION,
         0x200_000,
     )?);
     client.initialized = true;
@@ -215,7 +214,7 @@ fn pre_init<T: ServerConnection>(
     });
 
     loop {
-        let (msg, mut badge) = smos_serv_replyrecv(listen_conn, reply, reply_msg_info);
+        let (msg, badge) = smos_serv_replyrecv(listen_conn, reply, reply_msg_info);
 
         if let EntryType::Invocation(id) = decode_entry_type(badge.try_into().unwrap()) {
             let invocation = smos_serv_decode_invocation::<sDDFConnection>(&msg, recv_slot, None);
@@ -274,11 +273,11 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
     /* Register as a server */
     let ep_cptr = cspace.alloc_slot().expect("Could not get a slot");
     let listen_conn = rs_conn
-        .conn_publish::<sDDFConnection>(ntfn_buffer, &cspace.to_absolute_cptr(ep_cptr), args[0])
+        .conn_publish::<sDDFConnection>(NTFN_BUFFER, &cspace.to_absolute_cptr(ep_cptr), args[0])
         .expect("Could not publish as a server");
 
     /* Create the driver queue pair */
-    let drv_queues = QueuePair::new(&rs_conn, &mut cspace, drv_active, drv_free, drv_queue_size)
+    let drv_queues = QueuePair::new(&rs_conn, &mut cspace, DRV_ACTIVE, DRV_FREE, DRV_QUEUE_SIZE)
         .expect("Failed to create driver queue pair");
 
     /* Allocate a reply cap */
@@ -288,8 +287,8 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
         .expect("Could not create reply object");
 
     /* Allocate a cap recieve slot */
-    let mut recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
-    let mut recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
+    let recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
+    let recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
 
     let client = pre_init(&rs_conn, &mut cspace, &listen_conn, &reply, recv_slot);
 
@@ -332,26 +331,28 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
         drv_channel.from_bit.unwrap() as usize,
         None,
         sDDFChannel::NotificationChannelBi(drv_channel),
-    );
+    )
+    .expect("Failed to set driver channel");
     sddf_set_channel(
         client.channel.unwrap().from_bit.unwrap() as usize,
         None,
         sDDFChannel::NotificationChannelBi(client.channel.unwrap()),
-    );
+    )
+    .expect("Failed to set client channel");
 
     unsafe {
         resources = Resources {
-            tx_free_drv: drv_free as u64,
-            tx_active_drv: drv_active as u64,
-            drv_queue_size: drv_queue_capacity as u64,
+            tx_free_drv: DRV_FREE as u64,
+            tx_active_drv: DRV_ACTIVE as u64,
+            drv_queue_size: DRV_QUEUE_CAPACITY as u64,
             drv_ch: drv_channel.from_bit.unwrap(),
             num_network_clients: 1,
             clients: [Client {
-                tx_free: cli0_free as u64,
-                tx_active: cli0_active as u64,
-                queue_size: cli_queue_capacity as u64,
+                tx_free: CLI0_FREE as u64,
+                tx_active: CLI0_ACTIVE as u64,
+                queue_size: CLI_QUEUE_CAPACITY as u64,
                 client_ch: client.channel.unwrap().from_bit.unwrap(),
-                buffer_data_region_vaddr: cli0_tx_dma_region as u64,
+                buffer_data_region_vaddr: CLI0_TX_DMA_REGION as u64,
                 buffer_data_region_paddr: client.data.unwrap().paddr as u64,
             }],
         }

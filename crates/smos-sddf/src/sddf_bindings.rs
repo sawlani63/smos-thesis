@@ -6,10 +6,11 @@ use smos_common::connection::sDDFConnection;
 use smos_common::syscall::ReplyWrapper;
 use smos_server::event::{decode_entry_type, smos_serv_replyrecv, EntryType};
 
+#[allow(dead_code)]
 const MAX_CHANNELS: usize = 64;
 
-static mut channels: BTreeMap<usize, sDDFChannel> = BTreeMap::new();
-static mut ppcid_to_channelid: BTreeMap<usize, usize> = BTreeMap::new();
+static mut CHANNELS: BTreeMap<usize, sDDFChannel> = BTreeMap::new();
+static mut PPCID_TO_CHANNELID: BTreeMap<usize, usize> = BTreeMap::new();
 
 extern "C" {
     pub fn sddf_init();
@@ -22,19 +23,19 @@ extern "C" {
 
 pub fn sddf_set_channel(id: usize, ppc_id: Option<usize>, channel: sDDFChannel) -> Result<(), ()> {
     unsafe {
-        if channels.contains_key(&id) {
+        if CHANNELS.contains_key(&id) {
             return Err(());
         }
-        channels.insert(id, channel);
+        CHANNELS.insert(id, channel);
         if let Some(x) = ppc_id {
-            ppcid_to_channelid.insert(x, id);
+            PPCID_TO_CHANNELID.insert(x, id);
         }
         return Ok(());
     }
 }
 
 pub fn ppc_get_channel_id(ppc_id: usize) -> usize {
-    return unsafe { ppcid_to_channelid[&ppc_id] };
+    return unsafe { PPCID_TO_CHANNELID[&ppc_id] };
 }
 
 #[no_mangle]
@@ -60,7 +61,7 @@ pub unsafe extern "C" fn sddf_deferred_notify(id: u32) {
 
 #[no_mangle]
 pub unsafe extern "C" fn sddf_notify(id: u32) {
-    channels[&(id as usize)].notify();
+    CHANNELS[&(id as usize)].notify();
 }
 
 #[no_mangle]
@@ -81,7 +82,7 @@ pub unsafe extern "C" fn sddf_ppcall(
     msginfo_raw: sel4_sys::seL4_MessageInfo,
 ) -> sel4_sys::seL4_MessageInfo {
     let msginfo = sel4::MessageInfo::from_inner(msginfo_raw);
-    channels[&(id as usize)].ppcall(msginfo).into_inner()
+    CHANNELS[&(id as usize)].ppcall(msginfo).into_inner()
 }
 
 #[no_mangle]
@@ -91,18 +92,18 @@ pub unsafe extern "C" fn sddf_get_mr(idx: u32) -> u64 {
 
 #[no_mangle]
 pub unsafe extern "C" fn sddf_irq_ack(id: u32) {
-    channels[&(id as usize)].irq_ack();
+    CHANNELS[&(id as usize)].irq_ack();
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn sddf_deferred_irq_ack(id: u32) {
-    channels[&(id as usize)].irq_ack();
+    CHANNELS[&(id as usize)].irq_ack();
 }
 
 pub fn sddf_event_loop_ppc(listen_conn: sDDFConnection, reply: ReplyWrapper) -> ! {
     let mut reply_msg_info = None;
     loop {
-        let (msg, mut badge) = if reply_msg_info.is_some() {
+        let (msg, badge) = if reply_msg_info.is_some() {
             listen_conn
                 .ep()
                 .reply_recv(reply_msg_info.unwrap(), reply.cap)
@@ -133,7 +134,7 @@ pub fn sddf_event_loop_ppc(listen_conn: sDDFConnection, reply: ReplyWrapper) -> 
 pub fn sddf_event_loop(listen_conn: sDDFConnection, reply: ReplyWrapper) -> ! {
     let mut reply_msg_info = None;
     loop {
-        let (msg, mut badge) = smos_serv_replyrecv(&listen_conn, &reply, reply_msg_info);
+        let (_msg, badge) = smos_serv_replyrecv(&listen_conn, &reply, reply_msg_info);
 
         match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Notification(bits) => {

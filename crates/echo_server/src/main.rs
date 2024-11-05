@@ -1,14 +1,10 @@
 #![no_std]
 #![no_main]
 
-use core::ffi::{c_char, CStr};
 use smos_common::client_connection::ClientConnection;
-use smos_common::connection::{sDDFConnection, ObjectServerConnection, RootServerConnection};
-use smos_common::obj_attributes::ObjAttributes;
-use smos_common::sddf::{QueueType, VirtType};
-use smos_common::syscall::{
-    sDDFInterface, NonRootServerInterface, ObjectServerInterface, RootServerInterface,
-};
+use smos_common::connection::{sDDFConnection, RootServerConnection};
+use smos_common::sddf::QueueType;
+use smos_common::syscall::{sDDFInterface, NonRootServerInterface, RootServerInterface};
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::smos_declare_main;
 use smos_sddf::dma_region::DMARegion;
@@ -16,32 +12,32 @@ use smos_sddf::notification_channel::{
     BidirectionalChannel, NotificationChannel, PPCAllowed, PPCForbidden, RecieveOnlyChannel,
 };
 use smos_sddf::queue::QueuePair;
-use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_notified, sddf_set_channel};
+use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_set_channel};
 use smos_sddf::sddf_channel::sDDFChannel;
-use smos_server::event::{decode_entry_type, EntryType};
 extern crate alloc;
 use alloc::vec::Vec;
 
-const ntfn_buffer: *mut u8 = 0xB0000 as *mut u8;
+const NTFN_BUFFER: *mut u8 = 0xB0000 as *mut u8;
 
-const rx_free: usize = 0x2_000_000;
-const rx_active: usize = 0x2_200_000;
-const tx_free: usize = 0x2_400_000;
-const tx_active: usize = 0x2_600_000;
+const RX_FREE: usize = 0x2_000_000;
+const RX_ACTIVE: usize = 0x2_200_000;
+const TX_FREE: usize = 0x2_400_000;
+const TX_ACTIVE: usize = 0x2_600_000;
 
-const rx_data: usize = 0x2_800_000;
-const tx_data: usize = 0x2_a00_000;
+const RX_DATA: usize = 0x2_800_000;
+const TX_DATA: usize = 0x2_a00_000;
 
-const rx_queue_size: usize = 0x200_000;
-const tx_queue_size: usize = 0x200_000;
-const rx_data_size: usize = 0x200_000;
-const tx_data_size: usize = 0x200_000;
+const RX_QUEUE_SIZE: usize = 0x200_000;
+const TX_QUEUE_SIZE: usize = 0x200_000;
+const RX_DATA_SIZE: usize = 0x200_000;
+const TX_DATA_SIZE: usize = 0x200_000;
 
-const rx_queue_capacity: usize = 512;
-const tx_queue_capacity: usize = 512;
+const RX_QUEUE_CAPACITY: usize = 512;
+const TX_QUEUE_CAPACITY: usize = 512;
 
-const mac_addr: usize = 0x525401000007;
+const MAC_ADDR: usize = 0x525401000007;
 
+#[repr(C)]
 struct Resources {
     rx_free: u64,
     rx_active: u64,
@@ -59,7 +55,7 @@ struct Resources {
 }
 
 extern "C" {
-    pub static mut resources: Resources;
+    static mut resources: Resources;
 }
 
 #[smos_declare_main]
@@ -74,24 +70,24 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
     let ep_cptr = cspace.alloc_slot().expect("Could not get a slot");
     let listen_conn = rs_conn
         .conn_publish::<sDDFConnection>(
-            ntfn_buffer,
+            NTFN_BUFFER,
             &cspace.to_absolute_cptr(ep_cptr),
             "echo_server",
         )
         .expect("Could not publish as a server");
 
     /* Create the Rx queues */
-    let rx_queues = QueuePair::new(&rs_conn, &mut cspace, rx_active, rx_free, rx_queue_size)
+    let rx_queues = QueuePair::new(&rs_conn, &mut cspace, RX_ACTIVE, RX_FREE, RX_QUEUE_SIZE)
         .expect("Failed to create rx queue pair");
 
     /* Create the Tx queues */
-    let tx_queues = QueuePair::new(&rs_conn, &mut cspace, tx_active, tx_free, tx_queue_size)
+    let tx_queues = QueuePair::new(&rs_conn, &mut cspace, TX_ACTIVE, TX_FREE, TX_QUEUE_SIZE)
         .expect("Failed to create tx queue pair");
 
     /* Create the data regions */
-    let rx_data_region = DMARegion::new(&rs_conn, &mut cspace, rx_data, rx_data_size, true)
+    let rx_data_region = DMARegion::new(&rs_conn, &mut cspace, RX_DATA, RX_DATA_SIZE, true)
         .expect("Failed to create rx dma region");
-    let tx_data_region = DMARegion::new(&rs_conn, &mut cspace, tx_data, tx_data_size, true)
+    let tx_data_region = DMARegion::new(&rs_conn, &mut cspace, TX_DATA, TX_DATA_SIZE, true)
         .expect("Failed to create tx dma region");
 
     /* Create connection/channels with rx copier */
@@ -116,14 +112,14 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
     rx_conn
         .sddf_queue_register(
             rx_queues.active.obj_hndl_cap.unwrap(),
-            rx_queue_size,
+            RX_QUEUE_SIZE,
             QueueType::Active,
         )
         .expect("Failed to register active queue");
     rx_conn
         .sddf_queue_register(
             rx_queues.free.obj_hndl_cap.unwrap(),
-            rx_queue_size,
+            RX_QUEUE_SIZE,
             QueueType::Free,
         )
         .expect("Failed to register free queue");
@@ -154,14 +150,14 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
     tx_conn
         .sddf_queue_register(
             tx_queues.active.obj_hndl_cap.unwrap(),
-            tx_queue_size,
+            TX_QUEUE_SIZE,
             QueueType::Active,
         )
         .expect("Failed to register active queue");
     tx_conn
         .sddf_queue_register(
             tx_queues.free.obj_hndl_cap.unwrap(),
-            tx_queue_size,
+            TX_QUEUE_SIZE,
             QueueType::Free,
         )
         .expect("Failed to register free queue");
@@ -192,30 +188,33 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
         timer_channel.from_bit.unwrap() as usize,
         None,
         sDDFChannel::NotificationChannelRecvPPC(timer_channel),
-    );
+    )
+    .expect("Failed to set up channel with timer");
     sddf_set_channel(
         rx_channel.from_bit.unwrap() as usize,
         None,
         sDDFChannel::NotificationChannelBi(rx_channel),
-    );
+    )
+    .expect("Failed to set up channel with Rx Virt");
     sddf_set_channel(
         tx_channel.from_bit.unwrap() as usize,
         None,
         sDDFChannel::NotificationChannelBi(tx_channel),
-    );
+    )
+    .expect("Failed to set up channel with Tx Virt");
 
     /* Start up the client */
     unsafe {
         resources = Resources {
-            rx_free: rx_free as u64,
-            rx_active: rx_active as u64,
-            rx_queue_capacity: rx_queue_capacity as u64,
-            tx_free: tx_free as u64,
-            tx_active: tx_active as u64,
-            tx_queue_capacity: tx_queue_capacity as u64,
-            rx_data_region: rx_data as u64,
-            tx_data_region: tx_data as u64,
-            mac_addr: mac_addr as u64,
+            rx_free: RX_FREE as u64,
+            rx_active: RX_ACTIVE as u64,
+            rx_queue_capacity: RX_QUEUE_CAPACITY as u64,
+            tx_free: TX_FREE as u64,
+            tx_active: TX_ACTIVE as u64,
+            tx_queue_capacity: TX_QUEUE_CAPACITY as u64,
+            rx_data_region: RX_DATA as u64,
+            tx_data_region: TX_DATA as u64,
+            mac_addr: MAC_ADDR as u64,
 
             timer_id: timer_channel.from_bit.unwrap(),
             rx_id: rx_channel.from_bit.unwrap(),

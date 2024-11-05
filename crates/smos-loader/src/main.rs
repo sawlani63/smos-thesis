@@ -4,7 +4,6 @@
 extern crate alloc;
 use alloc::vec::Vec;
 use byteorder::ByteOrder;
-use elf::endian::LittleEndian;
 use smos_common::connection::{ObjectServerConnection, RootServerConnection};
 use smos_common::local_handle::{
     HandleOrHandleCap, LocalHandle, ObjectHandle, ViewHandle, WindowHandle,
@@ -18,8 +17,8 @@ use smos_runtime::{smos_declare_main, Never};
 
 use elf::ElfBytes;
 
-const shared_buffer_region: *mut u8 = 0xA0002000 as *mut u8;
-const elf_base: *const u8 = 0xB000000 as *const u8;
+const SHARED_BUFFER_REGION: *mut u8 = 0xA0002000 as *mut u8;
+const ELF_BASE: *const u8 = 0xB000000 as *const u8;
 
 const PAGE_SIZE_4K: u64 = 4096;
 
@@ -27,12 +26,12 @@ fn rights_from_elf_flags(flags: u32) -> sel4::CapRights {
     let mut builder = sel4::CapRightsBuilder::none();
 
     // Can read
-    if (flags & elf::abi::PF_R != 0 || flags & elf::abi::PF_X != 0) {
+    if flags & elf::abi::PF_R != 0 || flags & elf::abi::PF_X != 0 {
         builder = builder.read(true);
     }
 
     // Can write
-    if (flags & elf::abi::PF_W != 0) {
+    if flags & elf::abi::PF_W != 0 {
         builder = builder.write(true);
     }
 
@@ -74,7 +73,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
 
     /* Set up shared buffer with FS */
     let shared_buffer_win_hndl = rs_conn
-        .window_create(shared_buffer_region as usize, 4096, None)
+        .window_create(SHARED_BUFFER_REGION as usize, 4096, None)
         .expect("Failed to create window for shared buffer");
     let shared_buf_obj_hndl_cap = cspace
         .alloc_slot()
@@ -100,7 +99,9 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
         .expect("Failed to map shared buffer object");
 
     /* Open connection to file server */
-    fs_conn.conn_open(Some((shared_buf_obj.clone(), (shared_buffer_region, 4096))));
+    fs_conn
+        .conn_open(Some((shared_buf_obj.clone(), (SHARED_BUFFER_REGION, 4096))))
+        .expect("Failed to open connection to file server");
 
     /* Open the ELF file*/
     let file_hndl = fs_conn
@@ -117,7 +118,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
         .expect("Failed to alloc slot for elf window");
     let elf_window_hndl_cap = rs_conn
         .window_create(
-            elf_base as usize,
+            ELF_BASE as usize,
             ROUND_UP(file_size, sel4_sys::seL4_PageBits as usize),
             Some(cspace.to_absolute_cptr(elf_window_hndl_slot)),
         )
@@ -136,7 +137,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
         .expect("Failed to view");
 
     /* Load the ELF file */
-    let elf_bytes = unsafe { core::slice::from_raw_parts(elf_base, file_size) };
+    let elf_bytes = unsafe { core::slice::from_raw_parts(ELF_BASE, file_size) };
     let elf =
         ElfBytes::<elf::endian::AnyEndian>::minimal_parse(elf_bytes).expect("Invalid elf file");
 
@@ -147,13 +148,9 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
             continue;
         }
 
-        if (segment.p_filesz > segment.p_memsz) {
+        if segment.p_filesz > segment.p_memsz {
             panic!("Invalid ELF file");
         }
-
-        let readable =
-            segment.p_flags & elf::abi::PF_R != 0 || segment.p_flags & elf::abi::PF_X != 0;
-        let witeable = segment.p_flags & elf::abi::PF_W != 0;
 
         let total_size = segment.p_memsz
             + (segment.p_vaddr % PAGE_SIZE_4K)
@@ -241,15 +238,19 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
 
         // @alwin: This should probably be a single more efficient operation which downgrades the
         // permissions of an existing view instead.
-        rs_conn.unview(segment.view_hndl);
-        rs_conn.view(
-            &segment.win_hndl,
-            &segment.obj_hndl,
-            0,
-            0,
-            segment.size,
-            segment.rights,
-        );
+        rs_conn
+            .unview(segment.view_hndl)
+            .expect("Failed to unview ELF region");
+        rs_conn
+            .view(
+                &segment.win_hndl,
+                &segment.obj_hndl,
+                0,
+                0,
+                segment.size,
+                segment.rights,
+            )
+            .expect("Failed to remap ELF region with correct permissions");
     }
 
     /* Create a stack */
@@ -272,7 +273,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
             None,
         )
         .expect("Could not make stack object");
-    let stack_view = rs_conn
+    rs_conn
         .view(
             &stack_win_hndl,
             &stack_obj_hndl,
@@ -331,7 +332,8 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
             copy_terminated_rust_string_to_buffer(
                 unsafe { core::slice::from_raw_parts_mut(curr_sp, arg.as_bytes().len() + 1) },
                 arg,
-            );
+            )
+            .expect("Failed to copy arg to IPC buffer");
         }
 
         /* Pad to word alignment */
@@ -371,9 +373,15 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
 
     /* Clean up the ELF file */
     // @alwin: Closing the object might gc any views that are associated with it?
-    fs_conn.unview(elf_view);
-    fs_conn.obj_close(file_hndl);
-    rs_conn.window_destroy(elf_window_hndl_cap, &mut cspace);
+    fs_conn
+        .unview(elf_view)
+        .expect("Failed to close the ELF view");
+    fs_conn
+        .obj_close(file_hndl)
+        .expect("Failed to close the ELF file object");
+    rs_conn
+        .window_destroy(elf_window_hndl_cap, &mut cspace)
+        .expect("Failed to destroy the ELF window");
 
     /* Clean up the FS connection */
     // @alwin: This conn_close is not really mandatory, as conn_destroy will notify the
@@ -382,14 +390,22 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     // client can do anything else. In this particular example, if the client calls obj_destroy
     // while the server still has the shared buffer mapped in (it hasn't handled the notification
     // from the RS, the operation will fail.
-    fs_conn.conn_close();
+    fs_conn.conn_close().expect("Failed to close connection");
     // @alwin: Really only this one should be necessary, as this will result in a ntfn to the server
-    rs_conn.conn_destroy(fs_conn, &mut cspace);
+    rs_conn
+        .conn_destroy(fs_conn, &mut cspace)
+        .expect("Failed to destroy connection");
 
     /* Clean up the shared buffer */
-    rs_conn.unview(shared_buf_view);
-    rs_conn.obj_destroy(shared_buf_obj, &mut cspace);
-    rs_conn.window_destroy(shared_buffer_win_hndl, &mut cspace);
+    rs_conn
+        .unview(shared_buf_view)
+        .expect("Failed to unview FS shared buffer");
+    rs_conn
+        .obj_destroy(shared_buf_obj, &mut cspace)
+        .expect("Failed to destroy FS shared buffer object");
+    rs_conn
+        .window_destroy(shared_buffer_win_hndl, &mut cspace)
+        .expect("Failed to destroy shared buffer window");
 
     sel4::debug_println!("About to jump to executable at addr {:x}", start_vaddr);
 

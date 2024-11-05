@@ -2,7 +2,7 @@
 
 #[repr(usize)]
 pub enum WindowCreateArgs {
-    Base_Vaddr = 0,
+    BaseVaddr = 0,
     Size = 1,
     ReturnCap = 2,
 }

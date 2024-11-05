@@ -4,50 +4,56 @@
 #![allow(internal_features)]
 #![feature(lang_items)]
 
-use core::arch::global_asm;
-use core::ptr;
-use sel4::CapTypeForFrameObjectOfFixedSize;
-use sel4_panicking::catch_unwind;
-use smos_common::client_connection::ClientConnection;
-use smos_common::connection::{ObjectServerConnection, RootServerConnection};
-use smos_common::obj_attributes::ObjAttributes;
-use smos_common::syscall::{NonRootServerInterface, ObjectServerInterface, RootServerInterface};
+use smos_common::connection::RootServerConnection;
+use smos_common::syscall::RootServerInterface;
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::{smos_declare_main, Never};
 extern crate alloc;
 
 #[smos_declare_main]
-fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Result<Never> {
+fn main(rs_conn: RootServerConnection, _cspace: SMOSUserCSpace) -> sel4::Result<Never> {
     sel4::debug_println!("Hello world! I am init ^_^! I will now initialize the system...");
 
     /* Start the ethernet driver */
-    rs_conn.process_spawn("eth_driver", "BOOT_FS", 254, Some(&["eth0"]));
+    rs_conn
+        .process_spawn("eth_driver", "BOOT_FS", 254, Some(&["eth0"]))
+        .expect("Failed to start eth_driver");
 
     /* Start the timer driver */
-    rs_conn.process_spawn("timer", "BOOT_FS", 254, Some(&["timer0"]));
+    rs_conn
+        .process_spawn("timer", "BOOT_FS", 254, Some(&["timer0"]))
+        .expect("Failed to star timer_driver");
 
     /* Start the virt rx */
-    rs_conn.process_spawn("eth_virt_rx", "BOOT_FS", 253, Some(&["rx_eth0", "eth0"]));
+    rs_conn
+        .process_spawn("eth_virt_rx", "BOOT_FS", 253, Some(&["rx_eth0", "eth0"]))
+        .expect("Failed to start eth_virt_rx");
 
     /* Start the virt tx */
-    rs_conn.process_spawn("eth_virt_tx", "BOOT_FS", 253, Some(&["tx_eth0", "eth0"]));
+    rs_conn
+        .process_spawn("eth_virt_tx", "BOOT_FS", 253, Some(&["tx_eth0", "eth0"]))
+        .expect("Failed to start eth_virt_tx");
 
     /* Start the copier */
-    rs_conn.process_spawn(
-        "eth_copier",
-        "BOOT_FS",
-        252,
-        Some(&["cli0_copy_eth0", "rx_eth0"]),
-    );
+    rs_conn
+        .process_spawn(
+            "eth_copier",
+            "BOOT_FS",
+            252,
+            Some(&["cli0_copy_eth0", "rx_eth0"]),
+        )
+        .expect("Failed to start eth_copier");
 
     /* Start the client */
 
-    rs_conn.process_spawn(
-        "echo_server",
-        "BOOT_FS",
-        251,
-        Some(&["cli0_copy_eth0", "tx_eth0", "timer0"]),
-    );
+    rs_conn
+        .process_spawn(
+            "echo_server",
+            "BOOT_FS",
+            251,
+            Some(&["cli0_copy_eth0", "tx_eth0", "timer0"]),
+        )
+        .expect("Failed to start echo_server");
 
     loop {}
 
@@ -78,8 +84,8 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     // server look the same, so I think they are deleted by the capability revocation. Need to do
     // something so they look different
 
-    rs_conn.process_exit();
+    // rs_conn.process_exit();
 
-    loop {}
-    unreachable!()
+    // loop {}
+    // unreachable!()
 }

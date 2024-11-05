@@ -1,22 +1,15 @@
 use crate::handle_arg::{
     ReceivedHandle, ServerReceivedHandleOrHandleCap, UnwrappedHandleCap, WrappedHandleCap,
 };
-use alloc::boxed::Box;
-use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use core::ffi::CStr;
-use core::marker::PhantomData;
-use downcast_rs::{impl_downcast, Downcast};
 use sel4::AbsoluteCPtr;
 use sel4_bitfield_ops::Bitfield;
-use sel4_sys::seL4_MessageInfo;
-use smos_common::local_handle::{HandleOrHandleCap, ObjectHandle, WindowHandle};
 use smos_common::obj_attributes::ObjAttributes;
 use smos_common::sddf::{QueueType, VirtType};
 use smos_common::server_connection::ServerConnection;
 use smos_common::string::rust_str_from_buffer;
 use smos_common::util::BIT;
-use smos_common::{args::*, connection::*, error::*, invocations::SMOSInvocation};
+use smos_common::{args::*, error::*, invocations::SMOSInvocation};
 
 // Data structs
 #[derive(Debug)]
@@ -168,12 +161,14 @@ pub struct IRQRegister {
 }
 
 #[derive(Debug)]
+#[allow(non_camel_case_types)]
 pub struct sDDFChannelRegisterBidirectional {
     pub channel_hndl_cap: WrappedHandleCap,
     pub virt_type: Option<VirtType>,
 }
 
 #[derive(Debug)]
+#[allow(non_camel_case_types)]
 pub struct sDDFChannelRegisterRecvOnly {
     pub channel_hndl_cap: WrappedHandleCap,
 }
@@ -184,6 +179,7 @@ pub struct ChannelOpen {
 }
 
 #[derive(Debug)]
+#[allow(non_camel_case_types)]
 pub struct sDDFQueueRegister {
     pub hndl_cap: WrappedHandleCap,
     pub size: usize,
@@ -191,6 +187,7 @@ pub struct sDDFQueueRegister {
 }
 
 #[derive(Debug)]
+#[allow(non_camel_case_types)]
 pub struct sDDFProvideDataRegion {
     pub hndl_cap: WrappedHandleCap,
     // pub size: usize,
@@ -203,6 +200,7 @@ pub struct ServerCreateChannel {
 
 // General invocation enum
 #[derive(Debug)]
+#[allow(non_camel_case_types)]
 pub enum SMOS_Invocation<'a> {
     WindowCreate(WindowCreate),
     WindowDestroy(WindowDestroy),
@@ -257,7 +255,6 @@ impl<'a> SMOS_Invocation<'a> {
     pub fn contains_cap(&self) -> bool {
         match self {
             SMOS_Invocation::WindowCreate(_)
-            | SMOS_Invocation::WindowCreate(_)
             | SMOS_Invocation::WindowDestroy(_)
             | SMOS_Invocation::ObjCreate(_)
             | SMOS_Invocation::ObjOpen(_)
@@ -312,10 +309,9 @@ impl<'a> SMOS_Invocation<'a> {
     }
 }
 
+#[allow(non_snake_case)]
 mod SMOS_Invocation_Raw {
     use crate::syscalls::*;
-    use alloc::boxed::Box;
-    use sel4_sys::seL4_MessageInfo;
 
     pub fn get_from_ipc_buffer<'a, T: ServerConnection>(
         info: &sel4::MessageInfo,
@@ -384,7 +380,7 @@ mod SMOS_Invocation_Raw {
         match label {
             SMOSInvocation::WindowCreate => {
                 Ok(SMOS_Invocation::WindowCreate(WindowCreate {
-                    base_vaddr: f_msg(WindowCreateArgs::Base_Vaddr as u64)
+                    base_vaddr: f_msg(WindowCreateArgs::BaseVaddr as u64)
                         .try_into()
                         .unwrap(), // @alwin: if there is a type mismatch, it shouldn't panic
                     size: f_msg(WindowCreateArgs::Size as u64).try_into().unwrap(),
@@ -457,7 +453,7 @@ mod SMOS_Invocation_Raw {
                     },
                 ))
             }
-            SMOSInvocation::sDDFChannelRegisterRecieveOnly => {
+            SMOSInvocation::sDDFChannelRegisterReceiveOnly => {
                 if info.extra_caps() != 1 || info.caps_unwrapped() != 0 {
                     return Err(InvocationError::InvalidArguments);
                 }
@@ -568,7 +564,7 @@ mod SMOS_Invocation_Raw {
                         return Err(InvocationError::DataBufferNotSet);
                     }
 
-                    unsafe { Some(rust_str_from_buffer(data_buffer.unwrap())?.0) }
+                    Some(rust_str_from_buffer(data_buffer.unwrap())?.0)
                 } else {
                     None
                 };
@@ -588,7 +584,7 @@ mod SMOS_Invocation_Raw {
                     return Err(InvocationError::DataBufferNotSet);
                 }
 
-                let name = unsafe { rust_str_from_buffer(data_buffer.unwrap())?.0 };
+                let name = rust_str_from_buffer(data_buffer.unwrap())?.0;
 
                 Ok(SMOS_Invocation::ObjOpen(ObjOpen {
                     name: name,
@@ -664,7 +660,6 @@ mod SMOS_Invocation_Raw {
                         // @alwin: Double check that this is invalid
                         return Err(InvocationError::InvalidArguments);
                     }
-                    cap_arg_counter += 1;
                 } else {
                     object = ServerReceivedHandleOrHandleCap::new_handle(object_buf as usize)
                 }
@@ -795,7 +790,7 @@ mod SMOS_Invocation_Raw {
                     return Err(InvocationError::InvalidArguments);
                 }
 
-                let mut data_buffer_ref = data_buffer.unwrap();
+                let data_buffer_ref = data_buffer.unwrap();
 
                 let (exec_name, ref mut data_buffer_ref) = rust_str_from_buffer(data_buffer_ref)?;
                 let (fs_name, ref mut data_buffer_ref) = rust_str_from_buffer(data_buffer_ref)?;
@@ -804,7 +799,7 @@ mod SMOS_Invocation_Raw {
                     None
                 } else {
                     let mut args_inner = Vec::new();
-                    for i in 0..f_msg(0) {
+                    for _ in 0..f_msg(0) {
                         let (arg_tmp, buf_tmp) = rust_str_from_buffer(data_buffer_ref)?;
                         args_inner.push(arg_tmp);
                         *data_buffer_ref = buf_tmp;

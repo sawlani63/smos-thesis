@@ -16,6 +16,7 @@ use smos_server::{
 };
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct IRQRegistration {
     irq_number: usize,
     badge_bit: u8,
@@ -31,6 +32,7 @@ impl IRQRegistration {
 }
 
 #[derive(Copy, Clone)]
+#[allow(dead_code)]
 struct IRQHandlerInfo {
     irq: usize,
     irq_handler: sel4::cap::IrqHandler,
@@ -39,6 +41,7 @@ struct IRQHandlerInfo {
     data: *const (), // @alwin: This can be done using an enum instead
 }
 
+#[allow(dead_code)]
 pub struct IRQDispatch {
     irq_control: sel4::cap::IrqControl,
     ntfn: sel4::cap::Notification,
@@ -89,6 +92,7 @@ impl IRQDispatch {
         return badge as sel4::Word;
     }
 
+    #[allow(dead_code)]
     pub fn register_irq_handler(
         self: &mut Self,
         cspace: &mut CSpace,
@@ -167,18 +171,21 @@ impl IRQDispatch {
         return Ok(handler);
     }
 
+    #[allow(dead_code)]
     fn alloc_irq_bit(self: &mut Self) -> Result<usize, sel4::Error> {
         let bit = bf_first_free(&self.allocated_bits).map_err(|_| sel4::Error::NotEnoughMemory)?;
         bf_set_bit(&mut self.allocated_bits, bit);
         return Ok(bit);
     }
 
+    #[allow(dead_code)]
     fn free_irq_bit(self: &mut Self, bit: usize) {
         bf_clr_bit(&mut self.allocated_bits, bit);
     }
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct UserNotificationDispatch {
     irq_control: sel4::cap::IrqControl,
     ntfn: (sel4::cap::Notification, UTWrapper),
@@ -211,14 +218,18 @@ impl UserNotificationDispatch {
     pub fn destroy(&mut self, cspace: &mut CSpace, ut_table: &mut UTTable) {
         for ntfn in self.badged_ntfns {
             if ntfn.is_some() {
-                cspace.delete_cap(ntfn.unwrap());
+                cspace
+                    .delete_cap(ntfn.unwrap())
+                    .expect("Failed t destroy badged notification");
                 cspace.free_cap(ntfn.unwrap());
             }
         }
 
         for irq_hndler in self.irq_handler_caps {
             if irq_hndler.is_some() {
-                cspace.delete_cap(irq_hndler.unwrap());
+                cspace
+                    .delete_cap(irq_hndler.unwrap())
+                    .expect("Failed to delete IRQ handler cap");
                 cspace.free_cap(irq_hndler.unwrap());
             }
         }
@@ -243,11 +254,15 @@ impl UserNotificationDispatch {
         let badge = self.flag_bits | BIT(ident_bit);
 
         // Mint the badged notification
-        cspace.root_cnode().relative(ntfn).mint(
-            &cspace.root_cnode().relative(self.ntfn.0),
-            sel4::CapRights::write_only(),
-            badge.try_into().unwrap(),
-        );
+        cspace
+            .root_cnode()
+            .relative(ntfn)
+            .mint(
+                &cspace.root_cnode().relative(self.ntfn.0),
+                sel4::CapRights::write_only(),
+                badge.try_into().unwrap(),
+            )
+            .expect("Failed to mint badged notification");
 
         self.badged_ntfns[ident_bit] = Some(ntfn);
 
@@ -288,7 +303,7 @@ impl UserNotificationDispatch {
         // Get the handler cap
         let handler = cspace
             .irq_control_get(handler_cptr, self.irq_control, irq_num, edge_triggered)
-            .map_err(|e| {
+            .map_err(|_| {
                 cspace.free_cap(ntfn);
                 cspace.free_slot(handler_cptr);
                 self.free_ntfn_bit(ident_bit);
@@ -299,16 +314,20 @@ impl UserNotificationDispatch {
         let badge = self.flag_bits | BIT(ident_bit);
 
         // Mint the badged notification
-        cspace.root_cnode().relative(ntfn).mint(
-            &cspace.root_cnode().relative(self.ntfn.0),
-            sel4::CapRights::write_only(),
-            badge.try_into().unwrap(),
-        );
+        cspace
+            .root_cnode()
+            .relative(ntfn)
+            .mint(
+                &cspace.root_cnode().relative(self.ntfn.0),
+                sel4::CapRights::write_only(),
+                badge.try_into().unwrap(),
+            )
+            .expect("Failed to mint badged notification");
 
         // Set the notification for the IRQ
         handler.irq_handler_set_notification(ntfn).map_err(|_| {
-            cspace.delete_cap(ntfn);
-            cspace.delete_cap(handler);
+            cspace.delete_cap(ntfn).unwrap();
+            cspace.delete_cap(handler).unwrap();
             cspace.free_cap(ntfn);
             cspace.free_cap(handler);
             self.free_ntfn_bit(ident_bit);
@@ -342,7 +361,7 @@ pub fn handle_irq_register(
         .or(Err(InvocationError::InvalidHandle { which_arg: 0 }))?;
 
     let server = match publish_hndl_ref.as_ref().unwrap().inner() {
-        RootServerResource::Server(x) => (Ok(x.clone())),
+        RootServerResource::Server(x) => Ok(x.clone()),
         _ => Err(InvocationError::InvalidHandle { which_arg: 0 }),
     }?;
 
@@ -367,6 +386,7 @@ pub fn handle_irq_register(
     });
 }
 
+#[allow(dead_code)] // @alwin: Remove once implemented
 pub fn handle_irq_deregister() {
     todo!();
 }

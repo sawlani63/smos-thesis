@@ -9,6 +9,7 @@ use crate::util::{ALIGN_DOWN, ALIGN_UP};
 use crate::vmem_layout::UT_TABLE;
 use bitfield::bf_set_bit;
 use core::mem::size_of;
+use core::ptr::addr_of_mut;
 use sel4::CPtr;
 use smos_common::util::BIT;
 use smos_common::util::ROUND_UP;
@@ -116,6 +117,7 @@ struct BootstrapCSpace {
 }
 
 // pub fn smos_bootstrap(bi: &sel4::BootInfo) -> CSpace{
+#[allow(unused_assignments)]
 pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool), sel4::Error> {
     let mut bootinfo_avail_bytes: [usize; sel4_cfg_usize!(MAX_NUM_BOOTINFO_UNTYPED_CAPS)] =
         [0; sel4_cfg_usize!(MAX_NUM_BOOTINFO_UNTYPED_CAPS)];
@@ -126,7 +128,6 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
     };
 
     // The initial CNode
-    let mut init_task_cnode_cptr = sel4::init_thread::slot::CNODE.cap().relative_self();
     let mut init_task_cnode = sel4::init_thread::slot::CNODE.cap();
 
     /* use three slots from the current boot cspace */
@@ -153,7 +154,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
     n_slots += n_pts;
 
     /* We will need a few more for the page tables of the DMA region */
-    let n_dma_pts = (DMA_RESERVATION_NUM_PAGES >> sel4_sys::seL4_PageTableIndexBits);
+    let n_dma_pts = DMA_RESERVATION_NUM_PAGES >> sel4_sys::seL4_PageTableIndexBits;
     size += n_dma_pts * BIT(sel4_sys::seL4_PageTableBits as usize);
     n_slots += n_dma_pts;
 
@@ -234,17 +235,20 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
     )?;
 
     /* Set the new CNode as our default top-level CNode */
-    sel4::init_thread::slot::TCB.cap().tcb_set_space(
-        CPtr::from_bits(0),
-        lvl1_cnode,
-        cap_data,
-        sel4::init_thread::slot::VSPACE.cap(),
-    );
+    sel4::init_thread::slot::TCB
+        .cap()
+        .tcb_set_space(
+            CPtr::from_bits(0),
+            lvl1_cnode,
+            cap_data,
+            sel4::init_thread::slot::VSPACE.cap(),
+        )
+        .expect("Failed to set CSpace of root task");
 
     /* Redefine the CPtrs's relative to the new top-level CSpace */
     lvl1_cnode_cptr = sel4::init_thread::slot::CNODE.cap().relative_self();
     lvl1_cnode = sel4::init_thread::slot::CNODE.cap();
-    init_task_cnode_cptr = lvl1_cnode.relative_bits_with_depth(boot_cptr, sel4::WORD_SIZE);
+    let init_task_cnode_cptr = lvl1_cnode.relative_bits_with_depth(boot_cptr, sel4::WORD_SIZE);
     init_task_cnode =
         CPtr::from_bits(init_task_cnode_cptr.path().bits()).cast::<sel4::cap_type::CNode>();
 
@@ -289,7 +293,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
             lvl1_cnode,
             true,
             INITIAL_TASK_CNODE_SIZE_BITS,
-            &mut BOT_LVL_NODES,
+            addr_of_mut!(BOT_LVL_NODES).as_mut().unwrap(),
             None, /* alloc */
         )
     };
@@ -345,7 +349,8 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
             sel4::init_thread::slot::VSPACE.cap(),
             vaddr,
             sel4::VmAttributes::DEFAULT,
-        );
+        )
+        .expect("Failed to map page table into RS address space");
         first_free_slot += 1;
     }
 

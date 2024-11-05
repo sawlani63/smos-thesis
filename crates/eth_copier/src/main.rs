@@ -1,15 +1,10 @@
 #![no_std]
 #![no_main]
 
-use core::ffi::{c_char, CStr};
-use sel4::MessageInfo;
 use smos_common::client_connection::ClientConnection;
-use smos_common::connection::{sDDFConnection, ObjectServerConnection, RootServerConnection};
-use smos_common::obj_attributes::ObjAttributes;
-use smos_common::sddf::{QueueType, VirtType};
-use smos_common::syscall::{
-    sDDFInterface, NonRootServerInterface, ObjectServerInterface, RootServerInterface,
-};
+use smos_common::connection::{sDDFConnection, RootServerConnection};
+use smos_common::sddf::QueueType;
+use smos_common::syscall::{sDDFInterface, NonRootServerInterface, RootServerInterface};
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::smos_declare_main;
 use smos_sddf::dma_region::DMARegion;
@@ -24,7 +19,7 @@ use smos_common::local_handle::{
 use smos_common::server_connection::ServerConnection;
 use smos_common::syscall::ReplyWrapper;
 use smos_sddf::queue::{ActiveQueue, FreeQueue, Queue};
-use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_notified, sddf_set_channel};
+use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_set_channel};
 use smos_sddf::sddf_channel::sDDFChannel;
 use smos_server::event::{decode_entry_type, EntryType};
 use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
@@ -34,6 +29,7 @@ use smos_server::syscalls::{
     sDDFChannelRegisterBidirectional, sDDFProvideDataRegion, sDDFQueueRegister, ConnOpen,
 };
 
+#[repr(C)]
 struct Resources {
     rx_free_virt: u64,
     rx_active_virt: u64,
@@ -48,11 +44,13 @@ struct Resources {
 }
 
 extern "C" {
-    pub static mut resources: Resources;
+    static mut resources: Resources;
 }
 
 struct Client {
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     id: usize,
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     conn_registration_hndl: LocalHandle<ConnRegistrationHandle>,
     active: Option<Queue<ActiveQueue>>,
     free: Option<Queue<FreeQueue>>,
@@ -61,22 +59,23 @@ struct Client {
     initialized: bool,
 }
 
-const ntfn_buffer: *mut u8 = 0xB0000 as *mut u8;
+const NTFN_BUFFER: *mut u8 = 0xB0000 as *mut u8;
 
-const virt_free: usize = 0x2_000_000;
-const virt_active: usize = 0x2_200_000;
-const cli_free: usize = 0x2_400_000;
-const cli_active: usize = 0x2_600_000;
+const VIRT_FREE: usize = 0x2_000_000;
+const VIRT_ACTIVE: usize = 0x2_200_000;
+const CLI_FREE: usize = 0x2_400_000;
+const CLI_ACTIVE: usize = 0x2_600_000;
 
-const cli_dma_rcv_region: usize = 0x2_800_000;
-const virt_dma_recv_region: usize = 0x3_000_000;
+const CLI_DMA_RCV_REGION: usize = 0x2_800_000;
+const VIRT_DMA_RECV_REGION: usize = 0x3_000_000;
 
-const virt_queue_size: usize = 0x200_000;
-const virt_queue_capacity: usize = 512;
-const client_queue_size: usize = 0x200_000;
-const client_queue_capacity: usize = 512;
-const cli_rcv_region_size: usize = 0x200_000;
-const rcv_dma_region_size: usize = 0x2_200_000;
+const VIRT_QUEUE_SIZE: usize = 0x200_000;
+const VIRT_QUEUE_CAPACITY: usize = 512;
+const CLIENT_QUEUE_SIZE: usize = 0x200_000;
+const CLIENT_QUEUE_CAPACITY: usize = 512;
+#[allow(dead_code)]
+const CLI_RCV_REGION_SIZE: usize = 0x200_000;
+const RCV_DMA_REGION_SIZE: usize = 0x2_200_000;
 
 fn handle_conn_open(
     rs_conn: &RootServerConnection,
@@ -144,7 +143,7 @@ fn handle_queue_register(
     }
 
     /* We need the size to match what we expect */
-    if args.size != client_queue_size {
+    if args.size != CLIENT_QUEUE_SIZE {
         return Err(InvocationError::InvalidArguments);
     }
 
@@ -157,7 +156,7 @@ fn handle_queue_register(
 
             client.active = Some(Queue::<ActiveQueue>::open(
                 rs_conn,
-                cli_active,
+                CLI_ACTIVE,
                 args.size,
                 HandleOrHandleCap::<ObjectHandle>::from(args.hndl_cap),
             )?);
@@ -170,7 +169,7 @@ fn handle_queue_register(
 
             client.free = Some(Queue::<FreeQueue>::open(
                 rs_conn,
-                cli_free,
+                CLI_FREE,
                 args.size,
                 HandleOrHandleCap::<ObjectHandle>::from(args.hndl_cap),
             )?);
@@ -192,8 +191,8 @@ fn handle_provide_data_region(
     client.data = Some(DMARegion::open(
         rs_conn,
         HandleOrHandleCap::<ObjectHandle>::from(args.hndl_cap),
-        cli_dma_rcv_region,
-        client_queue_size,
+        CLI_DMA_RCV_REGION,
+        CLIENT_QUEUE_SIZE,
     )?);
     client.initialized = true;
 
@@ -216,7 +215,7 @@ fn pre_init<T: ServerConnection>(
     });
 
     loop {
-        let (msg, mut badge) = smos_serv_replyrecv(listen_conn, reply, reply_msg_info);
+        let (msg, badge) = smos_serv_replyrecv(listen_conn, reply, reply_msg_info);
 
         if let EntryType::Invocation(id) = decode_entry_type(badge.try_into().unwrap()) {
             let invocation = smos_serv_decode_invocation::<sDDFConnection>(&msg, recv_slot, None);
@@ -272,7 +271,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
 
     let ep_cptr = cspace.alloc_slot().expect("Could not get a slot for ep");
     let listen_conn = rs_conn
-        .conn_publish::<sDDFConnection>(ntfn_buffer, &cspace.to_absolute_cptr(ep_cptr), args[0])
+        .conn_publish::<sDDFConnection>(NTFN_BUFFER, &cspace.to_absolute_cptr(ep_cptr), args[0])
         .expect("Could not publish as a server");
 
     /* Allocate a reply cap */
@@ -282,8 +281,8 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
         .expect("Could not create reply object");
 
     /* Allocate a cap recieve slot */
-    let mut recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
-    let mut recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
+    let recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
+    let recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
 
     /* Allow client to connect */
     let client = pre_init(&rs_conn, &mut cspace, &listen_conn, &reply, recv_slot);
@@ -292,9 +291,9 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
     let virt_queues = QueuePair::new(
         &rs_conn,
         &mut cspace,
-        virt_active,
-        virt_free,
-        virt_queue_size,
+        VIRT_ACTIVE,
+        VIRT_FREE,
+        VIRT_QUEUE_SIZE,
     )
     .expect("Failed to create virt queue pair");
 
@@ -338,34 +337,37 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
         .sddf_get_data_region(&cspace.to_absolute_cptr(virt_rcv_dma_hndl_cap_slot))
         .expect("Failed to get data region");
 
-    let rcv_dma_region = DMARegion::open(
+    let _rcv_dma_region = DMARegion::open(
         &rs_conn,
         virt_rcv_dma_hndl_cap,
-        virt_dma_recv_region,
-        rcv_dma_region_size,
-    );
+        VIRT_DMA_RECV_REGION,
+        RCV_DMA_REGION_SIZE,
+    )
+    .expect("Failed to open DMA region");
 
     sddf_set_channel(
         virt_channel.from_bit.unwrap() as usize,
         None,
         sDDFChannel::NotificationChannelBi(virt_channel),
-    );
+    )
+    .expect("Failed to create channel with virtualiser");
     sddf_set_channel(
         client.channel.unwrap().from_bit.unwrap() as usize,
         None,
         sDDFChannel::NotificationChannelBi(client.channel.unwrap()),
-    );
+    )
+    .expect("Failed to create channel with with client");
 
     unsafe {
         resources = Resources {
-            rx_free_virt: virt_free as u64,
-            rx_active_virt: virt_active as u64,
-            virt_queue_size: virt_queue_capacity as u64,
-            rx_free_cli: cli_free as u64,
-            rx_active_cli: cli_active as u64,
-            cli_queue_size: client_queue_capacity as u64,
-            virt_data_region: virt_dma_recv_region as u64,
-            cli_data_region: cli_dma_rcv_region as u64,
+            rx_free_virt: VIRT_FREE as u64,
+            rx_active_virt: VIRT_ACTIVE as u64,
+            virt_queue_size: VIRT_QUEUE_CAPACITY as u64,
+            rx_free_cli: CLI_FREE as u64,
+            rx_active_cli: CLI_ACTIVE as u64,
+            cli_queue_size: CLIENT_QUEUE_CAPACITY as u64,
+            virt_data_region: VIRT_DMA_RECV_REGION as u64,
+            cli_data_region: CLI_DMA_RCV_REGION as u64,
             virt_id: virt_channel.from_bit.unwrap(),
             cli_id: client.channel.unwrap().from_bit.unwrap(),
         }

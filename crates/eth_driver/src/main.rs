@@ -3,19 +3,16 @@
 
 extern crate alloc;
 use alloc::vec::Vec;
-use core::ffi::{c_char, CStr};
-use smos_common::channel::Channel;
+use bitflags::bitflags;
 use smos_common::client_connection::ClientConnection;
 use smos_common::connection::{sDDFConnection, RootServerConnection};
 use smos_common::error::InvocationError;
 use smos_common::local_handle::{
-    ChannelAuthorityHandle, ConnRegistrationHandle, ConnectionHandle, HandleCap, HandleOrHandleCap,
-    LocalHandle, ObjectHandle, ViewHandle, WindowHandle,
+    ConnRegistrationHandle, ConnectionHandle, HandleOrHandleCap, LocalHandle, ObjectHandle,
 };
-use smos_common::obj_attributes::ObjAttributes;
 use smos_common::sddf::{QueueType, VirtType};
 use smos_common::server_connection::ServerConnection;
-use smos_common::syscall::{ObjectServerInterface, ReplyWrapper, RootServerInterface};
+use smos_common::syscall::{ReplyWrapper, RootServerInterface};
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::{smos_declare_main, Never};
 use smos_sddf::device_region::DeviceRegion;
@@ -23,34 +20,33 @@ use smos_sddf::dma_region::DMARegion;
 use smos_sddf::irq_channel::IrqChannel;
 use smos_sddf::notification_channel::{BidirectionalChannel, NotificationChannel, PPCForbidden};
 use smos_sddf::queue::{ActiveQueue, FreeQueue, Queue};
-use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_notified, sddf_set_channel};
+use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_set_channel};
 use smos_sddf::sddf_channel::sDDFChannel;
-use smos_server::error::handle_error;
 use smos_server::event::{decode_entry_type, EntryType};
 use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
-use smos_server::reply::{handle_reply, SMOSReply};
+use smos_server::reply::SMOSReply;
 use smos_server::syscalls::{
     sDDFChannelRegisterBidirectional, sDDFQueueRegister, ConnOpen, SMOS_Invocation,
 };
 
-const ntfn_buffer: *mut u8 = 0xB0000 as *mut u8;
+const NTFN_BUFFER: *mut u8 = 0xB0000 as *mut u8;
 
-const regs_base: *const u32 = 0xB000000 as *const u32;
+const REGS_BASE: *const u32 = 0xB000000 as *const u32;
 
-const virt_rx_active: *const u8 = 0xC000000 as *const u8;
-const virt_rx_free: *const u8 = 0xC200000 as *const u8;
-const virt_tx_active: *const u8 = 0xC400000 as *const u8;
-const virt_tx_free: *const u8 = 0xC600000 as *const u8;
+const VIRT_RX_ACTIVE: *const u8 = 0xC000000 as *const u8;
+const VIRT_RX_FREE: *const u8 = 0xC200000 as *const u8;
+const VIRT_TX_ACTIVE: *const u8 = 0xC400000 as *const u8;
+const VIRT_TX_FREE: *const u8 = 0xC600000 as *const u8;
 
-const hw_ring: *const u8 = 0xD000000 as *const u8;
+const HW_RING: *const u8 = 0xD000000 as *const u8;
 
-const eth_regs_paddr: usize = 0xa003000;
-const hw_ring_buffer_size: usize = 0x10_000;
+const ETH_REGS_PADDR: usize = 0xa003000;
+const HW_RING_BUFFER_SIZE: usize = 0x10_000;
 const ETH_IRQ_NUMBER: usize = 79;
-const rx_queue_size: usize = 0x200_000;
-const rx_queue_capacity: usize = 512;
-const tx_queue_size: usize = 0x200_000;
-const tx_queue_capacity: usize = 512;
+const RX_QUEUE_SIZE: usize = 0x200_000;
+const RX_QUEUE_CAPACITY: usize = 512;
+// const TX_QUEUE_SIZE: usize = 0x200_000;
+const TX_QUEUE_CAPACITY: usize = 512;
 
 #[repr(C)]
 struct Resources {
@@ -68,13 +64,35 @@ struct Resources {
     rx_ch: u8,
 }
 
+bitflags! {
+    /// Represents a set of flags.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    struct VirtRegistration: u32 {
+        /// The value `A`, at bit position `0`.
+        const Tx = 0b00000001;
+        /// The value `B`, at bit position `1`.
+        const Rx = 0b00000010;
+    }
+}
+
+impl Into<VirtRegistration> for VirtType {
+    fn into(self) -> VirtRegistration {
+        match self {
+            VirtType::Tx => VirtRegistration::Tx,
+            VirtType::Rx => VirtRegistration::Rx,
+        }
+    }
+}
+
 extern "C" {
-    pub static mut resources: Resources;
+    static mut resources: Resources;
 }
 
 #[derive(Debug, Copy, Clone)]
 struct Client {
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     id: usize,
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     conn_registration_hndl: LocalHandle<ConnRegistrationHandle>,
     virt_type: Option<VirtType>,
     active: Option<Queue<ActiveQueue>>,
@@ -83,28 +101,23 @@ struct Client {
     initalized: bool,
 }
 
-const VIRT_RX_INDEX: usize = 0;
-const VIRT_TX_INDEX: usize = 1;
-static mut clients: [Option<Client>; 2] = [None; 2];
-
-fn find_client_from_id(id: usize) -> Option<&'static mut Option<Client>> {
-    unsafe {
-        for client in clients.iter_mut() {
-            if client.as_ref().is_some() && client.as_ref().unwrap().id == id {
-                return Some(client);
-            }
+fn find_client_from_id<'a>(
+    id: usize,
+    clients: &'a mut [Option<Client>],
+) -> Option<&'a mut Option<Client>> {
+    for client in clients.iter_mut() {
+        if client.as_ref().is_some() && client.as_ref().unwrap().id == id {
+            return Some(client);
         }
     }
 
     return None;
 }
 
-fn find_client_slot() -> Option<&'static mut Option<Client>> {
-    unsafe {
-        for client in clients.iter_mut() {
-            if client.as_ref().is_none() {
-                return Some(client);
-            }
+fn find_client_slot<'a>(clients: &'a mut [Option<Client>]) -> Option<&'a mut Option<Client>> {
+    for client in clients.iter_mut() {
+        if client.as_ref().is_none() {
+            return Some(client);
         }
     }
 
@@ -116,8 +129,9 @@ fn handle_conn_open(
     publish_hndl: &LocalHandle<ConnectionHandle>,
     id: usize,
     args: &ConnOpen,
+    clients: &mut [Option<Client>],
 ) -> Result<SMOSReply, InvocationError> {
-    let slot = find_client_slot().ok_or(InvocationError::InsufficientResources)?;
+    let slot = find_client_slot(clients).ok_or(InvocationError::InsufficientResources)?;
 
     /* The eth driver does not support a shared buffer */
     if args.shared_buf_obj.is_some() {
@@ -146,31 +160,18 @@ fn handle_virt_register(
     publish_hndl: &LocalHandle<ConnectionHandle>,
     cspace: &mut SMOSUserCSpace,
     client: &mut Client,
+    virt_reg_status: &mut VirtRegistration,
     args: &sDDFChannelRegisterBidirectional,
 ) -> Result<SMOSReply, InvocationError> {
-    /* Check that no client has already registered for this type */
-    /* @alwin: Make this nicer */
-
     if args.virt_type.is_none() {
         return Err(InvocationError::InvalidArguments);
     }
 
     let virt_type = args.virt_type.unwrap();
 
-    unsafe {
-        for c in clients {
-            if c.is_some() {
-                match c.as_ref().unwrap().virt_type {
-                    Some(x) => {
-                        if x == virt_type {
-                            /* We can only have one tx and rx virtualiser */
-                            return Err(InvocationError::InvalidArguments);
-                        }
-                    }
-                    None => {}
-                }
-            }
-        }
+    /* We can only have one Tx and one Rx virtualizer */
+    if !(*virt_reg_status & virt_type.into()).is_empty() {
+        return Err(InvocationError::InvalidArguments);
     }
 
     /* Try and open the channel */
@@ -183,6 +184,8 @@ fn handle_virt_register(
 
     client.channel = Some(channel);
     client.virt_type = Some(virt_type);
+
+    *virt_reg_status |= virt_type.into();
 
     return Ok(SMOSReply::sDDFChannelRegisterBidirectional {
         hndl_cap: client.channel.unwrap().from_hndl_cap.unwrap(),
@@ -199,7 +202,7 @@ fn handle_queue_register(
     }
 
     // @alwin: Different cases for rx and tx
-    if args.size != rx_queue_size {
+    if args.size != RX_QUEUE_SIZE {
         return Err(InvocationError::InvalidArguments);
     }
 
@@ -210,8 +213,8 @@ fn handle_queue_register(
             }
 
             match client.virt_type {
-                Some(VirtType::Rx) => virt_rx_active,
-                Some(VirtType::Tx) => virt_tx_active,
+                Some(VirtType::Rx) => VIRT_RX_ACTIVE,
+                Some(VirtType::Tx) => VIRT_TX_ACTIVE,
                 _ => panic!("Should not hit this"),
             }
         }
@@ -221,8 +224,8 @@ fn handle_queue_register(
             }
 
             match client.virt_type {
-                Some(VirtType::Rx) => virt_rx_free,
-                Some(VirtType::Tx) => virt_tx_free,
+                Some(VirtType::Rx) => VIRT_RX_FREE,
+                Some(VirtType::Tx) => VIRT_TX_FREE,
                 _ => panic!("Should not hit this"),
             }
         }
@@ -268,8 +271,11 @@ fn pre_init<T: ServerConnection>(
         ipc_buf.set_recv_slot(&recv_slot);
     });
 
+    let mut clients: [Option<Client>; 2] = [None; 2];
+    let mut virt_reg = VirtRegistration::empty();
+
     loop {
-        let (msg, mut badge) = smos_serv_replyrecv(listen_conn, reply, reply_msg_info);
+        let (msg, badge) = smos_serv_replyrecv(listen_conn, reply, reply_msg_info);
 
         match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Fault(_) => panic!("Driver does not expect to handle faults"),
@@ -278,7 +284,7 @@ fn pre_init<T: ServerConnection>(
                 reply_msg_info = None;
             }
             EntryType::Invocation(id) => {
-                let client = find_client_from_id(id);
+                let client = find_client_from_id(id, &mut clients);
 
                 let invocation =
                     smos_serv_decode_invocation::<sDDFConnection>(&msg, recv_slot, None);
@@ -287,18 +293,17 @@ fn pre_init<T: ServerConnection>(
                     continue;
                 }
 
-                if client.is_none() && !matches!(invocation, Ok(SMOS_Invocation::ConnOpen(ref t))) {
+                if client.is_none() && !matches!(invocation, Ok(SMOS_Invocation::ConnOpen(_))) {
                     todo!();
-                } else if client.is_some()
-                    && matches!(invocation, Ok(SMOS_Invocation::ConnOpen(ref t)))
+                } else if client.is_some() && matches!(invocation, Ok(SMOS_Invocation::ConnOpen(_)))
                 {
                     todo!();
                 }
 
-                let ret = if matches!(invocation, Ok(SMOS_Invocation::ConnOpen(ref t))) {
+                let ret = if matches!(invocation, Ok(SMOS_Invocation::ConnOpen(_))) {
                     match invocation.as_ref().unwrap() {
                         SMOS_Invocation::ConnOpen(t) => {
-                            handle_conn_open(&rs_conn, listen_conn.hndl(), id, &t)
+                            handle_conn_open(&rs_conn, listen_conn.hndl(), id, &t, &mut clients)
                         }
                         _ => panic!("No invocations besides conn_open should be handled here"),
                     }
@@ -315,6 +320,7 @@ fn pre_init<T: ServerConnection>(
                                 listen_conn.hndl(),
                                 cspace,
                                 client_unwrapped,
+                                &mut virt_reg,
                                 &t,
                             )
                         }
@@ -331,19 +337,17 @@ fn pre_init<T: ServerConnection>(
             }
         }
 
-        unsafe {
-            if clients[0].is_none() || clients[1].is_none() {
-                continue;
-            }
+        if clients[0].is_none() || clients[1].is_none() {
+            continue;
+        }
 
-            if clients[0].as_ref().unwrap().initalized && clients[1].as_ref().unwrap().initalized {
-                reply.cap.send(reply_msg_info.unwrap());
-                return match clients[0].as_ref().unwrap().virt_type {
-                    Some(VirtType::Rx) => (clients[0].unwrap(), clients[1].unwrap()),
-                    Some(VirtType::Tx) => (clients[1].unwrap(), clients[0].unwrap()),
-                    None => panic!("Should not reach this with either client beign uninitialized"),
-                };
-            }
+        if clients[0].as_ref().unwrap().initalized && clients[1].as_ref().unwrap().initalized {
+            reply.cap.send(reply_msg_info.unwrap());
+            return match clients[0].as_ref().unwrap().virt_type {
+                Some(VirtType::Rx) => (clients[0].unwrap(), clients[1].unwrap()),
+                Some(VirtType::Tx) => (clients[1].unwrap(), clients[0].unwrap()),
+                None => panic!("Should not reach this with either client beign uninitialized"),
+            };
         }
     }
 }
@@ -358,18 +362,12 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     /* Register as a server */
     let ep_cptr = cspace.alloc_slot().expect("Could not get a slot");
     let listen_conn = rs_conn
-        .conn_publish::<sDDFConnection>(ntfn_buffer, &cspace.to_absolute_cptr(ep_cptr), args[0])
+        .conn_publish::<sDDFConnection>(NTFN_BUFFER, &cspace.to_absolute_cptr(ep_cptr), args[0])
         .expect("Could not publish as server");
 
     /* Map in the ethernet registers */
-    let device_region = DeviceRegion::new(
-        &rs_conn,
-        &mut cspace,
-        regs_base as usize,
-        0x1000,
-        eth_regs_paddr,
-    )
-    .expect("Failed to create eth device region");
+    let _device_region = DeviceRegion::new(&rs_conn, REGS_BASE as usize, 0x1000, ETH_REGS_PADDR)
+        .expect("Failed to create eth device region");
 
     /* Register for the IRQ  */
     let irq_channel = IrqChannel::new(&rs_conn, &mut cspace, &listen_conn.hndl(), ETH_IRQ_NUMBER)
@@ -379,8 +377,8 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     let hw_ring_buffer = DMARegion::new(
         &rs_conn,
         &mut cspace,
-        hw_ring as usize,
-        hw_ring_buffer_size,
+        HW_RING as usize,
+        HW_RING_BUFFER_SIZE,
         false,
     )
     .expect("Failed to create hw ring buffer DMA region");
@@ -392,8 +390,8 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
         .expect("Could not create reply object");
 
     /* Allocate a cap recieve slot */
-    let mut recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
-    let mut recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
+    let recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
+    let recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
 
     /* Wait for connections to be established with the rx and tx virtualizers */
     let (rx_virt, tx_virt) = pre_init(&rs_conn, &mut cspace, &listen_conn, &reply, recv_slot);
@@ -402,29 +400,32 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
         irq_channel.bit as usize,
         None,
         sDDFChannel::IrqChannel(irq_channel),
-    );
+    )
+    .expect("Failed to set up IRQ channel");
     sddf_set_channel(
         tx_virt.channel.unwrap().from_bit.unwrap() as usize,
         None,
         sDDFChannel::NotificationChannelBi(tx_virt.channel.unwrap()),
-    );
+    )
+    .expect("Failed to set up TX Virt channel");
     sddf_set_channel(
         rx_virt.channel.unwrap().from_bit.unwrap() as usize,
         None,
         sDDFChannel::NotificationChannelBi(rx_virt.channel.unwrap()),
-    );
+    )
+    .expect("Failed to set up RX Virt channel");
 
     unsafe {
         resources = Resources {
-            regs: regs_base as u64,
+            regs: REGS_BASE as u64,
             hw_ring_buffer_vaddr: hw_ring_buffer.vaddr as u64,
             hw_ring_buffer_paddr: hw_ring_buffer.paddr as u64,
             rx_free: rx_virt.free.unwrap().vaddr as u64,
             rx_active: rx_virt.active.unwrap().vaddr as u64,
             tx_free: tx_virt.free.unwrap().vaddr as u64,
             tx_active: tx_virt.active.unwrap().vaddr as u64,
-            rx_queue_size: rx_queue_capacity,
-            tx_queue_size: tx_queue_capacity,
+            rx_queue_size: RX_QUEUE_CAPACITY,
+            tx_queue_size: TX_QUEUE_CAPACITY,
             irq_ch: irq_channel.bit,
             tx_ch: tx_virt.channel.unwrap().from_bit.unwrap(),
             rx_ch: rx_virt.channel.unwrap().from_bit.unwrap(),
@@ -434,6 +435,4 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     unsafe { sddf_init() };
 
     sddf_event_loop(listen_conn, reply);
-
-    unreachable!()
 }

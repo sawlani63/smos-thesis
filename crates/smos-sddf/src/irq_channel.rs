@@ -37,6 +37,8 @@ impl IrqChannel {
     }
 
     pub fn ack(&self) {
-        self.irq_handler.irq_handler_ack();
+        self.irq_handler
+            .irq_handler_ack()
+            .expect("Failed to ack an IRQ handler");
     }
 }

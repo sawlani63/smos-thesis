@@ -1,6 +1,6 @@
 use crate::cspace::CSpace;
 use crate::irq::IRQDispatch;
-use sel4_config::{sel4_cfg, sel4_cfg_if};
+use sel4_config::sel4_cfg_if;
 
 sel4_cfg_if! {
     if #[sel4_cfg(PLAT_QEMU_ARM_VIRT)] {
@@ -12,7 +12,7 @@ sel4_cfg_if! {
     }
 }
 
-use imp::{configure_timeout_at, disable_timer, get_time, plat_timer_init, TIMEOUT_IRQ};
+use imp::{configure_timeout_at, disable_timer, get_time};
 
 #[derive(Copy, Clone)]
 struct TimeoutNode {
@@ -58,6 +58,7 @@ fn timeouts_peek() -> Option<usize> {
     }
 }
 
+#[allow(dead_code)] // @alwin: This can probably be removed once the timer is fully removed from the RS
 fn timeouts_remove_min() -> (usize, TimerCallback, *const (), usize) {
     unsafe {
         let rm_index = TIMEOUTS_HEAD_FULL.expect("Head was empty") as usize;
@@ -77,6 +78,7 @@ fn timeouts_remove_min() -> (usize, TimerCallback, *const (), usize) {
     }
 }
 
+#[allow(dead_code)] // @alwin: This can probably be removed once the timer is fully removed from the RS
 fn timer_irq(_data: *const (), _irq: usize, irq_handler: sel4::cap::IrqHandler) -> i32 {
     // @alwin: should this return something
     let curr_time = get_time();
@@ -97,6 +99,7 @@ fn timer_irq(_data: *const (), _irq: usize, irq_handler: sel4::cap::IrqHandler) 
     return 0;
 }
 
+#[allow(dead_code)] // @alwin: This can probably be removed once the timer is fully removed from the RS
 fn timeouts_init() {
     for i in 0..(MAX_TIMEOUTS - 1) {
         unsafe {
@@ -183,9 +186,9 @@ pub fn register_timer(
 
 // @alwin: We now have the clock in a user-level server
 pub fn clock_init(
-    cspace: &mut CSpace,
-    irq_dispatch: &mut IRQDispatch,
-    ntfn: sel4::cap::Notification,
+    _cspace: &mut CSpace,
+    _irq_dispatch: &mut IRQDispatch,
+    _ntfn: sel4::cap::Notification,
 ) -> Result<(), sel4::Error> {
     // plat_timer_init();
     // irq_dispatch.register_irq_handler(

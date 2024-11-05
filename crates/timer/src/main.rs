@@ -1,47 +1,31 @@
 #![no_std]
 #![no_main]
 
-use core::ffi::{c_char, CStr};
 use smos_common::client_connection::ClientConnection;
-use smos_common::connection::{sDDFConnection, ObjectServerConnection, RootServerConnection};
-use smos_common::obj_attributes::ObjAttributes;
-use smos_common::sddf::{QueueType, VirtType};
-use smos_common::syscall::{
-    sDDFInterface, NonRootServerInterface, ObjectServerInterface, RootServerInterface,
-};
+use smos_common::connection::{sDDFConnection, RootServerConnection};
+use smos_common::syscall::RootServerInterface;
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::smos_declare_main;
-use smos_sddf::dma_region::DMARegion;
-use smos_sddf::notification_channel::{
-    BidirectionalChannel, NotificationChannel, PPCForbidden, SendOnlyChannel,
-};
-use smos_sddf::queue::QueuePair;
+use smos_sddf::notification_channel::{NotificationChannel, PPCForbidden, SendOnlyChannel};
 extern crate alloc;
 use alloc::vec::Vec;
 use smos_common::error::InvocationError;
-use smos_common::local_handle::{
-    ConnRegistrationHandle, ConnectionHandle, HandleOrHandleCap, LocalHandle, ObjectHandle,
-};
+use smos_common::local_handle::{ConnRegistrationHandle, ConnectionHandle, LocalHandle};
 use smos_common::server_connection::ServerConnection;
 use smos_common::syscall::ReplyWrapper;
 use smos_sddf::irq_channel::IrqChannel;
-use smos_sddf::queue::{ActiveQueue, FreeQueue, Queue};
-use smos_sddf::sddf_bindings::{
-    sddf_event_loop_ppc, sddf_init, sddf_notified, sddf_protected, sddf_set_channel,
-};
+use smos_sddf::sddf_bindings::{sddf_event_loop_ppc, sddf_init, sddf_set_channel};
 use smos_sddf::sddf_channel::sDDFChannel;
-use smos_server::error::handle_error;
 use smos_server::event::{decode_entry_type, EntryType};
 use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
-use smos_server::reply::{handle_reply, SMOSReply};
+use smos_server::reply::SMOSReply;
 use smos_server::syscalls::SMOS_Invocation;
-use smos_server::syscalls::{
-    sDDFChannelRegisterRecvOnly, sDDFProvideDataRegion, sDDFQueueRegister, ConnOpen,
-};
+use smos_server::syscalls::{sDDFChannelRegisterRecvOnly, ConnOpen};
 
-const ntfn_buffer: *mut u8 = 0xB0000 as *mut u8;
-const regs_base: *const u32 = 0xB000000 as *const u32;
-const timer_id: usize = 2;
+const NTFN_BUFFER: *mut u8 = 0xB0000 as *mut u8;
+#[allow(dead_code)]
+const REGS_BASE: *const u32 = 0xB000000 as *const u32;
+const TIMER_ID: usize = 2;
 
 #[repr(C)]
 struct Resources {
@@ -49,12 +33,15 @@ struct Resources {
 }
 
 extern "C" {
-    pub static mut resources: Resources;
+    static mut resources: Resources;
 }
 
 struct Client {
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     id: usize,
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     timer_id: usize,
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     conn_registration_hndl: LocalHandle<ConnRegistrationHandle>,
     channel: Option<NotificationChannel<SendOnlyChannel, PPCForbidden>>,
 }
@@ -77,7 +64,7 @@ fn handle_conn_open(
 
     *slot = Some(Client {
         id: id,
-        timer_id: timer_id,
+        timer_id: TIMER_ID,
         conn_registration_hndl: registration_handle,
         channel: None,
     });
@@ -166,7 +153,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
     /* Register as a server */
     let ep_cptr = cspace.alloc_slot().expect("Could not get a slot");
     let listen_conn = rs_conn
-        .conn_publish::<sDDFConnection>(ntfn_buffer, &cspace.to_absolute_cptr(ep_cptr), args[0])
+        .conn_publish::<sDDFConnection>(NTFN_BUFFER, &cspace.to_absolute_cptr(ep_cptr), args[0])
         .expect("Could not publish as server");
 
     /* Register for the timer irq */
@@ -180,8 +167,8 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
         .expect("Could not create reply object");
 
     /* Allocate a cap recieve slot */
-    let mut recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
-    let mut recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
+    let recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
+    let recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
 
     /* Allow client to connect */
     let client = pre_init(&rs_conn, &mut cspace, &listen_conn, &reply, recv_slot);
@@ -190,12 +177,14 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
         irq_channel.bit as usize,
         None,
         sDDFChannel::IrqChannel(irq_channel),
-    );
+    )
+    .expect("Could not set up IRQ Channel");
     sddf_set_channel(
         2, // @alwin: This probably shouldn't be hardcoded
         Some(client.id),
         sDDFChannel::NotificationChannelSend(client.channel.unwrap()),
-    );
+    )
+    .expect("Could not set up channel with client");
 
     unsafe {
         resources = Resources {

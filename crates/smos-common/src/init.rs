@@ -1,11 +1,5 @@
 use core::marker::PhantomData;
-use core::ops::Range;
-
-use sel4::{cap_type, sys, CPtr, CPtrBits, Cap, CapType};
-
-const fn word_into_usize(x: sel4::Word) -> usize {
-    x as usize
-}
+use sel4::{cap_type, CPtr, CPtrBits, Cap, CapType};
 
 const fn usize_into_word(x: usize) -> sel4::Word {
     x as sel4::Word
@@ -17,6 +11,8 @@ const fn u32_into_usize(x: u32) -> usize {
 
 /* The capabilities that every application starts with */
 #[rustfmt::skip]
+#[allow(non_snake_case)]
+#[allow(non_upper_case_globals)]
 pub mod InitCNodeSlots {
     pub const SMOS_CapNull: u32            = 0;
     pub const SMOS_RootServerEP: u32       = 1;
@@ -74,7 +70,7 @@ impl Slot {
 }
 
 pub mod slot {
-    use super::{cap_type, sys, Slot};
+    use super::{cap_type, Slot};
 
     macro_rules! mk {
         [

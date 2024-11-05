@@ -9,8 +9,6 @@ pub mod env;
 pub use entry::run_main;
 pub use smos_macros::smos_declare_main;
 
-use sel4_panicking_env::abort;
-
 // NOTE(rustc_wishlist) remove once #![never_type] is stabilized
 #[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub enum Never {}

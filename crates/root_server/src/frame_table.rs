@@ -111,7 +111,7 @@ impl FrameTable {
 
     pub fn frame_data_raw(self: &Self, frame_ref: FrameRef) -> *const FrameData {
         assert!(frame_ref < self.capacity.try_into().unwrap());
-        return unsafe { self.frame_data.wrapping_add(frame_ref.try_into().unwrap()) };
+        return self.frame_data.wrapping_add(frame_ref.try_into().unwrap());
     }
 
     fn pop_front(self: &mut Self, list_id: ListID) -> Option<FrameWrapper> {
@@ -272,11 +272,13 @@ impl FrameTable {
             let frame_slot = cspace
                 .alloc_slot()
                 .expect("@alwin: This should not be an expect");
-            cspace.untyped_retype(
-                &ut.get_cap(),
-                sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
-                frame_slot,
-            );
+            cspace
+                .untyped_retype(
+                    &ut.get_cap(),
+                    sel4::ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::SmallPage),
+                    frame_slot,
+                )
+                .expect("@alwin: This should not be an expect");
             let frame =
                 CPtr::from_bits(frame_slot.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
             vec.push((frame, 0));

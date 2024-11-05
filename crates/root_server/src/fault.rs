@@ -1,4 +1,4 @@
-use crate::cspace::{CSpace, CSpaceTrait};
+use crate::cspace::CSpace;
 use crate::frame_table::FrameTable;
 use crate::proc::{procs_get_mut, ProcessType, UserProcess};
 use crate::ut::UTTable;

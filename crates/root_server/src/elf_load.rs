@@ -1,13 +1,12 @@
 use crate::cspace::{CSpace, CSpaceTrait};
 use crate::frame_table::FrameTable;
 use crate::mapping::map_frame;
-use crate::object::{AnonymousMemoryObject, MAX_OBJ_SIZE, OBJ_LVL_MAX};
+use crate::object::{AnonymousMemoryObject, MAX_OBJ_SIZE};
 use crate::page::PAGE_SIZE_4K;
 use crate::ut::UTTable;
 use crate::view::View;
 use crate::window::Window;
 use alloc::rc::Rc;
-use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use smos_common::obj_attributes::ObjAttributes;
@@ -17,12 +16,12 @@ fn rights_from_elf_flags(flags: u32) -> sel4::CapRights {
     let mut builder = sel4::CapRightsBuilder::none();
 
     // Can read
-    if (flags & elf::abi::PF_R != 0 || flags & elf::abi::PF_X != 0) {
+    if flags & elf::abi::PF_R != 0 || flags & elf::abi::PF_X != 0 {
         builder = builder.read(true);
     }
 
     // Can write
-    if (flags & elf::abi::PF_W != 0) {
+    if flags & elf::abi::PF_W != 0 {
         builder = builder.write(true);
     }
 
@@ -49,7 +48,7 @@ fn overlapping_window(
 fn handle_overlapping_segment(
     window: Rc<RefCell<Window>>,
     segment: &elf::segment::ProgramHeader,
-    data: &[u8],
+    _data: &[u8],
 ) {
     log_rs!("Dealing with an overlapping region");
     // @alwin: We should make sure no segments actually overlap in terms of their precise virtual addresses.
@@ -115,7 +114,7 @@ fn load_segment_into_vspace(
     }
 
     /* Create a window corresponding to this segment */
-    let mut window = Rc::new(RefCell::new(Window {
+    let window = Rc::new(RefCell::new(Window {
         start: ROUND_DOWN(
             segment.p_vaddr.try_into().unwrap(),
             sel4_sys::seL4_PageBits.try_into().unwrap(),
@@ -125,14 +124,14 @@ fn load_segment_into_vspace(
     }));
 
     /* Create a memory object corresponding to this segment */
-    let mut object = Rc::new(RefCell::new(AnonymousMemoryObject::new(
+    let object = Rc::new(RefCell::new(AnonymousMemoryObject::new(
         total_size.try_into().unwrap(),
         rights_from_elf_flags(segment.p_flags),
         ObjAttributes::DEFAULT,
     )));
 
     /* Create a view corresponding to this segment */
-    let mut view = Rc::new(RefCell::new(View::new(
+    let view = Rc::new(RefCell::new(View::new(
         window.clone(),
         Some(object.clone()),
         None,
@@ -159,18 +158,24 @@ fn load_segment_into_vspace(
         let orig_frame_cap = frame_table.frame_from_ref(frame_ref).get_cap();
         object
             .borrow_mut()
-            .insert_frame_at(i * PAGE_SIZE_4K, (orig_frame_cap, frame_ref));
+            .insert_frame_at(i * PAGE_SIZE_4K, (orig_frame_cap, frame_ref))
+            .expect("Failed to insert frame into object");
 
         let loadee_frame = sel4::CPtr::from_bits(cspace.alloc_slot()?.try_into().unwrap())
             .cast::<sel4::cap_type::UnspecifiedFrame>();
-        cspace.root_cnode().relative(loadee_frame).copy(
-            &cspace
-                .root_cnode()
-                .relative(frame_table.frame_from_ref(frame_ref).get_cap()),
-            sel4::CapRightsBuilder::all().build(),
-        );
+        cspace
+            .root_cnode()
+            .relative(loadee_frame)
+            .copy(
+                &cspace
+                    .root_cnode()
+                    .relative(frame_table.frame_from_ref(frame_ref).get_cap()),
+                sel4::CapRightsBuilder::all().build(),
+            )
+            .expect("Failed to copy frame capability into loadee frame cslot");
         view.borrow_mut()
-            .insert_cap_at(i * PAGE_SIZE_4K, loadee_frame.cast());
+            .insert_cap_at(i * PAGE_SIZE_4K, loadee_frame.cast())
+            .expect("Failed to insert into view");
 
         match map_frame(
             cspace,
@@ -187,7 +192,9 @@ fn load_segment_into_vspace(
                 // @alwin: This won't get triggered as you would expect because overmapping does
                 // not return an error on aarch64.
                 sel4::Error::DeleteFirst => {
-                    cspace.delete(loadee_frame.bits().try_into().unwrap());
+                    cspace
+                        .delete(loadee_frame.bits().try_into().unwrap())
+                        .unwrap();
                     cspace.free_slot(loadee_frame.bits().try_into().unwrap());
                     frame_table.free_frame(frame_ref);
                 }
@@ -204,7 +211,7 @@ fn load_segment_into_vspace(
         frame_offset += leading_zeroes;
 
         let segment_bytes = PAGE_SIZE_4K - leading_zeroes;
-        if (pos < segment.p_filesz.try_into().unwrap()) {
+        if pos < segment.p_filesz.try_into().unwrap() {
             /* Copy data from the ELF into the region */
             let file_bytes = usize::min(segment_bytes, segment.p_filesz as usize - pos);
             frame_data[frame_offset..frame_offset + file_bytes]
@@ -212,7 +219,6 @@ fn load_segment_into_vspace(
             frame_offset += file_bytes;
 
             /* Fill in the rest of the frame with zeroes */
-            let trailing_zeroes = PAGE_SIZE_4K - (leading_zeroes + file_bytes);
             frame_data[frame_offset..PAGE_SIZE_4K].fill(0);
         } else {
             frame_data.fill(0);

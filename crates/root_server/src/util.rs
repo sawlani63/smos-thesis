@@ -59,7 +59,9 @@ pub fn dealloc_retyped<T: sel4::CapType>(
     ut_table: &mut UTTable,
     alloc: (sel4::Cap<T>, UTWrapper),
 ) {
-    cspace.delete(alloc.0.bits().try_into().unwrap());
+    cspace
+        .delete(alloc.0.bits().try_into().unwrap())
+        .expect("Faield to delete cap");
     cspace.free_slot(alloc.0.bits().try_into().unwrap());
     ut_table.free(alloc.1);
 }

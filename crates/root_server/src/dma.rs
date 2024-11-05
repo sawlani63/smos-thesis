@@ -1,8 +1,7 @@
-use crate::log_rs;
+use crate::cspace::CSpace;
 use crate::mapping::map_frame;
 use crate::page::PAGE_SIZE_4K;
 use crate::ut::UTTable;
-use crate::{cspace::CSpace, println};
 use alloc::vec::Vec;
 use offset_allocator::{Allocation, Allocator};
 use smos_common::{error::InvocationError, util::BIT};
@@ -15,8 +14,11 @@ pub const DMA_RESERVATION_NUM_PAGES: usize = BIT(DMA_RESERVATION_SIZE_BITS as us
 pub struct DMAPool {
     vstart: usize,
     pstart: usize,
+    #[allow(dead_code)] // @alwin: This should hopefully be removed later
     pnext: usize,
+    #[allow(dead_code)] // @alwin: This should hopefully be removed later
     pend: usize,
+    #[allow(dead_code)] // @alwin: This should hopefully be removed later
     ut: sel4::cap::Untyped,
     pages: [sel4::cap::UnspecifiedFrame; DMA_RESERVATION_NUM_PAGES],
     vspace: sel4::cap::VSpace,

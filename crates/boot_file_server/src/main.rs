@@ -11,7 +11,6 @@ use smos_common::local_handle::{
     ViewHandle, WindowHandle, WindowRegistrationHandle,
 };
 use smos_common::syscall::{ObjectServerInterface, ReplyWrapper, RootServerInterface};
-use smos_common::util::ROUND_UP;
 use smos_common::{
     connection::{ObjectServerConnection, RootServerConnection},
     server_connection::ServerConnection,
@@ -19,20 +18,17 @@ use smos_common::{
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::smos_declare_main;
 use smos_runtime::Never;
-use smos_server::error::*;
 use smos_server::event::{decode_entry_type, EntryType};
 use smos_server::handle::{
     generic_allocate_handle, generic_cleanup_handle, generic_get_handle,
     generic_invalid_handle_error, HandleAllocater, HandleInner, ServerHandle,
 };
-use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
 use smos_server::handle_capability::{HandleCapability, HandleCapabilityTable};
 use smos_server::reply::*;
 use smos_server::syscalls::*;
 extern crate alloc;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
-use core::ptr::NonNull;
 use offset_allocator::{Allocation, Allocator};
 use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
 use smos_server::ntfn_buffer::*;
@@ -56,9 +52,9 @@ struct File {
     data: &'static [u8],
 }
 
-static mut files: [Option<File>; NUM_FILES] = [None; NUM_FILES];
+static mut FILES: [Option<File>; NUM_FILES] = [None; NUM_FILES];
 
-const ntfn_buffer: *mut u8 = 0xB0000 as *mut u8;
+const NTFN_BUFFER: *mut u8 = 0xB0000 as *mut u8;
 const SHARED_BUFFER_BASE: *mut u8 = 0xC0000 as *mut u8;
 
 const MAX_HANDLES: usize = 16;
@@ -73,6 +69,7 @@ struct ViewData {
     size: usize,
     win_offset: usize,
     obj_offset: usize,
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     rights: sel4::CapRights,
     registration_hndl: LocalHandle<WindowRegistrationHandle>,
 }
@@ -113,11 +110,11 @@ impl HandleAllocater<BFSResource> for Client {
 
 const MAX_CLIENTS: usize = 16;
 const ARRAY_REPEAT_VALUE: Option<Client> = None;
-static mut clients: [Option<Client>; MAX_CLIENTS] = [ARRAY_REPEAT_VALUE; MAX_CLIENTS];
+static mut CLIENTS: [Option<Client>; MAX_CLIENTS] = [ARRAY_REPEAT_VALUE; MAX_CLIENTS];
 
 fn find_client_from_id(id: usize) -> Option<&'static mut Option<Client>> {
     unsafe {
-        for client in clients.iter_mut() {
+        for client in CLIENTS.iter_mut() {
             if client.as_ref().is_some() && client.as_ref().unwrap().id == id {
                 return Some(client);
             }
@@ -129,7 +126,7 @@ fn find_client_from_id(id: usize) -> Option<&'static mut Option<Client>> {
 
 fn delete_client(to_del: &mut Client) -> Result<(), ()> {
     unsafe {
-        for client in clients.iter_mut() {
+        for client in CLIENTS.iter_mut() {
             if client.is_some() && core::ptr::eq(client.as_ref().unwrap(), to_del) {
                 *client = None;
                 return Ok(());
@@ -142,7 +139,7 @@ fn delete_client(to_del: &mut Client) -> Result<(), ()> {
 
 fn find_client_slot() -> Option<&'static mut Option<Client>> {
     unsafe {
-        for client in clients.iter_mut() {
+        for client in CLIENTS.iter_mut() {
             if client.as_ref().is_none() {
                 return Some(client);
             }
@@ -181,7 +178,7 @@ fn handle_obj_open(
     let mut matched_file = None;
 
     unsafe {
-        for file in files.iter() {
+        for file in FILES.iter() {
             if file.is_none() {
                 continue;
             }
@@ -236,14 +233,15 @@ fn handle_obj_close(
         todo!();
     }
 
-    generic_cleanup_handle(client, handle_cap_table, args.hndl, 0);
+    generic_cleanup_handle(client, handle_cap_table, args.hndl, 0)
+        .expect("Failed to clean up handle");
 
     return Ok(SMOSReply::ObjClose);
 }
 
 fn handle_view(
     rs_conn: &RootServerConnection,
-    publish_hdnl: &LocalHandle<ConnectionHandle>,
+    publish_hndl: &LocalHandle<ConnectionHandle>,
     handle_cap_table: &mut HandleCapabilityTable<BFSResource>,
     client: &mut Client,
     args: &View,
@@ -266,7 +264,7 @@ fn handle_view(
     let client_id = client.id;
     let (idx, handle_ref) = client.allocate_handle()?;
 
-    let reg_hndl = rs_conn.window_register(publish_hdnl, &window, client_id, idx)?;
+    let reg_hndl = rs_conn.window_register(publish_hndl, &window, client_id, idx)?;
 
     let view = Rc::new(RefCell::new(ViewData {
         object: object.clone(),
@@ -301,7 +299,9 @@ fn handle_unview(
     }?;
 
     /* Deregister from the window */
-    rs_conn.window_deregister(view.borrow().registration_hndl);
+    rs_conn
+        .window_deregister(view.borrow().registration_hndl)
+        .expect("Failed to deregister from window");
 
     /* Remove reference to view from object*/
     let pos = view
@@ -325,10 +325,11 @@ fn handle_unview(
 
 fn handle_conn_open(
     rs_conn: &RootServerConnection,
-    publish_hdnl: &LocalHandle<ConnectionHandle>,
+    cspace: &mut SMOSUserCSpace,
+    publish_hndl: &LocalHandle<ConnectionHandle>,
     window_allocator: &mut Allocator,
     id: usize,
-    args: ConnOpen,
+    args: &ConnOpen,
 ) -> Result<SMOSReply, InvocationError> {
     let slot = find_client_slot().ok_or(InvocationError::InsufficientResources)?;
 
@@ -339,30 +340,58 @@ fn handle_conn_open(
         LocalHandle<ViewHandle>,
         Allocation<u32>,
     )>;
+
+    let registration_hndl = rs_conn.conn_register(publish_hndl, id)?;
+
     if let Some(sb) = args.shared_buf_obj {
         // This server arbitrarily only supports windows of size 4K
         if sb.1 != 4096 {
+            rs_conn
+                .conn_deregister(&registration_hndl)
+                .expect("Failed to deregister from connection");
             return Err(InvocationError::AlignmentError { which_arg: 0 });
         }
 
         /* Create a window of the 4KB size*/
-        let window_index = window_allocator
-            .allocate(1)
-            .ok_or(InvocationError::InsufficientResources)?;
+        let window_index = window_allocator.allocate(1).ok_or_else(|| {
+            rs_conn
+                .conn_deregister(&registration_hndl)
+                .expect("Failed to deregister from connection");
+            InvocationError::InsufficientResources
+        })?;
         let window_address = SHARED_BUFFER_BASE as usize + (window_index.offset as usize * 4096);
 
         /* Create a window for the shared buffer */
-        let window_hndl = rs_conn.window_create(window_address, sb.1, None)?;
+        let window_hndl = rs_conn
+            .window_create(window_address, sb.1, None)
+            .map_err(|e| {
+                window_allocator.free(window_index);
+                rs_conn
+                    .conn_deregister(&registration_hndl)
+                    .expect("Failed to deregister from connection");
+                e
+            })?;
 
         /* Create a view for the shared buffer*/
-        let view_hndl = rs_conn.view(
-            &window_hndl,
-            &sb.0.try_into().or(Err(InvocationError::InvalidArguments))?,
-            0,
-            0,
-            4096,
-            sel4::CapRights::all(),
-        )?;
+        let view_hndl = rs_conn
+            .view(
+                &window_hndl,
+                &sb.0.try_into().or(Err(InvocationError::InvalidArguments))?,
+                0,
+                0,
+                4096,
+                sel4::CapRights::all(),
+            )
+            .map_err(|e| {
+                rs_conn
+                    .window_destroy(window_hndl, cspace)
+                    .expect("Failed to destroy window");
+                window_allocator.free(window_index);
+                rs_conn
+                    .conn_deregister(&registration_hndl)
+                    .expect("Failed to deregister from connection");
+                e
+            })?;
 
         shared_buffer = Some((
             window_address as *mut u8,
@@ -375,17 +404,13 @@ fn handle_conn_open(
         shared_buffer = None;
     }
 
-    let registration_handle = rs_conn
-        .conn_register(publish_hdnl, id)
-        .expect("@alwin: can this be an assert?");
     const HANDLE_REPEAT_VALUE: Option<ServerHandle<BFSResource>> = None;
-    const VIEW_REPEAT_VALUE: Option<Rc<RefCell<ViewData>>> = None;
 
     *slot = Some(Client {
         id: id,
         shared_buffer: shared_buffer,
         handles: [HANDLE_REPEAT_VALUE; MAX_HANDLES],
-        conn_registration_hndl: registration_handle,
+        conn_registration_hndl: registration_hndl,
     });
 
     return Ok(SMOSReply::ConnOpen);
@@ -414,9 +439,11 @@ fn handle_conn_close(
         window_allocator.free(client.shared_buffer.as_ref().unwrap().4);
     }
 
-    rs_conn.conn_deregister(&client.conn_registration_hndl);
+    rs_conn
+        .conn_deregister(&client.conn_registration_hndl)
+        .expect("Failed to deregister from connection");
 
-    delete_client(client);
+    delete_client(client).expect("Failed to delete client");
 
     return Ok(SMOSReply::ConnClose);
 }
@@ -436,8 +463,11 @@ fn handle_vm_fault(rs_conn: &RootServerConnection, args: VMFaultNotification) {
 
     if args.fault_offset < view.borrow().win_offset {
         /* The case where the fault occurs before the view */
+        // @alwin: Should probably add an invocation that tells the RS that this fault couldn't be
+        // handled. Not sure what the correct recovery mechanism is here? Maybe something like a
+        // SIGBUS?
         todo!()
-    } else if (args.fault_offset > view.borrow().win_offset + view.borrow().size) {
+    } else if args.fault_offset > view.borrow().win_offset + view.borrow().size {
         /* The case where the fault occurs after the view*/
         todo!()
     }
@@ -445,17 +475,19 @@ fn handle_vm_fault(rs_conn: &RootServerConnection, args: VMFaultNotification) {
     /* How far into the view the fault occurs */
     let pos = args.fault_offset - view.borrow().win_offset;
 
-    rs_conn.page_map(
-        &view.borrow().registration_hndl,
-        args.fault_offset,
-        view.borrow()
-            .object
-            .borrow()
-            .file
-            .data
-            .as_ptr()
-            .wrapping_add(pos + view.borrow().obj_offset),
-    );
+    rs_conn
+        .page_map(
+            &view.borrow().registration_hndl,
+            args.fault_offset,
+            view.borrow()
+                .object
+                .borrow()
+                .file
+                .data
+                .as_ptr()
+                .wrapping_add(pos + view.borrow().obj_offset),
+        )
+        .expect("Failed to map page in VM fault handler");
 }
 
 fn handle_conn_destroy_ntfn(
@@ -487,10 +519,10 @@ fn handle_conn_destroy_ntfn(
         window_allocator.free(client.shared_buffer.as_ref().unwrap().4);
     }
 
-    delete_client(client);
+    delete_client(client).expect("Failed to delete client");
 }
 
-fn handle_win_destroy_ntfn(rs_conn: &RootServerConnection, args: WindowDestroyNotification) {
+fn handle_win_destroy_ntfn(args: WindowDestroyNotification) {
     let client = find_client_from_id(args.client_id).expect("BFS corruption: Invalid client ID");
 
     let view_ref = client
@@ -526,15 +558,13 @@ fn handle_notification(
     window_allocator: &mut Allocator,
     cspace: &mut SMOSUserCSpace,
 ) {
-    while let Some(msg) = unsafe { dequeue_ntfn_buffer_msg(ntfn_buffer) } {
+    while let Some(msg) = unsafe { dequeue_ntfn_buffer_msg(NTFN_BUFFER) } {
         match msg {
             NotificationType::VMFaultNotification(data) => handle_vm_fault(rs_conn, data),
             NotificationType::ConnDestroyNotification(data) => {
                 handle_conn_destroy_ntfn(rs_conn, window_allocator, data, cspace)
             }
-            NotificationType::WindowDestroyNotification(data) => {
-                handle_win_destroy_ntfn(rs_conn, data)
-            }
+            NotificationType::WindowDestroyNotification(data) => handle_win_destroy_ntfn(data),
         }
     }
 }
@@ -547,8 +577,8 @@ fn syscall_loop<T: ServerConnection>(
 ) {
     let mut handle_cap_table = init_handle_cap_table(&mut cspace, &rs_conn, &listen_conn);
     let mut reply_msg_info = None;
-    let mut recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
-    let mut recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
+    let recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
+    let recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
     sel4::with_ipc_buffer_mut(|ipc_buf| {
         ipc_buf.set_recv_slot(&recv_slot);
     });
@@ -557,7 +587,7 @@ fn syscall_loop<T: ServerConnection>(
     let mut window_allocator = Allocator::with_max_allocs(MAX_CLIENTS as u32, MAX_CLIENTS as u32);
 
     loop {
-        let (msg, mut badge) = smos_serv_replyrecv(&listen_conn, &reply, reply_msg_info);
+        let (msg, badge) = smos_serv_replyrecv(&listen_conn, &reply, reply_msg_info);
 
         match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Notification(bits) => {
@@ -598,11 +628,10 @@ fn syscall_loop<T: ServerConnection>(
                     continue;
                 }
 
-                if client.is_none() && !matches!(invocation, Ok(SMOS_Invocation::ConnOpen(ref t))) {
+                if client.is_none() && !matches!(invocation, Ok(SMOS_Invocation::ConnOpen(_))) {
                     // If the client invokes the server without opening the connection
                     todo!()
-                } else if client.is_some()
-                    && matches!(invocation, Ok(SMOS_Invocation::ConnOpen(ref t)))
+                } else if client.is_some() && matches!(invocation, Ok(SMOS_Invocation::ConnOpen(_)))
                 {
                     // If the client calls conn_open on an already open connection
 
@@ -613,7 +642,7 @@ fn syscall_loop<T: ServerConnection>(
                     todo!()
                 }
 
-                let ret = if matches!(invocation, Ok(SMOS_Invocation::ConnOpen(ref t))) {
+                let ret = if matches!(invocation, Ok(SMOS_Invocation::ConnOpen(_))) {
                     match invocation.as_ref().unwrap() {
                         SMOS_Invocation::ConnOpen(t) => handle_conn_open(
                             &rs_conn,
@@ -671,31 +700,31 @@ fn syscall_loop<T: ServerConnection>(
 
 fn init_file_table() {
     unsafe {
-        files[0] = Some(File {
+        FILES[0] = Some(File {
             name: "init",
             data: INIT_ELF_CONTENTS,
         });
-        files[1] = Some(File {
+        FILES[1] = Some(File {
             name: "eth_driver",
             data: ETH_DRIVER_ELF_CONTENTS,
         });
-        files[2] = Some(File {
+        FILES[2] = Some(File {
             name: "eth_virt_rx",
             data: ETH_VIRT_RX_ELF_CONTENTS,
         });
-        files[3] = Some(File {
+        FILES[3] = Some(File {
             name: "eth_virt_tx",
             data: ETH_VIRT_TX_ELF_CONTENTS,
         });
-        files[4] = Some(File {
+        FILES[4] = Some(File {
             name: "eth_copier",
             data: ETH_COPIER_ELF_CONTENTS,
         });
-        files[5] = Some(File {
+        FILES[5] = Some(File {
             name: "echo_server",
             data: ECHO_SERVER_ELF_CONTENTS,
         });
-        files[6] = Some(File {
+        FILES[6] = Some(File {
             name: "timer",
             data: TIMER_ELF_CONTENTS,
         })
@@ -733,7 +762,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) -> sel4::Resu
     let ep_cptr = cspace.alloc_slot().expect("Could not get a slot");
     let listen_connection = rs_conn
         .conn_publish::<ObjectServerConnection>(
-            ntfn_buffer,
+            NTFN_BUFFER,
             &cspace.to_absolute_cptr(ep_cptr),
             "BOOT_FS",
         )

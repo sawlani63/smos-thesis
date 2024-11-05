@@ -1,18 +1,13 @@
-use crate::connection::Server;
-use crate::cspace::{CSpace, CSpaceTrait};
+use crate::cspace::CSpace;
 use crate::handle::RootServerResource;
-use crate::object::{AnonymousMemoryObject, OBJ_LVL_MAX};
 use crate::proc::UserProcess;
 use crate::view::View;
 use crate::PAGE_SIZE_4K;
 use alloc::rc::Rc;
-use alloc::vec;
 use core::cell::RefCell;
 use smos_common::args::{WindowCreateArgs, WindowDestroyArgs};
 use smos_common::error::InvocationError;
-use smos_common::local_handle::{
-    HandleOrHandleCap, LocalHandle, WindowHandle, WindowRegistrationHandle,
-};
+use smos_common::local_handle::{HandleOrHandleCap, LocalHandle, WindowHandle};
 use smos_server::handle::{
     generic_allocate_handle, generic_cleanup_handle, generic_get_handle, HandleAllocater,
     ServerHandle,
@@ -41,7 +36,7 @@ pub fn handle_window_create(
     if args.base_vaddr as usize % PAGE_SIZE_4K != 0 {
         warn_rs!("Window base address should be aligned");
         return Err(InvocationError::AlignmentError {
-            which_arg: WindowCreateArgs::Base_Vaddr as usize,
+            which_arg: WindowCreateArgs::BaseVaddr as usize,
         });
     }
 
@@ -161,7 +156,8 @@ pub fn handle_window_deregister(
     view.borrow_mut().bound_window.borrow_mut().bound_view = None;
     assert!(view.borrow_mut().bound_object.is_none());
 
-    p.cleanup_handle(args.hndl.idx);
+    p.cleanup_handle(args.hndl.idx)
+        .expect("Failed to clean up handle");
 
     return Ok(SMOSReply::WindowDeregister);
 }
@@ -179,7 +175,10 @@ pub fn handle_window_destroy_internal(
                 reference: *reference,
             });
 
-            unsafe { enqueue_ntfn_buffer_msg(server.borrow().ntfn_buffer_addr, msg) };
+            unsafe {
+                enqueue_ntfn_buffer_msg(server.borrow().ntfn_buffer_addr, msg)
+                    .expect("@alwin: What to do when buffer is full");
+            };
             server.borrow().ntfn_dispatch.rs_badged_ntfn().signal();
         }
 
@@ -227,10 +226,10 @@ pub fn handle_window_destroy(
     let window = match handle_ref.as_ref().unwrap().inner() {
         RootServerResource::Window(win) => Ok(win.clone()),
         _ => match args.hndl {
-            ServerReceivedHandleOrHandleCap::Handle(x) => Err(InvocationError::InvalidHandle {
+            ServerReceivedHandleOrHandleCap::Handle(_) => Err(InvocationError::InvalidHandle {
                 which_arg: WindowDestroyArgs::Handle as usize,
             }),
-            ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(x) => {
+            ServerReceivedHandleOrHandleCap::UnwrappedHandleCap(_) => {
                 Err(InvocationError::InvalidHandleCapability {
                     which_arg: WindowDestroyArgs::Handle as usize,
                 })

@@ -1,30 +1,27 @@
 #![no_std]
 #![no_main]
 
-use core::ffi::{c_char, CStr};
 use smos_common::client_connection::ClientConnection;
-use smos_common::connection::{sDDFConnection, ObjectServerConnection, RootServerConnection};
+use smos_common::connection::{sDDFConnection, RootServerConnection};
 use smos_common::error::InvocationError;
 use smos_common::local_handle::HandleOrHandleCap;
 use smos_common::local_handle::ObjectHandle;
 use smos_common::local_handle::{ConnRegistrationHandle, ConnectionHandle, LocalHandle};
-use smos_common::obj_attributes::ObjAttributes;
 use smos_common::sddf::{QueueType, VirtType};
 use smos_common::server_connection::ServerConnection;
 use smos_common::syscall::{
-    sDDFInterface, NonRootServerInterface, ObjectServerInterface, ReplyWrapper, RootServerInterface,
+    sDDFInterface, NonRootServerInterface, ReplyWrapper, RootServerInterface,
 };
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::smos_declare_main;
 use smos_sddf::dma_region::DMARegion;
 use smos_sddf::notification_channel::{BidirectionalChannel, NotificationChannel, PPCForbidden};
 use smos_sddf::queue::{ActiveQueue, FreeQueue, Queue, QueuePair};
-use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_notified, sddf_set_channel};
+use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_set_channel};
 use smos_sddf::sddf_channel::sDDFChannel;
-use smos_server::error::handle_error;
 use smos_server::event::{decode_entry_type, EntryType};
 use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
-use smos_server::reply::{handle_reply, SMOSReply};
+use smos_server::reply::SMOSReply;
 use smos_server::syscalls::{
     sDDFChannelRegisterBidirectional, sDDFQueueRegister, ConnOpen, SMOS_Invocation,
 };
@@ -32,21 +29,21 @@ use smos_server::syscalls::{
 extern crate alloc;
 use alloc::vec::Vec;
 
-const ntfn_buffer: *mut u8 = 0xB0000 as *mut u8;
+const NTFN_BUFFER: *mut u8 = 0xB0000 as *mut u8;
 
-const cpy_free: usize = 0x2_000_000;
-const cpy_active: usize = 0x2_200_000;
-const drv_free: usize = 0x3_000_000;
-const drv_active: usize = 0x3_200_000;
-const rcv_dma: usize = 0x3_400_000;
+const CPY_FREE: usize = 0x2_000_000;
+const CPY_ACTIVE: usize = 0x2_200_000;
+const DRV_FREE: usize = 0x3_000_000;
+const DRV_ACTIVE: usize = 0x3_200_000;
+const RCV_DMA: usize = 0x3_400_000;
 
-const drv_queue_size: usize = 0x200_000;
-const drv_queue_capacity: usize = 512;
-const cpy_queue_size: usize = 0x200_000;
-const cpy_queue_capacity: usize = 512;
-const rcv_dma_region_size: usize = 0x2_200_000;
+const DRV_QUEUE_SIZE: usize = 0x200_000;
+const DRV_QUEUE_CAPACITY: usize = 512;
+const CPY_QUEUE_SIZE: usize = 0x200_000;
+const CPY_QUEUE_CAPACITY: usize = 512;
+const RCV_DMA_REGION_SIZE: usize = 0x2_200_000;
 
-const cli_mac_addr: usize = 0x525401000007;
+const CLI_MAC_ADDR: usize = 0x525401000007;
 
 #[repr(C)]
 struct Client {
@@ -72,11 +69,13 @@ struct Resources {
 }
 
 extern "C" {
-    pub static mut resources: Resources;
+    static mut resources: Resources;
 }
 
 struct Copier {
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     id: usize,
+    #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     conn_registration_hndl: LocalHandle<ConnRegistrationHandle>,
     active: Option<Queue<ActiveQueue>>,
     free: Option<Queue<FreeQueue>>,
@@ -148,7 +147,7 @@ fn handle_queue_register(
         return Err(InvocationError::InvalidArguments);
     }
 
-    if args.size != cpy_queue_size {
+    if args.size != CPY_QUEUE_SIZE {
         return Err(InvocationError::InvalidArguments);
     }
 
@@ -160,7 +159,7 @@ fn handle_queue_register(
 
             cpy.active = Some(Queue::<ActiveQueue>::open(
                 rs_conn,
-                cpy_active,
+                CPY_ACTIVE,
                 args.size,
                 HandleOrHandleCap::<ObjectHandle>::from(args.hndl_cap),
             )?);
@@ -172,7 +171,7 @@ fn handle_queue_register(
 
             cpy.free = Some(Queue::<FreeQueue>::open(
                 rs_conn,
-                cpy_free,
+                CPY_FREE,
                 args.size,
                 HandleOrHandleCap::<ObjectHandle>::from(args.hndl_cap),
             )?);
@@ -215,7 +214,7 @@ fn pre_init<T: ServerConnection>(
     });
 
     loop {
-        let (msg, mut badge) = smos_serv_replyrecv(listen_conn, reply, reply_msg_info);
+        let (msg, badge) = smos_serv_replyrecv(listen_conn, reply, reply_msg_info);
 
         if let EntryType::Invocation(id) = decode_entry_type(badge.try_into().unwrap()) {
             let invocation = smos_serv_decode_invocation::<sDDFConnection>(&msg, recv_slot, None);
@@ -273,19 +272,19 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
     /* Register as a server */
     let ep_cptr = cspace.alloc_slot().expect("Could not get a slot");
     let listen_conn = rs_conn
-        .conn_publish::<sDDFConnection>(ntfn_buffer, &cspace.to_absolute_cptr(ep_cptr), args[0])
+        .conn_publish::<sDDFConnection>(NTFN_BUFFER, &cspace.to_absolute_cptr(ep_cptr), args[0])
         .expect("Could not publish as a server");
 
     /* Create the driver queue pair */
-    let drv_queues = QueuePair::new(&rs_conn, &mut cspace, drv_active, drv_free, drv_queue_size)
+    let drv_queues = QueuePair::new(&rs_conn, &mut cspace, DRV_ACTIVE, DRV_FREE, DRV_QUEUE_SIZE)
         .expect("Failed to create driver queue pair");
 
     /* Create the recieve DMA region */
     let rcv_dma_region = DMARegion::new(
         &rs_conn,
         &mut cspace,
-        rcv_dma as usize,
-        rcv_dma_region_size,
+        RCV_DMA as usize,
+        RCV_DMA_REGION_SIZE,
         true,
     )
     .expect("Failed to create DMA region");
@@ -297,8 +296,8 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
         .expect("Could not create reply object");
 
     /* Allocate a cap recieve slot */
-    let mut recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
-    let mut recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
+    let recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
+    let recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
 
     let copier = pre_init(
         &rs_conn,
@@ -347,31 +346,33 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
         drv_channel.from_bit.unwrap() as usize,
         None,
         sDDFChannel::NotificationChannelBi(drv_channel),
-    );
+    )
+    .expect("Failed to set up channel to driver");
     sddf_set_channel(
         copier.channel.unwrap().from_bit.unwrap() as usize,
         None,
         sDDFChannel::NotificationChannelBi(copier.channel.unwrap()),
-    );
+    )
+    .expect("Failed to set up channel to copier");
 
     /* Start the virtualizer */
     unsafe {
         resources = Resources {
-            rx_free_drv: drv_free as u64,
-            rx_active_drv: drv_active as u64,
-            drv_queue_size: drv_queue_capacity as u64,
-            buffer_data_vaddr: rcv_dma as u64,
+            rx_free_drv: DRV_FREE as u64,
+            rx_active_drv: DRV_ACTIVE as u64,
+            drv_queue_size: DRV_QUEUE_CAPACITY as u64,
+            buffer_data_vaddr: RCV_DMA as u64,
             buffer_data_paddr: rcv_dma_region.paddr as u64,
 
             driver_id: drv_channel.from_bit.unwrap(),
             num_network_clients: 1,
 
             clients: [Client {
-                rx_free: cpy_free as u64,
-                rx_active: cpy_active as u64,
-                queue_size: cpy_queue_capacity as u64,
+                rx_free: CPY_FREE as u64,
+                rx_active: CPY_ACTIVE as u64,
+                queue_size: CPY_QUEUE_CAPACITY as u64,
                 client_id: copier.channel.unwrap().from_bit.unwrap(),
-                mac_addr: cli_mac_addr as u64,
+                mac_addr: CLI_MAC_ADDR as u64,
             }],
         }
     }

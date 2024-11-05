@@ -4,13 +4,14 @@ use core::arch::global_asm;
 use core::panic::UnwindSafe;
 use core::ptr;
 use linked_list_allocator::LockedHeap;
+#[allow(unused_imports)]
 use sel4_panicking::catch_unwind;
+#[allow(unused_imports)]
 use sel4_panicking_env::abort;
 use smos_common::client_connection::ClientConnection;
 use smos_common::connection::RootServerConnection;
 use smos_common::init::InitCNodeSlots::*;
 use smos_common::local_handle::{ConnectionHandle, LocalHandle};
-use smos_common::string::rust_str_from_buffer;
 use smos_cspace::SMOSUserCSpace;
 
 // @alwin: Do this more properly. Map in a heap from the root server and initialize this
@@ -18,7 +19,7 @@ use smos_cspace::SMOSUserCSpace;
 #[global_allocator]
 static ALLOCATOR: LockedHeap = LockedHeap::empty();
 
-static mut heap: [u8; 4096] = [0; 4096];
+static mut HEAP: [u8; 4096] = [0; 4096];
 
 global_asm! {
     r"
@@ -42,8 +43,6 @@ extern "Rust" {
 }
 
 sel4_panicking_env::register_debug_put_char!(sel4::debug_put_char);
-
-enum Never {}
 
 #[no_mangle]
 unsafe extern "C" fn sel4_runtime_rust_entry(argc: u32, argv: *const u8, envp: *const u8) -> ! {
@@ -92,7 +91,7 @@ pub fn run_main<T>(f: impl FnOnce(RootServerConnection, SMOSUserCSpace) -> T + U
     assert!(slot == SMOS_CNodeSelf as usize);
 
     unsafe {
-        ALLOCATOR.lock().init(heap.as_mut_ptr(), heap.len());
+        ALLOCATOR.lock().init(HEAP.as_mut_ptr(), HEAP.len());
     }
 
     // @alwin: There is no conn_hndl associated with the connection to the root server

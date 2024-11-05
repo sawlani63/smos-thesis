@@ -1,6 +1,4 @@
-use core::ptr;
 use sel4::sel4_cfg;
-use smos_common::util::BIT;
 use tock_registers::interfaces::{Readable, Writeable};
 use tock_registers::registers::ReadWrite;
 use tock_registers::{register_bitfields, register_structs};

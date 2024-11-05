@@ -1,3 +1,5 @@
+#![allow(non_camel_case_types)]
+
 use crate::local_handle::{ConnectionHandle, LocalHandle};
 use sel4::cap::Endpoint;
 

@@ -1,6 +1,7 @@
 use byteorder::{ByteOrder, LittleEndian};
 use smos_common::string::rust_str_from_buffer;
 
+#[allow(non_upper_case_globals)]
 static mut args_inner: Option<ArgsInner> = None;
 
 pub unsafe fn init_args(argc: usize, argv: *const u8) {

@@ -1,4 +1,4 @@
-use crate::cspace::{CSpace, CSpaceTrait};
+use crate::cspace::CSpace;
 use crate::dma::DMAPool;
 use crate::frame_table::FrameRef;
 use crate::frame_table::FrameTable;
@@ -6,7 +6,7 @@ use crate::handle::RootServerResource;
 use crate::proc::UserProcess;
 use crate::ut::UTTable;
 use crate::view::View;
-use crate::{dma, PAGE_SIZE_4K};
+use crate::PAGE_SIZE_4K;
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -14,14 +14,13 @@ use core::cell::RefCell;
 use offset_allocator::Allocation;
 use smos_common::error::InvocationError;
 use smos_common::local_handle::{HandleOrHandleCap, ObjectHandle};
-use smos_common::obj_attributes::{self, ObjAttributes};
+use smos_common::obj_attributes::ObjAttributes;
 use smos_common::returns::ObjStat as ObjStatReturn;
 use smos_common::util::BIT;
 use smos_server::handle::{
     generic_allocate_handle, generic_cleanup_handle, generic_get_handle,
     generic_invalid_handle_error, ServerHandle,
 };
-use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
 use smos_server::handle_capability::HandleCapabilityTable;
 use smos_server::reply::SMOSReply;
 use smos_server::syscalls::{ObjCreate, ObjDestroy, ObjStat};
@@ -59,6 +58,7 @@ pub enum ObjectFrameTableEntry {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct AnonymousMemoryObject {
     pub size: usize,
     pub rights: sel4::CapRights,
@@ -171,7 +171,11 @@ impl AnonymousMemoryObject {
                     }
                     ObjectFrameTableEntry::Frame(ref y) => {
                         if revoke {
-                            cspace.root_cnode.relative(y.cap).revoke();
+                            cspace
+                                .root_cnode
+                                .relative(y.cap)
+                                .revoke()
+                                .expect("Failed to revoke cap");
                         }
                         frame_table.free_frame(y.frame_ref);
                     }
@@ -234,7 +238,10 @@ pub fn handle_obj_create(
             .expect("@alwin: This should not be an expect");
         let mut offset = 0;
         for frame in frames {
-            mem_obj.borrow_mut().insert_frame_at(offset, frame);
+            mem_obj
+                .borrow_mut()
+                .insert_frame_at(offset, frame)
+                .expect("Failed to insert frame into object");
             offset += PAGE_SIZE_4K;
         }
     } else {
@@ -249,7 +256,8 @@ pub fn handle_obj_create(
             for (i, frame) in frames.iter().enumerate() {
                 mem_obj
                     .borrow_mut()
-                    .insert_frame_at(i * PAGE_SIZE_4K, (frame.cast(), 0));
+                    .insert_frame_at(i * PAGE_SIZE_4K, (frame.cast(), 0))
+                    .expect("Failed to insert frame into object");
             }
         } else if (args.attributes.has(ObjAttributes::CONTIGUOUS) && n_pages == 1)
             || args.attributes.has(ObjAttributes::EAGER)
@@ -259,10 +267,13 @@ pub fn handle_obj_create(
                     .alloc_frame(cspace, ut_table)
                     .expect("@alwin: This should not be an exepct");
 
-                mem_obj.borrow_mut().insert_frame_at(
-                    i * PAGE_SIZE_4K,
-                    (frame_table.frame_from_ref(frame).get_cap(), frame),
-                );
+                mem_obj
+                    .borrow_mut()
+                    .insert_frame_at(
+                        i * PAGE_SIZE_4K,
+                        (frame_table.frame_from_ref(frame).get_cap(), frame),
+                    )
+                    .expect("Failed to insert frame into object");
             }
         }
     }

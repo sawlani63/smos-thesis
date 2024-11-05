@@ -9,17 +9,14 @@ use crate::PAGE_SIZE_4K;
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::borrow::Borrow;
 use core::cell::RefCell;
 use smos_common::args::ViewArgs;
 use smos_common::error::InvocationError;
-use smos_common::local_handle::{LocalHandle, WindowRegistrationHandle};
+use smos_common::local_handle::LocalHandle;
 use smos_common::util::BIT;
 use smos_server::handle::{
-    generic_allocate_handle, generic_cleanup_handle, generic_get_handle,
-    generic_invalid_handle_error, HandleAllocater, ServerHandle,
+    generic_get_handle, generic_invalid_handle_error, HandleAllocater, ServerHandle,
 };
-use smos_server::handle_arg::ServerReceivedHandleOrHandleCap;
 use smos_server::handle_capability::HandleCapabilityTable;
 use smos_server::reply::SMOSReply;
 
@@ -156,7 +153,9 @@ impl View {
                         ViewCapTableEntry::Cap(ref y) => {
                             if delete {
                                 /* @alwin: deleting the cap should result in an unmap, but double check*/
-                                cspace.delete_cap(y.cap);
+                                cspace
+                                    .delete_cap(y.cap)
+                                    .expect("Failed to delete capability");
                             }
                             cspace.free_cap(y.cap);
                         }
@@ -199,18 +198,18 @@ pub fn handle_view(
     }?;
 
     /* Ensure the size is non-zero */
-    if (args.size == 0) {
+    if args.size == 0 {
         return Err(InvocationError::InvalidArguments);
     }
 
     /* Ensure offsets into the window and object are page aligned */
-    if (args.window_offset & PAGE_SIZE_4K != 0) {
+    if args.window_offset & PAGE_SIZE_4K != 0 {
         return Err(InvocationError::AlignmentError {
             which_arg: ViewArgs::WinOffset as usize,
         });
     }
 
-    if (args.obj_offset & PAGE_SIZE_4K != 0) {
+    if args.obj_offset & PAGE_SIZE_4K != 0 {
         return Err(InvocationError::AlignmentError {
             which_arg: ViewArgs::ObjOffset as usize,
         });
@@ -298,7 +297,8 @@ pub fn handle_unview(
 
     handle_unview_internal(cspace, view);
 
-    p.cleanup_handle(args.hndl.idx);
+    p.cleanup_handle(args.hndl.idx)
+        .expect("Failed to clean up handle");
 
     return Ok(SMOSReply::Unview);
 }

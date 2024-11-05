@@ -13,9 +13,7 @@ use core::cell::RefCell;
 use smos_common::error::InvocationError;
 use smos_common::util::ROUND_DOWN;
 use smos_server::handle::HandleAllocater;
-use smos_server::ntfn_buffer::{
-    enqueue_ntfn_buffer_msg, NotificationType, NtfnBufferData, VMFaultNotification,
-};
+use smos_server::ntfn_buffer::{enqueue_ntfn_buffer_msg, NotificationType, VMFaultNotification};
 use smos_server::reply::{FaultReply, SMOSReply};
 use smos_server::syscalls::PageMap;
 
@@ -39,7 +37,10 @@ fn forward_vm_fault(
     // Safety: The notification buffer address was set when the server was registered and
     // is only unset if the server stops being a server, at which point all the objects
     // associated with it will no longer be backed by it. @alwin: Make sure to actually implement this
-    unsafe { enqueue_ntfn_buffer_msg(server.borrow().ntfn_buffer_addr, msg) };
+    unsafe {
+        enqueue_ntfn_buffer_msg(server.borrow().ntfn_buffer_addr, msg)
+            .expect("@alwin: This shouldn't be an expect")
+    };
 
     server.borrow().ntfn_dispatch.rs_badged_ntfn().signal();
     borrowed_view.pending_fault = Some((reply, info, p.vspace.0))
@@ -79,7 +80,7 @@ pub fn handle_page_map(
     let src_win = p
         .find_window_containing(args.content_vaddr)
         .ok_or(InvocationError::InvalidArguments)?;
-    let src_window_offset = (args.content_vaddr - src_win.borrow_mut().start);
+    let src_window_offset = args.content_vaddr - src_win.borrow_mut().start;
 
     /* Check that the window has a view associated with it */
     let src_view = src_win
@@ -121,7 +122,8 @@ pub fn handle_page_map(
             let orig_frame_cap = frame_table.frame_from_ref(frame_ref).get_cap();
             object
                 .borrow_mut()
-                .insert_frame_at(obj_offset, (orig_frame_cap, frame_ref));
+                .insert_frame_at(obj_offset, (orig_frame_cap, frame_ref))
+                .expect("Failed to insert frame cap into object");
 
             /* Zero-out the frame */
             let frame_data = frame_table.frame_data(frame_ref);
@@ -138,15 +140,20 @@ pub fn handle_page_map(
             .expect("@alwin: this should not be an assert");
         let view_frame_cap = sel4::CPtr::from_bits(view_frame_slot.try_into().unwrap())
             .cast::<sel4::cap_type::UnspecifiedFrame>();
-        cspace.root_cnode().relative(view_frame_cap).copy(
-            &cspace.root_cnode().relative(obj_frame_cap),
-            // @alwin: Be careful about rights here
-            sel4::CapRightsBuilder::all().build(),
-        );
+        cspace
+            .root_cnode()
+            .relative(view_frame_cap)
+            .copy(
+                &cspace.root_cnode().relative(obj_frame_cap),
+                // @alwin: Be careful about rights here
+                sel4::CapRightsBuilder::all().build(),
+            )
+            .expect("Failed to copy frame into view cap");
 
         src_view
             .borrow_mut()
-            .insert_cap_at(src_window_offset, view_frame_cap);
+            .insert_cap_at(src_window_offset, view_frame_cap)
+            .expect("Failed to insert frame cap into view");
     }
 
     /* If we get to this point, there is guaranteed to be a mapping in the view */
@@ -157,17 +164,22 @@ pub fn handle_page_map(
         .expect("@alwin: this should not be an assert");
     let dst_view_frame_cap = sel4::CPtr::from_bits(dst_view_frame_slot.try_into().unwrap())
         .cast::<sel4::cap_type::UnspecifiedFrame>();
-    cspace.root_cnode.relative(dst_view_frame_cap).copy(
-        &cspace
-            .root_cnode
-            .relative(src_view.borrow().lookup_cap(src_window_offset).unwrap().cap),
-        // @alwin: Be careful about rights here
-        sel4::CapRightsBuilder::all().build(),
-    );
+    cspace
+        .root_cnode
+        .relative(dst_view_frame_cap)
+        .copy(
+            &cspace
+                .root_cnode
+                .relative(src_view.borrow().lookup_cap(src_window_offset).unwrap().cap),
+            // @alwin: Be careful about rights here
+            sel4::CapRightsBuilder::all().build(),
+        )
+        .expect("Failed to copy from src view to dst view");
 
     dst_view
         .borrow_mut()
-        .insert_cap_at(args.view_offset, dst_view_frame_cap);
+        .insert_cap_at(args.view_offset, dst_view_frame_cap)
+        .expect("Failed to add frame to view");
 
     if dst_view.borrow().pending_fault.is_some() {
         /* Map the page into the faulting process */
@@ -184,7 +196,8 @@ pub fn handle_page_map(
             dst_view.borrow().rights.clone(),
             sel4::VmAttributes::DEFAULT,
             None,
-        );
+        )
+        .expect("Failed to map frame");
 
         /* Respond to the faulting process */
         let msginfo = sel4::MessageInfoBuilder::default().build();
@@ -278,9 +291,11 @@ pub fn handle_vm_fault(
                 .alloc_frame(cspace, ut_table)
                 .expect("@alwin: Should probs not be an assert");
             let orig_frame_cap = frame_table.frame_from_ref(frame_ref).get_cap();
+
             object
                 .borrow_mut()
-                .insert_frame_at(obj_offset, (orig_frame_cap, frame_ref));
+                .insert_frame_at(obj_offset, (orig_frame_cap, frame_ref))
+                .expect("Failed to insert frame into object");
 
             /* Zero-out the frame */
             let frame_data = frame_table.frame_data(frame_ref);
@@ -293,14 +308,19 @@ pub fn handle_vm_fault(
         let view_frame_cap = cspace
             .alloc_cap::<sel4::cap_type::UnspecifiedFrame>()
             .expect("@alwin: This should not be an assert");
-        cspace.root_cnode().relative(view_frame_cap).copy(
-            &cspace.root_cnode().relative(obj_frame_cap),
-            // @alwin: Be careful about rights here
-            sel4::CapRightsBuilder::all().build(),
-        );
+        cspace
+            .root_cnode()
+            .relative(view_frame_cap)
+            .copy(
+                &cspace.root_cnode().relative(obj_frame_cap),
+                // @alwin: Be careful about rights here
+                sel4::CapRightsBuilder::all().build(),
+            )
+            .expect("Failed to copy frame cap into slot");
 
         view.borrow_mut()
-            .insert_cap_at(fault_offset, view_frame_cap);
+            .insert_cap_at(fault_offset, view_frame_cap)
+            .expect("Failed to insert mapping into view");
     }
 
     /* Map views[idx] into virtual address space */
@@ -318,7 +338,8 @@ pub fn handle_vm_fault(
         view.borrow().rights.clone(),
         sel4::VmAttributes::DEFAULT,
         None,
-    );
+    )
+    .expect("@alwin: Can this be an assert?");
 
     return Some(FaultReply::VMFault { resume: true });
 }

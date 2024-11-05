@@ -13,3 +13,4 @@ smos-cspace = { path = "../smos-cspace" }
 smos-common = { path = "../smos-common"}
 smos-server = { path = "../smos-server" }
 smos-sddf = { path = "../smos-sddf" }
+bitflags = "2.6.0"

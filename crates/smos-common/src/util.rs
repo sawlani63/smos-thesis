@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 pub fn ROUND_UP(n: usize, b: usize) -> usize {
     if n == 0 {
         return 0;
@@ -7,7 +9,7 @@ pub fn ROUND_UP(n: usize, b: usize) -> usize {
 }
 
 pub fn ROUND_DOWN(n: usize, b: usize) -> usize {
-    return (((n) >> (b)) << (b));
+    return (n >> b) << b;
 }
 
 pub const fn BIT(n: usize) -> usize {

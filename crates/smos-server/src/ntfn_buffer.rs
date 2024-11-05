@@ -1,10 +1,8 @@
 use core::ptr::NonNull;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sel4_externally_shared::{ExternallySharedRef, ExternallySharedRefExt};
-use sel4_shared_ring_buffer::roles::{Read, Write};
 use sel4_shared_ring_buffer::RingBuffer;
 use sel4_shared_ring_buffer::{InitialState, InitializationStrategy, RawRingBuffer};
-use smos_common::local_handle::{LocalHandle, WindowRegistrationHandle};
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
 const NTFN_BUFFER_CAPACITY: usize = 64;
@@ -149,12 +147,13 @@ impl Into<NtfnBufferData> for WindowDestroyNotification {
 }
 
 /* Methods */
-
 pub unsafe fn init_ntfn_buffer(raw_ntfn_buffer_addr: *mut u8) {
     let ntfn_buffer_addr = NonNull::new_unchecked(
         raw_ntfn_buffer_addr as *mut RawRingBuffer<NtfnBufferData, NTFN_BUFFER_CAPACITY>,
     );
-    let ntfn_buffer = RingBuffer::<
+    // @alwin: This is kinda ugly, ideally we should pass this around instead of passing an addr
+    // to the enqueue and dequeue functions
+    let _ntfn_buffer = RingBuffer::<
         sel4_shared_ring_buffer::roles::Write,
         NtfnBufferData,
         NTFN_BUFFER_CAPACITY,

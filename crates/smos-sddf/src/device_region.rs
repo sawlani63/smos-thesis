@@ -5,7 +5,6 @@ use smos_common::local_handle::{
 };
 use smos_common::obj_attributes::ObjAttributes;
 use smos_common::syscall::{ObjectServerInterface, RootServerInterface};
-use smos_cspace::SMOSUserCSpace;
 extern crate alloc;
 use alloc::string::ToString;
 
@@ -21,7 +20,6 @@ pub struct DeviceRegion {
 impl DeviceRegion {
     pub fn new(
         rs_conn: &RootServerConnection,
-        cspace: &mut SMOSUserCSpace,
         vaddr: usize,
         size: usize,
         paddr: usize,

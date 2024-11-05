@@ -1,5 +1,5 @@
 use core::arch::asm;
-use sel4::{BootInfo, BootInfoPtr};
+use sel4::BootInfo;
 
 use crate::cspace::CSpace;
 use crate::dma::DMAPool;

@@ -42,7 +42,7 @@ extern crate alloc;
 
 use crate::bootstrap::smos_bootstrap;
 use crate::clock::{clock_init, register_timer};
-use crate::cspace::{CSpace, CSpaceTrait, UserCSpace};
+use crate::cspace::{CSpace, CSpaceTrait};
 use crate::debug::debug_print_bootinfo;
 use crate::fault::handle_fault;
 use crate::frame_table::FrameTable;
@@ -53,19 +53,17 @@ use crate::irq::IRQDispatch;
 use crate::mapping::map_frame;
 use crate::page::PAGE_SIZE_4K;
 use crate::printing::print_init;
-use crate::proc::{start_process, MAX_PID};
+use crate::proc::start_process;
 use crate::syscall::handle_syscall;
 use crate::tests::run_tests;
 use crate::uart::uart_init;
 use crate::ut::{UTTable, UTWrapper};
 use crate::util::alloc_retype;
 use dma::DMAPool;
-use sel4::cap::VSpace;
-use sel4::{BootInfo, BootInfoPtr};
-use sel4_root_task::{declare_root_task, root_task, Never};
+use sel4::BootInfo;
+use sel4_root_task::{declare_root_task, Never};
 use smos_server::event::*;
 use smos_server::handle_capability::HandleCapabilityTable;
-use vmem_layout::PROCESS_STACK_TOP;
 // use crate::connection::publish_boot_fs;
 
 const BFS_CONTENTS: &[u8] = include_bytes!(env!("BOOT_FS_ELF"));
@@ -131,15 +129,13 @@ fn syscall_loop(
     });
 
     loop {
-        let (msg, mut badge) = {
+        let (msg, badge) = {
             if reply_msg_info.is_some() {
                 ep.reply_recv(reply_msg_info.unwrap(), reply.0)
             } else {
                 ep.recv(reply.0)
             }
         };
-
-        let label = msg.label();
 
         reply_msg_info = match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Notification(badge) => {
@@ -188,8 +184,6 @@ fn syscall_loop(
             )?;
         }
     }
-
-    Ok(())
 }
 
 extern "C" fn main_continued(
@@ -238,9 +232,7 @@ extern "C" fn main_continued(
 
     clock_init(cspace, &mut irq_dispatch, ntfn).expect("Failed to initialize clock");
 
-    // publish_boot_fs(ipc_ep);
-
-    let proc = start_process(
+    let _proc = start_process(
         cspace,
         ut_table,
         &mut frame_table,

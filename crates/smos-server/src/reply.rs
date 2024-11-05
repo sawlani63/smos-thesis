@@ -7,6 +7,7 @@ use smos_common::local_handle::{
 use smos_common::returns::*;
 
 #[derive(Debug)]
+#[allow(non_camel_case_types)]
 pub enum SMOSReply {
     WindowCreate {
         hndl: HandleOrHandleCap<WindowHandle>,
@@ -211,10 +212,10 @@ pub fn handle_reply(ipc_buf: &mut sel4::IpcBuffer, reply_type: SMOSReply) -> sel
 }
 
 pub fn handle_fault_reply(
-    ipc_buf: &mut sel4::IpcBuffer,
+    _ipc_buf: &mut sel4::IpcBuffer,
     reply_type: FaultReply,
 ) -> Option<sel4::MessageInfo> {
-    let mut msginfo: Option<sel4::MessageInfo>;
+    let msginfo: Option<sel4::MessageInfo>;
     match reply_type {
         FaultReply::VMFault { resume } => {
             if resume {

@@ -12,10 +12,11 @@ struct EnvVarsInner {
     index: usize,
 }
 
-struct EnvVars {
+pub struct EnvVars {
     inner: EnvVarsInner,
 }
 
+#[allow(non_upper_case_globals)]
 static mut env_inner: Option<EnvVarsInner> = None;
 
 pub unsafe fn init_env(envp: *const u8) {

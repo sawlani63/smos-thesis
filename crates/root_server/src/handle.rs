@@ -11,7 +11,6 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use smos_server::handle::HandleInner;
 use smos_server::handle_capability::HandleCapability;
-use smos_server::syscalls::IRQRegister;
 
 const MAX_HANDLE_CAPS: usize = 256;
 
@@ -33,7 +32,8 @@ pub fn create_handle_cap_table(
                 &cspace.root_cnode().relative(ep),
                 sel4::CapRightsBuilder::none().build(),
                 i.try_into().unwrap(),
-            );
+            )
+            .expect("Failed to mint handle capability");
 
         vec.push(HandleCapability {
             handle: None,
@@ -54,12 +54,15 @@ pub enum RootServerResource {
     Object(Rc<RefCell<AnonymousMemoryObject>>),
     ConnRegistration(Rc<RefCell<Connection>>),
     WindowRegistration(Rc<RefCell<View>>),
+    #[allow(dead_code)]
     IRQRegistration(Rc<RefCell<IRQRegistration>>),
     View(Rc<RefCell<View>>),
     Connection(Rc<RefCell<Connection>>), // Does this need a refcell?
     Server(Rc<RefCell<Server>>),
     Process(Rc<RefCell<ProcessType>>),
+    #[allow(dead_code)]
     Reply((sel4::cap::Reply, UTWrapper)),
+    #[allow(dead_code)]
     HandleCap(sel4::cap::Endpoint),
     ChannelAuthority((sel4::cap::Notification, u8)),
 }

@@ -3,6 +3,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 // @alwin: This file should be auto-generated
 #[derive(TryFromPrimitive, IntoPrimitive, Debug, PartialEq)]
 #[repr(u64)]
+#[allow(non_camel_case_types)]
 pub enum SMOSInvocation {
     WindowCreate = 0,
     WindowDestroy,
@@ -43,7 +44,7 @@ pub enum SMOSInvocation {
     LoadComplete,
     IRQRegister,
     sDDFChannelRegisterBidirectional,
-    sDDFChannelRegisterRecieveOnly,
+    sDDFChannelRegisterReceiveOnly,
     sDDFQueueRegister,
     sDDFGetDataRegion,
     sDDFProvideDataRegion,
@@ -55,7 +56,7 @@ impl SMOSInvocation {
     pub fn can_contain_wrapped_cap(&self) -> bool {
         match self {
             SMOSInvocation::sDDFChannelRegisterBidirectional
-            | SMOSInvocation::sDDFChannelRegisterRecieveOnly
+            | SMOSInvocation::sDDFChannelRegisterReceiveOnly
             | SMOSInvocation::sDDFQueueRegister
             | SMOSInvocation::sDDFProvideDataRegion
             | SMOSInvocation::View
