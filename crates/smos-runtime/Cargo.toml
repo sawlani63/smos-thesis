@@ -7,6 +7,7 @@ edition = "2021"
 sel4 = { git = "https://github.com/seL4/rust-sel4", features = ["state", "thread-local-state"]}
 sel4-sys = { git = "https://github.com/seL4/rust-sel4" }
 sel4-config = { git = "https://github.com/seL4/rust-sel4" }
+sel4-ctors-dtors = { git = "https://github.com/seL4/rust-sel4" }
 sel4-panicking = { git = "https://github.com/seL4/rust-sel4" }
 sel4-runtime-common = { git = "https://github.com/seL4/rust-sel4", features = ["tls", "unwinding"]}
 sel4-panicking-env = {git = "https://github.com/seL4/rust-sel4"}

@@ -162,14 +162,14 @@ fn load_segment_into_vspace(
             .expect("Failed to insert frame into object");
 
         let loadee_frame = sel4::CPtr::from_bits(cspace.alloc_slot()?.try_into().unwrap())
-            .cast::<sel4::cap_type::UnspecifiedFrame>();
+            .cast::<sel4::cap_type::UnspecifiedPage>();
         cspace
             .root_cnode()
-            .relative(loadee_frame)
+            .absolute_cptr(loadee_frame)
             .copy(
                 &cspace
                     .root_cnode()
-                    .relative(frame_table.frame_from_ref(frame_ref).get_cap()),
+                    .absolute_cptr(frame_table.frame_from_ref(frame_ref).get_cap()),
                 sel4::CapRightsBuilder::all().build(),
             )
             .expect("Failed to copy frame capability into loadee frame cslot");

@@ -27,9 +27,9 @@ pub fn create_handle_cap_table(
         // so they can't be spoofed from normal endpoint caps
         cspace
             .root_cnode()
-            .relative_bits_with_depth(tmp.try_into().unwrap(), sel4::WORD_SIZE)
+            .absolute_cptr_from_bits_with_depth(tmp.try_into().unwrap(), sel4::WORD_SIZE)
             .mint(
-                &cspace.root_cnode().relative(ep),
+                &cspace.root_cnode().absolute_cptr(ep),
                 sel4::CapRightsBuilder::none().build(),
                 i.try_into().unwrap(),
             )
@@ -40,7 +40,7 @@ pub fn create_handle_cap_table(
             root_cap: Some(
                 cspace
                     .root_cnode()
-                    .relative_bits_with_depth(tmp.try_into().unwrap(), sel4::WORD_SIZE),
+                    .absolute_cptr_from_bits_with_depth(tmp.try_into().unwrap(), sel4::WORD_SIZE),
             ),
         });
     }

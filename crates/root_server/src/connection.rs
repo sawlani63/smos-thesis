@@ -139,9 +139,11 @@ pub fn handle_conn_create(
         .or(Err(InvocationError::InsufficientResources))?;
     cspace
         .root_cnode()
-        .relative_bits_with_depth(slot.try_into().unwrap(), sel4::WORD_SIZE)
+        .absolute_cptr_from_bits_with_depth(slot.try_into().unwrap(), sel4::WORD_SIZE)
         .mint(
-            &cspace.root_cnode().relative(server.borrow().unbadged_ep.0),
+            &cspace
+                .root_cnode()
+                .absolute_cptr(server.borrow().unbadged_ep.0),
             sel4::CapRightsBuilder::all().build(),
             ((pid | INVOCATION_EP_BITS) as u64).try_into().unwrap(),
         )
@@ -184,7 +186,7 @@ pub fn handle_conn_destroy(
 
     cspace
         .root_cnode()
-        .relative(conn.borrow().badged_ep)
+        .absolute_cptr(conn.borrow().badged_ep)
         .revoke()
         .expect("Failed to revoke badged endpoint");
 
@@ -232,9 +234,11 @@ pub fn handle_server_handle_cap_create(
         .or(Err(InvocationError::InsufficientResources))?;
     cspace
         .root_cnode
-        .relative(badged_cap)
+        .absolute_cptr(badged_cap)
         .mint(
-            &cspace.root_cnode().relative(server.borrow().unbadged_ep.0),
+            &cspace
+                .root_cnode()
+                .absolute_cptr(server.borrow().unbadged_ep.0),
             sel4::CapRights::none(),
             args.ident as u64,
         )

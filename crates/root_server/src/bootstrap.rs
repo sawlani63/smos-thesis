@@ -189,13 +189,15 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
     };
     ut.untyped_retype(
         &blueprint,
-        &sel4::init_thread::slot::CNODE.cap().relative_self(),
+        &sel4::init_thread::slot::CNODE
+            .cap()
+            .absolute_cptr_for_self(),
         lvl1_cptr,
         1,
     )
     .expect("Could not create new top-level CNode");
     let mut lvl1_cnode_cptr =
-        init_task_cnode.relative_bits_with_depth(lvl1_cptr as u64, sel4::WORD_SIZE);
+        init_task_cnode.absolute_cptr_from_bits_with_depth(lvl1_cptr as u64, sel4::WORD_SIZE);
     let mut lvl1_cnode =
         CPtr::from_bits(lvl1_cnode_cptr.path().bits()).cast::<sel4::cap_type::CNode>();
 
@@ -215,16 +217,16 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
         CNODE_SLOT_BITS(INITIAL_TASK_CNODE_SIZE_BITS) + CNODE_SLOT_BITS(CNODE_SIZE_BITS);
 
     /* copy the old root cnode to cptr 0 in the new cspace */
-    let init_task_cnode_self = init_task_cnode.relative_bits_with_depth(
+    let init_task_cnode_self = init_task_cnode.absolute_cptr_from_bits_with_depth(
         sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode.into(),
         sel4::WORD_SIZE,
     );
-    let init_task_cnode_copy = lvl1_cnode.relative_bits_with_depth(boot_cptr, depth);
+    let init_task_cnode_copy = lvl1_cnode.absolute_cptr_from_bits_with_depth(boot_cptr, depth);
     init_task_cnode_copy.copy(&init_task_cnode_self, sel4::CapRightsBuilder::all().build())?;
 
     /* mint a cap to our new cnode at seL4_CapInitThreadCnode in the new cspace with the correct guard */
     let cap_data = sel4::CNodeCapData::new(0, sel4::WORD_SIZE - depth);
-    let lvl1_self_cptr = lvl1_cnode.relative_bits_with_depth(
+    let lvl1_self_cptr = lvl1_cnode.absolute_cptr_from_bits_with_depth(
         sel4_sys::seL4_RootCNodeCapSlots::seL4_CapInitThreadCNode.into(),
         depth,
     );
@@ -246,9 +248,12 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
         .expect("Failed to set CSpace of root task");
 
     /* Redefine the CPtrs's relative to the new top-level CSpace */
-    lvl1_cnode_cptr = sel4::init_thread::slot::CNODE.cap().relative_self();
+    lvl1_cnode_cptr = sel4::init_thread::slot::CNODE
+        .cap()
+        .absolute_cptr_for_self();
     lvl1_cnode = sel4::init_thread::slot::CNODE.cap();
-    let init_task_cnode_cptr = lvl1_cnode.relative_bits_with_depth(boot_cptr, sel4::WORD_SIZE);
+    let init_task_cnode_cptr =
+        lvl1_cnode.absolute_cptr_from_bits_with_depth(boot_cptr, sel4::WORD_SIZE);
     init_task_cnode =
         CPtr::from_bits(init_task_cnode_cptr.path().bits()).cast::<sel4::cap_type::CNode>();
 
@@ -267,9 +272,10 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
         }
 
         if let Err(e) = lvl1_cnode
-            .relative_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE)
+            .absolute_cptr_from_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE)
             .move_(
-                &init_task_cnode.relative_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE),
+                &init_task_cnode
+                    .absolute_cptr_from_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE),
             )
         {
             sel4::debug_println!("When copying capability {} - Encountered error {}", i, e);
@@ -382,7 +388,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
     )
     .ok_or(sel4::Error::NotEnoughMemory)?;
 
-    let mut dma_pages: [sel4::cap::UnspecifiedFrame; DMA_RESERVATION_NUM_PAGES] =
+    let mut dma_pages: [sel4::cap::UnspecifiedPage; DMA_RESERVATION_NUM_PAGES] =
         [CPtr::from_bits(0).cast(); DMA_RESERVATION_NUM_PAGES];
     for i in 0..DMA_RESERVATION_NUM_PAGES {
         cspace.untyped_retype(
@@ -391,7 +397,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
             first_free_slot,
         )?;
         dma_pages[i] = CPtr::from_bits(first_free_slot.try_into().unwrap())
-            .cast::<sel4::cap_type::UnspecifiedFrame>();
+            .cast::<sel4::cap_type::UnspecifiedPage>();
         first_free_slot += 1;
     }
 
@@ -432,7 +438,7 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
 
             this_ut.untyped_retype(
                 &blueprint,
-                &lvl1_cnode.relative_bits_with_depth(
+                &lvl1_cnode.absolute_cptr_from_bits_with_depth(
                     cnode.try_into().unwrap(),
                     sel4::WORD_SIZE - CNODE_SLOT_BITS(CNODE_SIZE_BITS),
                 ),

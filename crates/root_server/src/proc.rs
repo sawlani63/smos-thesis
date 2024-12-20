@@ -547,15 +547,15 @@ fn init_process_stack(
             .expect("Failed to insert frame into object");
 
         let loadee_frame = sel4::CPtr::from_bits(cspace.alloc_slot()?.try_into().unwrap())
-            .cast::<sel4::cap_type::UnspecifiedFrame>();
+            .cast::<sel4::cap_type::UnspecifiedPage>();
 
         cspace
             .root_cnode()
-            .relative(loadee_frame)
+            .absolute_cptr(loadee_frame)
             .copy(
                 &cspace
                     .root_cnode()
-                    .relative(frame_table.frame_from_ref(frame_ref).get_cap()),
+                    .absolute_cptr(frame_table.frame_from_ref(frame_ref).get_cap()),
                 sel4::CapRightsBuilder::all().build(),
             )
             .expect("Failed to copy frame");
@@ -629,11 +629,11 @@ pub fn start_process(
         .cast::<sel4::cap_type::SmallPage>();
     cspace
         .root_cnode()
-        .relative(ipc_buffer_cap)
+        .absolute_cptr(ipc_buffer_cap)
         .copy(
             &cspace
                 .root_cnode()
-                .relative(frame_table.frame_from_ref(ipc_buffer_ref).get_cap()),
+                .absolute_cptr(frame_table.frame_from_ref(ipc_buffer_ref).get_cap()),
             sel4::CapRightsBuilder::all().build(),
         )
         .map_err(|e| {
@@ -661,9 +661,9 @@ pub fn start_process(
     /* now mutate the cap, thereby setting the badge */
     proc_cspace
         .root_cnode()
-        .relative_bits_with_depth(proc_ep.try_into().unwrap(), sel4::WORD_SIZE)
+        .absolute_cptr_from_bits_with_depth(proc_ep.try_into().unwrap(), sel4::WORD_SIZE)
         .mint(
-            &cspace.root_cnode().relative(ep),
+            &cspace.root_cnode().absolute_cptr(ep),
             sel4::CapRightsBuilder::all().build(),
             (pos | INVOCATION_EP_BITS).try_into().unwrap(),
         )
@@ -694,9 +694,9 @@ pub fn start_process(
     /* Copy the CNode cap into the new process cspace*/
     proc_cspace
         .root_cnode()
-        .relative_bits_with_depth(proc_self_cspace.try_into().unwrap(), sel4::WORD_SIZE)
+        .absolute_cptr_from_bits_with_depth(proc_self_cspace.try_into().unwrap(), sel4::WORD_SIZE)
         .copy(
-            &cspace.root_cnode().relative(proc_cspace.root_cnode()),
+            &cspace.root_cnode().absolute_cptr(proc_cspace.root_cnode()),
             sel4::CapRightsBuilder::all().build(),
         )
         .map_err(|e| {
@@ -809,9 +809,9 @@ pub fn start_process(
     /* Mint the badged fault EP capability into the slot */
     cspace
         .root_cnode()
-        .relative(fault_ep)
+        .absolute_cptr(fault_ep)
         .mint(
-            &cspace.root_cnode().relative(ep),
+            &cspace.root_cnode().absolute_cptr(ep),
             sel4::CapRightsBuilder::all().build(),
             (pos | FAULT_EP_BITS).try_into().unwrap(),
         )
@@ -969,11 +969,11 @@ pub fn start_process(
         .cast::<sel4::cap_type::SmallPage>();
     cspace
         .root_cnode()
-        .relative(shared_buffer_cap)
+        .absolute_cptr(shared_buffer_cap)
         .copy(
             &cspace
                 .root_cnode()
-                .relative(frame_table.frame_from_ref(shared_buffer_ref).get_cap()),
+                .absolute_cptr(frame_table.frame_from_ref(shared_buffer_ref).get_cap()),
             sel4::CapRightsBuilder::all().build(),
         )
         .map_err(|e| {

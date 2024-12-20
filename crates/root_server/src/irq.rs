@@ -135,9 +135,9 @@ impl IRQDispatch {
             .cast::<sel4::cap_type::Notification>();
         cspace
             .root_cnode
-            .relative(ntfn)
+            .absolute_cptr(ntfn)
             .mint(
-                &cspace.root_cnode.relative(irq_ntfn),
+                &cspace.root_cnode.absolute_cptr(irq_ntfn),
                 sel4::CapRightsBuilder::none().write(true).build(),
                 badge.try_into().unwrap(),
             )
@@ -256,9 +256,9 @@ impl UserNotificationDispatch {
         // Mint the badged notification
         cspace
             .root_cnode()
-            .relative(ntfn)
+            .absolute_cptr(ntfn)
             .mint(
-                &cspace.root_cnode().relative(self.ntfn.0),
+                &cspace.root_cnode().absolute_cptr(self.ntfn.0),
                 sel4::CapRights::write_only(),
                 badge.try_into().unwrap(),
             )
@@ -316,9 +316,9 @@ impl UserNotificationDispatch {
         // Mint the badged notification
         cspace
             .root_cnode()
-            .relative(ntfn)
+            .absolute_cptr(ntfn)
             .mint(
-                &cspace.root_cnode().relative(self.ntfn.0),
+                &cspace.root_cnode().absolute_cptr(self.ntfn.0),
                 sel4::CapRights::write_only(),
                 badge.try_into().unwrap(),
             )

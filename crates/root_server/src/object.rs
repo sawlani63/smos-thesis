@@ -173,7 +173,7 @@ impl AnonymousMemoryObject {
                         if revoke {
                             cspace
                                 .root_cnode
-                                .relative(y.cap)
+                                .absolute_cptr(y.cap)
                                 .revoke()
                                 .expect("Failed to revoke cap");
                         }

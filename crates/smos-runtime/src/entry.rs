@@ -46,8 +46,8 @@ sel4_panicking_env::register_debug_put_char!(sel4::debug_put_char);
 
 #[no_mangle]
 unsafe extern "C" fn sel4_runtime_rust_entry(argc: u32, argv: *const u8, envp: *const u8) -> ! {
-    unsafe extern "C" fn cont_fn(_cont_arg: *mut sel4_runtime_common::ContArg) -> ! {
-        inner_entry()
+    fn cont_fn(_cont_arg: *mut sel4_runtime_common::ContArg) -> ! {
+        unsafe { inner_entry() }
     }
 
     unsafe { init_args(argc as usize, argv) };
@@ -57,7 +57,7 @@ unsafe extern "C" fn sel4_runtime_rust_entry(argc: u32, argv: *const u8, envp: *
 
 #[doc(hidden)]
 pub fn run_main<T>(f: impl FnOnce(RootServerConnection, SMOSUserCSpace) -> T + UnwindSafe) -> ! {
-    #[cfg(all(feature = "unwinding", panic = "unwind"))]
+    #[cfg(all(panic = "unwind"))]
     {
         ::sel4_runtime_common::set_eh_frame_finder().unwrap();
     }
@@ -68,7 +68,7 @@ pub fn run_main<T>(f: impl FnOnce(RootServerConnection, SMOSUserCSpace) -> T + U
                 .as_mut()
                 .unwrap(),
         );
-        ::sel4_runtime_common::run_ctors();
+        ::sel4_ctors_dtors::run_ctors();
     }
 
     // Set up the cspace

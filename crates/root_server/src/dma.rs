@@ -20,7 +20,7 @@ pub struct DMAPool {
     pend: usize,
     #[allow(dead_code)] // @alwin: This should hopefully be removed later
     ut: sel4::cap::Untyped,
-    pages: [sel4::cap::UnspecifiedFrame; DMA_RESERVATION_NUM_PAGES],
+    pages: [sel4::cap::UnspecifiedPage; DMA_RESERVATION_NUM_PAGES],
     vspace: sel4::cap::VSpace,
     pub allocation_table: Option<Allocator>,
 }
@@ -31,7 +31,7 @@ impl DMAPool {
         ut_table: &mut UTTable,
         vspace: sel4::cap::VSpace,
         ut: sel4::cap::Untyped,
-        pages: [sel4::cap::UnspecifiedFrame; DMA_RESERVATION_NUM_PAGES],
+        pages: [sel4::cap::UnspecifiedPage; DMA_RESERVATION_NUM_PAGES],
         pstart: usize,
         vstart: usize,
     ) -> Result<Self, sel4::Error> {
@@ -84,7 +84,7 @@ impl DMAPool {
     pub fn allocate_contig_pages(
         &mut self,
         n_pages: u32,
-    ) -> Result<(Allocation, Vec<sel4::cap::UnspecifiedFrame>), InvocationError> {
+    ) -> Result<(Allocation, Vec<sel4::cap::UnspecifiedPage>), InvocationError> {
         assert!(self.allocation_table.is_some());
 
         let alloc = self

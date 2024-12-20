@@ -24,7 +24,7 @@ fn retype_map_pt(
 pub fn map_frame(
     cspace: &mut CSpace,
     ut_table: &mut UTTable,
-    frame_cap: sel4::cap::UnspecifiedFrame,
+    frame_cap: sel4::cap::UnspecifiedPage,
     vspace: sel4::cap::VSpace,
     vaddr: usize,
     rights: sel4::CapRights,

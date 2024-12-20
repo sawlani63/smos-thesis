@@ -139,12 +139,12 @@ pub fn handle_page_map(
             .alloc_slot()
             .expect("@alwin: this should not be an assert");
         let view_frame_cap = sel4::CPtr::from_bits(view_frame_slot.try_into().unwrap())
-            .cast::<sel4::cap_type::UnspecifiedFrame>();
+            .cast::<sel4::cap_type::UnspecifiedPage>();
         cspace
             .root_cnode()
-            .relative(view_frame_cap)
+            .absolute_cptr(view_frame_cap)
             .copy(
-                &cspace.root_cnode().relative(obj_frame_cap),
+                &cspace.root_cnode().absolute_cptr(obj_frame_cap),
                 // @alwin: Be careful about rights here
                 sel4::CapRightsBuilder::all().build(),
             )
@@ -163,14 +163,14 @@ pub fn handle_page_map(
         .alloc_slot()
         .expect("@alwin: this should not be an assert");
     let dst_view_frame_cap = sel4::CPtr::from_bits(dst_view_frame_slot.try_into().unwrap())
-        .cast::<sel4::cap_type::UnspecifiedFrame>();
+        .cast::<sel4::cap_type::UnspecifiedPage>();
     cspace
         .root_cnode
-        .relative(dst_view_frame_cap)
+        .absolute_cptr(dst_view_frame_cap)
         .copy(
             &cspace
                 .root_cnode
-                .relative(src_view.borrow().lookup_cap(src_window_offset).unwrap().cap),
+                .absolute_cptr(src_view.borrow().lookup_cap(src_window_offset).unwrap().cap),
             // @alwin: Be careful about rights here
             sel4::CapRightsBuilder::all().build(),
         )
@@ -306,13 +306,13 @@ pub fn handle_vm_fault(
         };
 
         let view_frame_cap = cspace
-            .alloc_cap::<sel4::cap_type::UnspecifiedFrame>()
+            .alloc_cap::<sel4::cap_type::UnspecifiedPage>()
             .expect("@alwin: This should not be an assert");
         cspace
             .root_cnode()
-            .relative(view_frame_cap)
+            .absolute_cptr(view_frame_cap)
             .copy(
-                &cspace.root_cnode().relative(obj_frame_cap),
+                &cspace.root_cnode().absolute_cptr(obj_frame_cap),
                 // @alwin: Be careful about rights here
                 sel4::CapRightsBuilder::all().build(),
             )

@@ -56,7 +56,7 @@ pub trait CSpaceTrait {
             let cnode = target >> CNODE_SLOT_BITS(CNODE_SIZE_BITS);
             return ut.untyped_retype(
                 &blueprint,
-                &self.root_cnode().relative_bits_with_depth(
+                &self.root_cnode().absolute_cptr_from_bits_with_depth(
                     cnode.try_into().unwrap(),
                     sel4::WORD_SIZE - CNODE_SLOT_BITS(CNODE_SIZE_BITS),
                 ),
@@ -64,7 +64,12 @@ pub trait CSpaceTrait {
                 1,
             );
         } else {
-            return ut.untyped_retype(&blueprint, &self.root_cnode().relative_self(), target, 1);
+            return ut.untyped_retype(
+                &blueprint,
+                &self.root_cnode().absolute_cptr_for_self(),
+                target,
+                1,
+            );
         }
     }
 
@@ -134,7 +139,7 @@ pub trait CSpaceTrait {
 
     fn delete(&self, cptr: usize) -> Result<(), sel4::Error> {
         self.root_cnode()
-            .relative_bits_with_depth(cptr.try_into().unwrap(), sel4::WORD_SIZE)
+            .absolute_cptr_from_bits_with_depth(cptr.try_into().unwrap(), sel4::WORD_SIZE)
             .delete()
     }
 
@@ -204,7 +209,7 @@ pub struct BotLvlNodeT {
 struct CSpaceAlloc {
     map_frame: fn(
         usize,
-        sel4::cap::UnspecifiedFrame,
+        sel4::cap::UnspecifiedPage,
         [sel4::AbsoluteCPtr; MAPPING_SLOTS],
     ) -> (usize, usize),
     alloc_4k_ut: fn(usize) -> (sel4::AbsoluteCPtr, usize),
@@ -297,9 +302,9 @@ impl UserCSpace {
         let root_cnode = bootstrap.alloc_slot()?;
         bootstrap
             .root_cnode
-            .relative_bits_with_depth(root_cnode.try_into().unwrap(), sel4::WORD_SIZE)
+            .absolute_cptr_from_bits_with_depth(root_cnode.try_into().unwrap(), sel4::WORD_SIZE)
             .mint(
-                &bootstrap.root_cnode.relative(untyped.0),
+                &bootstrap.root_cnode.absolute_cptr(untyped.0),
                 sel4::CapRightsBuilder::all().build(),
                 guard.into_word(),
             )
@@ -337,7 +342,7 @@ impl UserCSpace {
         does with the cspace */
         for i in 1..BIT(CNODE_SIZE_BITS) {
             self.root_cnode
-                .relative_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE)
+                .absolute_cptr_from_bits_with_depth(i.try_into().unwrap(), sel4::WORD_SIZE)
                 .delete()
                 .expect("Failed to delete cap");
         }
@@ -346,7 +351,7 @@ impl UserCSpace {
 
         bootstrap
             .root_cnode()
-            .relative(self.root_cnode)
+            .absolute_cptr(self.root_cnode)
             .delete()
             .expect("Failed to delete root cnode");
     }
@@ -444,7 +449,7 @@ impl<'a> CSpace<'a> {
                 irq.try_into().unwrap(),
                 edge_triggered.into(),
                 0,
-                &self.root_cnode.relative(irq_handler),
+                &self.root_cnode.absolute_cptr(irq_handler),
             )
             .or(Err(sel4::Error::InvalidArgument))
     }
@@ -461,7 +466,7 @@ impl<'a> CSpace<'a> {
             .irq_control_get_trigger(
                 irq.try_into().unwrap(),
                 edge_triggered.into(),
-                &self.root_cnode.relative(irq_handler),
+                &self.root_cnode.absolute_cptr(irq_handler),
             )
             .or(Err(sel4::Error::InvalidArgument))
     }
@@ -484,7 +489,7 @@ impl<'a> CSpace<'a> {
                 .irq_control_get_trigger(
                     irq.try_into().unwrap(),
                     edge_triggered.into(),
-                    &self.root_cnode.relative(irq_handler),
+                    &self.root_cnode.absolute_cptr(irq_handler),
                 )
                 .or(Err(sel4::Error::InvalidArgument))?;
         } else {

@@ -22,7 +22,7 @@ use smos_server::reply::SMOSReply;
 
 #[derive(Clone, Debug)]
 pub struct ViewCap {
-    pub cap: sel4::cap::UnspecifiedFrame,
+    pub cap: sel4::cap::UnspecifiedPage,
 }
 
 #[derive(Clone, Debug)]
@@ -94,7 +94,7 @@ impl View {
     pub fn insert_cap_at(
         &mut self,
         offset: usize,
-        cap: sel4::cap::UnspecifiedFrame,
+        cap: sel4::cap::UnspecifiedPage,
     ) -> Result<(), sel4::Error> {
         let mut shift = 39;
         let mut curr_table_lvl = 0;

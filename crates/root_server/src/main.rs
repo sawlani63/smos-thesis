@@ -123,7 +123,7 @@ fn syscall_loop(
     let recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
     let recv_slot = cspace
         .root_cnode()
-        .relative_bits_with_depth(recv_slot_inner as u64, sel4::WORD_SIZE);
+        .absolute_cptr_from_bits_with_depth(recv_slot_inner as u64, sel4::WORD_SIZE);
     sel4::with_ipc_buffer_mut(|ipc_buf| {
         ipc_buf.set_recv_slot(&recv_slot);
     });
