@@ -9,8 +9,20 @@ use sel4::CPtr;
 use smos_common::util::BIT;
 
 type FrameData = [u8; PAGE_SIZE_4K];
-
 pub type FrameRef = u32;
+
+/* @alwin: This whole thing is BAD! fix it up in resource containers */
+const MAX_DEVICE_ALLOCATIONS: usize = 64;
+const ARRAY_REPEAT_VALUE: Option<DeviceMemAllocation> = None;
+static mut DEVICE_ALLOCATIONS: [Option<DeviceMemAllocation>; MAX_DEVICE_ALLOCATIONS] =
+    [ARRAY_REPEAT_VALUE; MAX_DEVICE_ALLOCATIONS];
+
+#[derive(Debug, Clone)]
+struct DeviceMemAllocation {
+    paddr: usize,
+    size: usize,
+    frames: Vec<(sel4::cap::SmallPage, u32)>,
+}
 
 // @alwin: C uses a packed struct but we don't have those in Rust.
 // #[packed]
@@ -263,7 +275,19 @@ impl FrameTable {
         ut_table: &mut UTTable,
         paddr: usize,
         size: usize,
-    ) -> Option<Vec<(sel4::cap::SmallPage, u32)>> {
+    ) -> Option<&'static Vec<(sel4::cap::SmallPage, u32)>> {
+        /* Check if we have already allocated this memory range */
+        unsafe {
+            for allocation in &mut DEVICE_ALLOCATIONS {
+                if let Some(allocation_inner) = allocation {
+                    // @alwin: For now, only deal with it if it's an exact match
+                    if paddr == allocation_inner.paddr && size <= allocation_inner.size {
+                        return Some(&allocation_inner.frames);
+                    }
+                }
+            }
+        }
+
         let mut vec = Vec::new();
         for curr in (paddr..paddr + size).step_by(PAGE_SIZE_4K) {
             let ut = ut_table
@@ -281,9 +305,25 @@ impl FrameTable {
                 .expect("@alwin: This should not be an expect");
             let frame =
                 CPtr::from_bits(frame_slot.try_into().unwrap()).cast::<sel4::cap_type::SmallPage>();
+            // @alwin: THis is zero because these these frrames aren't from the frame table so they don't
+            // have a real frame ref
             vec.push((frame, 0));
         }
-        Some(vec)
+
+        unsafe {
+            for i in 0..MAX_DEVICE_ALLOCATIONS {
+                if DEVICE_ALLOCATIONS[i].is_none() {
+                    DEVICE_ALLOCATIONS[i] = Some(DeviceMemAllocation {
+                        paddr: paddr,
+                        size: size,
+                        frames: vec,
+                    });
+                    return Some(&DEVICE_ALLOCATIONS[i].as_ref().unwrap().frames);
+                }
+            }
+        }
+
+        panic!("Ran out of device memory allocations AAAA");
     }
 
     fn remove_frame(self: &mut Self, list_id: ListID, frame: &FrameWrapper) {

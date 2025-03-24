@@ -992,15 +992,18 @@ pub trait sDDFInterface: ClientConnection {
     fn sddf_data_region_provide(
         &self,
         obj: HandleOrHandleCap<ObjectHandle>,
+        size: usize,
     ) -> Result<(), InvocationError> {
         let mut msginfo = sel4::MessageInfoBuilder::default()
             .label(SMOSInvocation::sDDFProvideDataRegion as u64)
             .extra_caps(1)
+            .length(1)
             .build();
 
         if let HandleOrHandleCap::HandleCap(hndl_cap) = obj {
             return sel4::with_ipc_buffer_mut(|ipc_buf| {
                 ipc_buf.caps_or_badges_mut()[0] = hndl_cap.cptr.path().bits();
+                ipc_buf.msg_regs_mut()[0] = size as u64;
 
                 msginfo = self.ep().call(msginfo);
 

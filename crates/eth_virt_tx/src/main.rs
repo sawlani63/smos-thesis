@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+use core::mem::MaybeUninit;
+
 use smos_common::client_connection::ClientConnection;
 use smos_common::connection::{sDDFConnection, RootServerConnection};
 use smos_common::error::InvocationError;
@@ -14,10 +16,19 @@ use smos_common::syscall::{
 };
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::smos_declare_main;
+use smos_sddf::config::RegionResource;
+use smos_sddf::device_config::DeviceRegionResource;
 use smos_sddf::dma_region::DMARegion;
+use smos_sddf::driver_setup::sDDFClient;
+use smos_sddf::driver_setup::sddf_driver_pre_init;
+use smos_sddf::driver_setup::VirtRegistration;
+use smos_sddf::net_config::{
+    NetConnectionResource, NetVirtTxClientConfig, NetVirtTxConfig, SDDF_NET_MAGIC,
+    SDDF_NET_MAX_CLIENTS,
+};
 use smos_sddf::notification_channel::{BidirectionalChannel, NotificationChannel, PPCForbidden};
 use smos_sddf::queue::{ActiveQueue, FreeQueue, Queue, QueuePair};
-use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_set_channel};
+use smos_sddf::sddf_bindings::{init, sddf_event_loop, sddf_set_channel};
 use smos_sddf::sddf_channel::sDDFChannel;
 use smos_server::event::{decode_entry_type, EntryType};
 use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
@@ -45,31 +56,12 @@ const CLI_QUEUE_SIZE: usize = 0x200_000;
 const CLI_QUEUE_CAPACITY: usize = 512;
 // const rcv_dma_region_size: usize = 0x2_200_000;
 
-#[repr(C)]
-struct Client {
-    tx_free: u64,
-    tx_active: u64,
-    queue_size: u64,
-    client_ch: u8,
-    buffer_data_region_vaddr: u64,
-    buffer_data_region_paddr: u64,
-}
-
-#[repr(C)]
-struct Resources {
-    tx_free_drv: u64,
-    tx_active_drv: u64,
-    drv_queue_size: u64,
-    drv_ch: u8,
-    num_network_clients: u8,
-    clients: [Client; 1],
-}
-
 extern "C" {
-    static mut resources: Resources;
+    static mut config: NetVirtTxConfig;
 }
 
-struct CliConn {
+#[derive(Debug, Copy, Clone)]
+struct VirtTxClient {
     #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
     id: usize,
     #[allow(dead_code)] // @alwin: Remove once this is used to tear stuff down
@@ -78,45 +70,41 @@ struct CliConn {
     free: Option<Queue<FreeQueue>>,
     data: Option<DMARegion>,
     channel: Option<NotificationChannel<BidirectionalChannel, PPCForbidden>>,
-    initialized: bool,
 }
 
-fn handle_conn_open(
-    rs_conn: &RootServerConnection,
-    publish_hndl: &LocalHandle<ConnectionHandle>,
-    id: usize,
-    args: &ConnOpen,
-    slot: &mut Option<CliConn>,
-) -> Result<SMOSReply, InvocationError> {
-    /* The virtualizer does not support a shared buffer */
-    if args.shared_buf_obj.is_some() {
-        return Err(InvocationError::InvalidArguments);
+impl sDDFClient for VirtTxClient {
+    fn new(id: usize, conn_handle: LocalHandle<ConnRegistrationHandle>) -> Self {
+        return VirtTxClient {
+            id: id,
+            conn_registration_hndl: conn_handle,
+            active: None,
+            free: None,
+            data: None,
+            channel: None,
+        };
     }
 
-    let registration_handle = rs_conn
-        .conn_register(publish_hndl, id)
-        .expect("@alwin: Can this be an assertion?");
+    fn get_id(&self) -> usize {
+        return self.id;
+    }
 
-    *slot = Some(CliConn {
-        id: id,
-        conn_registration_hndl: registration_handle,
-        free: None,
-        active: None,
-        data: None,
-        channel: None,
-        initialized: false,
-    });
-
-    return Ok(SMOSReply::ConnOpen);
+    fn initialized(&self) -> bool {
+        return self.channel.is_some()
+            && self.free.is_some()
+            && self.active.is_some()
+            && self.data.is_some();
+    }
 }
 
 fn handle_client_register(
     rs_conn: &RootServerConnection,
     publish_hndl: &LocalHandle<ConnectionHandle>,
     cspace: &mut SMOSUserCSpace,
-    client: &mut CliConn,
+    client: &mut VirtTxClient,
+    _status: &mut VirtRegistration,
     args: &sDDFChannelRegisterBidirectional,
 ) -> Result<SMOSReply, InvocationError> {
+    // We expect a client, not a virtualizer
     if args.virt_type.is_some() {
         return Err(InvocationError::InvalidArguments);
     }
@@ -137,7 +125,7 @@ fn handle_client_register(
 
 fn handle_queue_register(
     rs_conn: &RootServerConnection,
-    client: &mut CliConn,
+    client: &mut VirtTxClient,
     args: &sDDFQueueRegister,
 ) -> Result<SMOSReply, InvocationError> {
     /* We expect them to register a channel first */
@@ -174,6 +162,7 @@ fn handle_queue_register(
                 HandleOrHandleCap::<ObjectHandle>::from(args.hndl_cap),
             )?);
         }
+        _ => return Err(InvocationError::InvalidArguments),
     }
 
     return Ok(SMOSReply::sDDFQueueRegister);
@@ -181,7 +170,7 @@ fn handle_queue_register(
 
 fn handle_provide_data_region(
     rs_conn: &RootServerConnection,
-    client: &mut CliConn,
+    client: &mut VirtTxClient,
     args: &sDDFProvideDataRegion,
 ) -> Result<SMOSReply, InvocationError> {
     if client.active.is_none() || client.free.is_none() {
@@ -193,73 +182,16 @@ fn handle_provide_data_region(
         CLI0_TX_DMA_REGION,
         0x200_000,
     )?);
-    client.initialized = true;
 
     return Ok(SMOSReply::sDDFProvideDataRegion);
 }
 
-fn pre_init<T: ServerConnection>(
-    rs_conn: &RootServerConnection,
-    cspace: &mut SMOSUserCSpace,
-    listen_conn: &T,
-    reply: &ReplyWrapper,
-    recv_slot: sel4::AbsoluteCPtr,
-) -> CliConn {
-    let mut client = None;
-    let mut reply_msg_info = None;
-
-    /* Specify the slot in which we should recieve caps */
-    sel4::with_ipc_buffer_mut(|ipc_buf| {
-        ipc_buf.set_recv_slot(&recv_slot);
-    });
-
-    loop {
-        let (msg, badge) = smos_serv_replyrecv(listen_conn, reply, reply_msg_info);
-
-        if let EntryType::Invocation(id) = decode_entry_type(badge.try_into().unwrap()) {
-            let invocation = smos_serv_decode_invocation::<sDDFConnection>(&msg, recv_slot, None);
-            if let Err(e) = invocation {
-                reply_msg_info = e;
-                continue;
-            }
-
-            let ret = if client.is_none() {
-                match invocation.as_ref().unwrap() {
-                    SMOS_Invocation::ConnOpen(t) => {
-                        handle_conn_open(&rs_conn, listen_conn.hndl(), id, t, &mut client)
-                    }
-                    _ => todo!(), // @alwin: Client calls something before opening connection
-                }
-            } else {
-                match invocation.as_ref().unwrap() {
-                    SMOS_Invocation::ConnOpen(_) => todo!(), // @alwin: Client calls conn_open again
-                    SMOS_Invocation::sDDFChannelRegisterBidirectional(t) => handle_client_register(
-                        rs_conn,
-                        listen_conn.hndl(),
-                        cspace,
-                        &mut client.as_mut().unwrap(),
-                        &t,
-                    ),
-                    SMOS_Invocation::sDDFQueueRegister(t) => {
-                        handle_queue_register(rs_conn, &mut client.as_mut().unwrap(), &t)
-                    }
-                    SMOS_Invocation::sDDFProvideDataRegion(t) => {
-                        handle_provide_data_region(rs_conn, &mut client.as_mut().unwrap(), &t)
-                    }
-                    _ => panic!("Should not get any other invocations!"),
-                }
-            };
-
-            reply_msg_info = smos_serv_cleanup(invocation.unwrap(), recv_slot, ret);
-        } else {
-            reply_msg_info = None;
-        }
-
-        if client.as_ref().unwrap().initialized {
-            reply.cap.send(reply_msg_info.unwrap());
-            return client.unwrap();
-        }
+fn check_done(client: [Option<VirtTxClient>; 1]) -> bool {
+    if client[0].is_none() {
+        return false;
     }
+
+    return client[0].unwrap().initialized();
 }
 
 // @alwin: This initial setup is pretty duplicated between the Tx and Rx virtualizers
@@ -290,7 +222,19 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
     let recv_slot_inner = cspace.alloc_slot().expect("Could not allocate slot");
     let recv_slot = cspace.to_absolute_cptr(recv_slot_inner);
 
-    let client = pre_init(&rs_conn, &mut cspace, &listen_conn, &reply, recv_slot);
+    let client = sddf_driver_pre_init(
+        &rs_conn,
+        &mut cspace,
+        &listen_conn,
+        &reply,
+        recv_slot,
+        Some(handle_client_register),
+        Some(handle_queue_register),
+        Some(handle_provide_data_region),
+        None,
+        check_done,
+    )[0]
+    .expect("Failed to establish connection with client");
 
     /* Create connection to eth driver */
     let conn_ep_slot = cspace.alloc_slot().expect("Failed to allocate slot");
@@ -341,24 +285,51 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
     .expect("Failed to set client channel");
 
     unsafe {
-        resources = Resources {
-            tx_free_drv: DRV_FREE as u64,
-            tx_active_drv: DRV_ACTIVE as u64,
-            drv_queue_size: DRV_QUEUE_CAPACITY as u64,
-            drv_ch: drv_channel.from_bit.unwrap(),
-            num_network_clients: 1,
-            clients: [Client {
-                tx_free: CLI0_FREE as u64,
-                tx_active: CLI0_ACTIVE as u64,
-                queue_size: CLI_QUEUE_CAPACITY as u64,
-                client_ch: client.channel.unwrap().from_bit.unwrap(),
-                buffer_data_region_vaddr: CLI0_TX_DMA_REGION as u64,
-                buffer_data_region_paddr: client.data.unwrap().paddr as u64,
-            }],
-        }
+        let mut clients: [MaybeUninit<NetVirtTxClientConfig>; SDDF_NET_MAX_CLIENTS] =
+            MaybeUninit::uninit().assume_init();
+
+        clients[0] = MaybeUninit::new(NetVirtTxClientConfig {
+            conn: NetConnectionResource {
+                free_queue: RegionResource {
+                    vaddr: client.free.unwrap().vaddr,
+                    size: client.free.unwrap().size,
+                },
+                active_queue: RegionResource {
+                    vaddr: client.active.unwrap().vaddr,
+                    size: client.active.unwrap().size,
+                },
+                num_buffers: 512,
+                id: client.channel.unwrap().from_bit.unwrap(),
+            },
+            data: DeviceRegionResource {
+                region: RegionResource {
+                    vaddr: client.data.as_ref().unwrap().vaddr,
+                    size: client.data.as_ref().unwrap().size,
+                },
+                io_addr: client.data.as_ref().unwrap().paddr,
+            },
+        });
+
+        config = NetVirtTxConfig {
+            magic: SDDF_NET_MAGIC,
+            driver: NetConnectionResource {
+                free_queue: RegionResource {
+                    vaddr: drv_queues.free.vaddr,
+                    size: drv_queues.free.size,
+                },
+                active_queue: RegionResource {
+                    vaddr: drv_queues.active.vaddr,
+                    size: drv_queues.active.size,
+                },
+                num_buffers: 512,
+                id: drv_channel.from_bit.unwrap(),
+            },
+            clients: clients,
+            num_clients: 1,
+        };
     }
 
-    unsafe { sddf_init() };
+    unsafe { init() };
 
     sddf_event_loop(listen_conn, reply);
 }

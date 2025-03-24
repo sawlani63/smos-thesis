@@ -6,6 +6,7 @@ fn main() {
     println!("cargo:rustc-link-search={}", libary_dir);
     println!("cargo:rustc-link-search={}", libc_dir);
     println!("cargo::rustc-link-lib=static=echo_server",);
-    println!("cargo::rustc-link-lib=static=sddf_util",);
+    println!("cargo::rustc-link-lib=static=sddf_util_serial",);
+    println!("cargo::rustc-link-lib=static=lib_sddf_lwip",);
     println!("cargo::rustc-link-lib=static=c",);
 }

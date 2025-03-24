@@ -190,7 +190,7 @@ pub struct sDDFQueueRegister {
 #[allow(non_camel_case_types)]
 pub struct sDDFProvideDataRegion {
     pub hndl_cap: WrappedHandleCap,
-    // pub size: usize,
+    pub size: usize,
 }
 
 #[derive(Debug)]
@@ -485,6 +485,7 @@ mod SMOS_Invocation_Raw {
                 Ok(SMOS_Invocation::sDDFProvideDataRegion(
                     sDDFProvideDataRegion {
                         hndl_cap: WrappedHandleCap::new(recv_slot),
+                        size: f_msg(0) as usize,
                     },
                 ))
             }

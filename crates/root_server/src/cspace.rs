@@ -10,7 +10,7 @@ use bitfield::{bf_clr_bit, bf_first_free, bf_set_bit, bitfield_init, bitfield_ty
 use core::mem::size_of;
 use sel4::sel4_cfg;
 use sel4::{CNodeCapData, ObjectBlueprint};
-use smos_common::util::BIT;
+use smos_common::util::{BIT, ROUND_DOWN};
 
 pub const fn CNODE_SLOT_BITS(x: usize) -> usize {
     x - sel4_sys::seL4_SlotBits as usize

@@ -19,17 +19,18 @@ fn main(rs_conn: RootServerConnection, _cspace: SMOSUserCSpace) -> sel4::Result<
         .process_spawn("eth_driver", "BOOT_FS", 254, Some(&["eth0"]))
         .expect("Failed to start eth_driver");
 
-    /* Start the timer driver */
+    /* Start the serial driver */
     rs_conn
-        .process_spawn("timer", "BOOT_FS", 254, Some(&["timer0"]))
-        .expect("Failed to star timer_driver");
+        .process_spawn("serial_driver", "BOOT_FS", 254, Some(&["serial0"]))
+        .expect("Failed to start serial_driver");
 
-    /* Start the virt rx */
+    /* eth components */
+    /* Start the eth virt rx */
     rs_conn
         .process_spawn("eth_virt_rx", "BOOT_FS", 253, Some(&["rx_eth0", "eth0"]))
         .expect("Failed to start eth_virt_rx");
 
-    /* Start the virt tx */
+    /* Start the eth virt tx */
     rs_conn
         .process_spawn("eth_virt_tx", "BOOT_FS", 253, Some(&["tx_eth0", "eth0"]))
         .expect("Failed to start eth_virt_tx");
@@ -44,14 +45,43 @@ fn main(rs_conn: RootServerConnection, _cspace: SMOSUserCSpace) -> sel4::Result<
         )
         .expect("Failed to start eth_copier");
 
-    /* Start the client */
+    /* Serial components */
+    rs_conn
+        .process_spawn(
+            "serial_virt_rx",
+            "BOOT_FS",
+            253,
+            Some(&["rx_serial0", "serial0"]),
+        )
+        .expect("Failed to start eth_virt_rx");
 
+    rs_conn
+        .process_spawn(
+            "serial_virt_tx",
+            "BOOT_FS",
+            253,
+            Some(&["tx_serial0", "serial0"]),
+        )
+        .expect("Failed to start eth_virt_rx");
+
+    /* Start the timer driver */
+    rs_conn
+        .process_spawn("timer", "BOOT_FS", 254, Some(&["timer0"]))
+        .expect("Failed to star timer_driver");
+
+    /* Start the client */
     rs_conn
         .process_spawn(
             "echo_server",
             "BOOT_FS",
             251,
-            Some(&["cli0_copy_eth0", "tx_eth0", "timer0"]),
+            Some(&[
+                "cli0_copy_eth0",
+                "tx_eth0",
+                "rx_serial0",
+                "tx_serial0",
+                "timer0",
+            ]),
         )
         .expect("Failed to start echo_server");
 

@@ -6,7 +6,10 @@ sddf = 'sddf'
 sel4_install_dir = 'deps/seL4/install'
 echo_server_dir = sddf / 'examples/echo_server'
 eth_driver_dir = sddf / 'drivers/network/virtio'
+serial_driver_dir = sddf / 'drivers/serial/virtio'
 net_components_dir = sddf / 'network/components'
+lib_sddf_lwip_dir = sddf / 'network/lib_sddf_lwip'
+serial_components_dir = sddf / 'serial/components'
 timer_dir = sddf / 'drivers/timer/arm'
 lwip_dir = sddf / 'network/ipstacks/lwip/src'
 lwip_dir_core = lwip_dir / 'core'
@@ -18,14 +21,14 @@ libc_full_path = run_command('realpath', libc_path).stdout().strip()
 libc_dir = run_command('dirname', libc_full_path).stdout().strip()
 
 
-### SETUP INCLUDE DIRECTORIES
+# SETUP INCLUDE DIRECTORIES
 
-sddf_include_directories = include_directories(sddf / 'include', sel4_install_dir / 'libsel4/include')
+sddf_include_directories = include_directories(sddf / 'include', sddf / 'include/extern', sel4_install_dir / 'libsel4/include')
 lwip_include_directories = include_directories(lwip_dir / 'include', echo_server_dir / 'include/lwip' )
 
-### BUILD SDDF C LIBRARIES
+# BUILD SDDF C LIBRARIES
 
-## Build lib_sddf_util
+# Build lib_sddf_util
 libsddf_util = static_library('sddf_util',
                               [sddf / 'util/printf.c',
                                sddf / 'util/assert.c',
@@ -33,41 +36,70 @@ libsddf_util = static_library('sddf_util',
                                sddf / 'util/cache.c'],
                                include_directories: sddf_include_directories)
 
+libsddf_util_serial = static_library('sddf_util_serial',
+                              [sddf / 'util/printf.c',
+                               sddf / 'util/assert.c',
+                               sddf / 'util/cache.c',
+                               sddf / 'util/putchar_serial.c'],
+                               include_directories: sddf_include_directories)
+
 
 # @alwin: Do I need to add ethernet.h etc.
-## Build the sDDF ethernet driver
+# Build the sDDF ethernet driver
 libeth_driver = static_library('eth_driver',
-                            eth_driver_dir / 'ethernet.c',
-                            include_directories: sddf_include_directories,
-                            link_with: libsddf_util)
+                               eth_driver_dir / 'ethernet.c',
+                               include_directories: sddf_include_directories,
+                               link_with: libsddf_util)
 
-## Build the sDDF network components
+# Build the sDDF virtio serial driver
+libserial_driver = static_library('serial_driver',
+                                  serial_driver_dir / 'console.c',
+                                  include_directories: [sddf_include_directories, serial_driver_dir / 'include'],
+                                  link_with: libsddf_util)
+
+# Build the sDDF network components
 
 # Build the rx_virt
-libeth_virt_rx = static_library('virt_rx',
-                            net_components_dir / 'virt_rx.c',
-                            include_directories: sddf_include_directories,
-                            link_with: libsddf_util)
+libeth_virt_rx = static_library('eth_virt_rx',
+                                net_components_dir / 'virt_rx.c',
+                                include_directories: sddf_include_directories,
+                                link_with: libsddf_util)
 
 # Build the tx_virt
-libeth_virt_tx = static_library('virt_tx',
-                            net_components_dir / 'virt_tx.c',
-                            include_directories: sddf_include_directories,
-                            link_with: libsddf_util)
+libeth_virt_tx = static_library('eth_virt_tx',
+                                net_components_dir / 'virt_tx.c',
+                                include_directories: sddf_include_directories,
+                                link_with: libsddf_util)
 
 # Build the copy
 libeth_copy = static_library('copy',
-                         net_components_dir / 'copy.c',
-                         include_directories: sddf_include_directories,
-                         link_with: libsddf_util)
+                             net_components_dir / 'copy.c',
+                             include_directories: sddf_include_directories,
+                             link_with: libsddf_util)
 
-## Build the timer
+# Build the timer
 libtimer = static_library('timer',
                           timer_dir / 'timer.c',
                           include_directories: sddf_include_directories,
                           link_with: libsddf_util)
 
-## Build echo server
+
+# Build the sDDF serial components
+
+# Build the rx_virt
+
+libserial_virt_rx = static_library('serial_virt_rx',
+                                   serial_components_dir / 'virt_rx.c',
+                                   include_directories: sddf_include_directories,
+                                   link_with: libsddf_util)
+
+# Build the tx_virt
+
+libserial_virt_tx = static_library('serial_virt_tx',
+                                   serial_components_dir / 'virt_tx.c',
+                                   include_directories: sddf_include_directories,
+                                   link_with: libsddf_util)
+# Build echo server
 
 # Build newlib
 newlib = static_library('newlib',
@@ -117,10 +149,15 @@ core4files = [lwip_dir_core4 / 'autoip.c',
 api_files = lwip_dir / 'api/err.c'
 netif_files = lwip_dir / 'netif/ethernet.c'
 
+lib_sddf_lwip = static_library('lib_sddf_lwip',
+                               [corefiles, core4files, api_files, netif_files, lib_sddf_lwip_dir / 'lib_sddf_lwip.c'],
+                               link_with: [newlib, libsddf_util_serial],
+                               include_directories: [sddf_include_directories, lwip_include_directories])
+
 # Build lib echo server
 libecho_server = static_library('echo_server',
-                                [corefiles,core4files, api_files, netif_files, echo_server_dir / 'lwip.c', echo_server_dir / 'udp_echo_socket.c', echo_server_dir / 'tcp_echo_socket.c' ],
-                                link_with: [newlib],
+                                [echo_server_dir / 'echo.c', echo_server_dir / 'udp_echo_socket.c', echo_server_dir / 'tcp_echo_socket.c' ],
+                                link_with: [libsddf_util_serial, lib_sddf_lwip],
                                 include_directories: [sddf_include_directories, lwip_include_directories]
 )
 
@@ -137,6 +174,10 @@ cargo_env.set('ETH_COPIER_ELF', meson.current_build_dir() / 'eth_copier.elf')
 cargo_env.set('ECHO_SERVER_ELF', meson.current_build_dir() / 'echo_server.elf')
 cargo_env.set('INIT_ELF', meson.current_build_dir() / 'init.elf')
 cargo_env.set('TIMER_ELF', meson.current_build_dir() / 'timer.elf')
+cargo_env.set('SERIAL_DRIVER_ELF', meson.current_build_dir() / 'virtio_serial_driver.elf')
+cargo_env.set('SERIAL_VIRT_RX_ELF', meson.current_build_dir() / 'serial_virt_rx.elf')
+cargo_env.set('SERIAL_VIRT_TX_ELF', meson.current_build_dir() / 'serial_virt_tx.elf')
+
 
 cargo_env.set('LOADER_LINKER_SCRIPT', meson.source_root() / 'crates/smos-loader/custom.ld')
 cargo_env.set('BUILD_DIR', meson.current_build_dir())
@@ -170,6 +211,15 @@ eth_driver = custom_target(
   depends: [libeth_driver]
 )
 
+serial_driver = custom_target(
+  'virtio_serial_driver',
+  output: 'virtio_serial_driver.elf',
+  command: cargo_command_base + ['-p', 'virtio_serial_driver'],
+  env: cargo_env,
+  build_always_stale: true,
+  depends: [libserial_driver, eth_driver]
+)
+
 # Build the virt_rx
 eth_virt_rx = custom_target(
   'eth_virt_rx',
@@ -177,7 +227,17 @@ eth_virt_rx = custom_target(
   command: cargo_command_base + ['-p', 'eth_virt_rx'],
   env: cargo_env,
   build_always_stale: true,
-  depends: [libeth_virt_rx, eth_driver]
+  depends: [libeth_virt_rx, serial_driver]
+)
+
+# Build the virt_rx
+serial_virt_rx = custom_target(
+  'serial_virt_rx',
+  output: 'serial_virt_rx.elf',
+  command: cargo_command_base + ['-p', 'serial_virt_rx'],
+  env: cargo_env,
+  build_always_stale: true,
+  depends: [libserial_virt_rx, eth_virt_rx]
 )
 
 # Build the virt_tx
@@ -187,7 +247,17 @@ eth_virt_tx = custom_target(
   command: cargo_command_base + ['-p', 'eth_virt_tx'],
   env: cargo_env,
   build_always_stale: true,
-  depends: [libeth_virt_tx, eth_virt_rx]
+  depends: [libeth_virt_tx, serial_virt_rx]
+)
+
+# Build the virt_rx
+serial_virt_tx = custom_target(
+  'serial_virt_tx',
+  output: 'serial_virt_tx.elf',
+  command: cargo_command_base + ['-p', 'serial_virt_tx'],
+  env: cargo_env,
+  build_always_stale: true,
+  depends: [libserial_virt_rx, eth_virt_tx]
 )
 
 # Build the copier
@@ -197,7 +267,7 @@ eth_copier = custom_target(
   command: cargo_command_base + ['-p', 'eth_copier'],
   env: cargo_env,
   build_always_stale: true,
-  depends: [libeth_copy, eth_virt_tx]
+  depends: [libeth_copy, serial_virt_tx]
 )
 
 # Build the timer

@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-pub fn ROUND_UP(n: usize, b: usize) -> usize {
+pub const fn ROUND_UP(n: usize, b: usize) -> usize {
     if n == 0 {
         return 0;
     }
@@ -8,7 +8,7 @@ pub fn ROUND_UP(n: usize, b: usize) -> usize {
     return (((n - 1) >> b) + 1) << b;
 }
 
-pub fn ROUND_DOWN(n: usize, b: usize) -> usize {
+pub const fn ROUND_DOWN(n: usize, b: usize) -> usize {
     return (n >> b) << b;
 }
 

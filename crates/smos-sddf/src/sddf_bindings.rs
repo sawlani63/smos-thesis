@@ -13,12 +13,9 @@ static mut CHANNELS: BTreeMap<usize, sDDFChannel> = BTreeMap::new();
 static mut PPCID_TO_CHANNELID: BTreeMap<usize, usize> = BTreeMap::new();
 
 extern "C" {
-    pub fn sddf_init();
-    pub fn sddf_notified(id: u32);
-    pub fn sddf_protected(
-        id: u32,
-        msginfo: sel4_sys::seL4_MessageInfo,
-    ) -> sel4_sys::seL4_MessageInfo;
+    pub fn init();
+    pub fn notified(id: u32);
+    pub fn protected(id: u32, msginfo: sel4_sys::seL4_MessageInfo) -> sel4_sys::seL4_MessageInfo;
 }
 
 pub fn sddf_set_channel(id: usize, ppc_id: Option<usize>, channel: sDDFChannel) -> Result<(), ()> {
@@ -114,13 +111,13 @@ pub fn sddf_event_loop_ppc(listen_conn: sDDFConnection, reply: ReplyWrapper) -> 
         match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Notification(bits) => {
                 for ch in bits {
-                    unsafe { sddf_notified(ch as u32) }
+                    unsafe { notified(ch as u32) }
                 }
                 reply_msg_info = None;
             }
             EntryType::Invocation(id) => {
                 reply_msg_info = Some(sel4::MessageInfo::from_inner(unsafe {
-                    sddf_protected(ppc_get_channel_id(id) as u32, msg.into_inner())
+                    protected(ppc_get_channel_id(id) as u32, msg.into_inner())
                 }));
             }
             _ => {
@@ -139,7 +136,7 @@ pub fn sddf_event_loop(listen_conn: sDDFConnection, reply: ReplyWrapper) -> ! {
         match decode_entry_type(badge.try_into().unwrap()) {
             EntryType::Notification(bits) => {
                 for ch in bits {
-                    unsafe { sddf_notified(ch as u32) }
+                    unsafe { notified(ch as u32) }
                 }
                 reply_msg_info = None;
             }

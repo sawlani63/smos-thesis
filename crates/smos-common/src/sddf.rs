@@ -7,6 +7,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 pub enum QueueType {
     Active = 0,
     Free,
+    None,
 }
 
 #[repr(u64)]

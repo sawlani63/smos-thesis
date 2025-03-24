@@ -7,6 +7,7 @@ use smos_common::obj_attributes::ObjAttributes;
 use smos_common::syscall::{ObjectServerInterface, RootServerInterface};
 use smos_cspace::SMOSUserCSpace;
 
+#[derive(Debug, Copy, Clone)]
 pub struct DMARegion {
     pub vaddr: usize,
     pub paddr: usize,

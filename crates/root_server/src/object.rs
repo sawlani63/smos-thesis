@@ -240,14 +240,15 @@ pub fn handle_obj_create(
         for frame in frames {
             mem_obj
                 .borrow_mut()
-                .insert_frame_at(offset, frame)
+                .insert_frame_at(offset, *frame)
                 .expect("Failed to insert frame into object");
             offset += PAGE_SIZE_4K;
         }
     } else {
         let n_pages = args.size / PAGE_SIZE_4K;
 
-        if args.attributes.has(ObjAttributes::CONTIGUOUS) && n_pages > 1 {
+        if args.attributes.has(ObjAttributes::CONTIGUOUS) {
+            /* && n_pages > 1 @alwin: It is wasteful to map single pages from here, but the frame table doesn't currently remember the paddr of frames. Revisit this later*/
             let (allocation, frames) = dma_pool
                 .allocate_contig_pages(n_pages.try_into().unwrap())
                 .expect("@alwin: This should not be an expect");

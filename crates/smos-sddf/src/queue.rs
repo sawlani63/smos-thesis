@@ -11,13 +11,17 @@ use smos_cspace::SMOSUserCSpace;
 #[allow(non_camel_case_types)]
 pub trait sDDFQueueType {}
 
+// @alwin: Should these be moved somewhere else?
 #[derive(Debug, Copy, Clone)]
 pub struct ActiveQueue {}
 #[derive(Debug, Copy, Clone)]
 pub struct FreeQueue {}
+#[derive(Debug, Copy, Clone)]
+pub struct SerialQueue {}
 
 impl sDDFQueueType for ActiveQueue {}
 impl sDDFQueueType for FreeQueue {}
+impl sDDFQueueType for SerialQueue {}
 
 pub struct QueuePair {
     pub active: Queue<ActiveQueue>,

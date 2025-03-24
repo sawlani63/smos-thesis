@@ -1,33 +1,42 @@
 #![no_std]
 #![no_main]
 
-use smos_common::client_connection::ClientConnection;
-use smos_common::connection::{sDDFConnection, RootServerConnection};
-use smos_common::sddf::QueueType;
-use smos_common::syscall::{sDDFInterface, NonRootServerInterface, RootServerInterface};
+use smos_common::{
+    client_connection::ClientConnection,
+    connection::{sDDFConnection, RootServerConnection},
+    error::InvocationError,
+    local_handle::{
+        ConnRegistrationHandle, ConnectionHandle, HandleOrHandleCap, LocalHandle, ObjectHandle,
+    },
+    sddf::QueueType,
+    server_connection::ServerConnection,
+    syscall::{sDDFInterface, NonRootServerInterface, ReplyWrapper, RootServerInterface},
+};
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::smos_declare_main;
-use smos_sddf::dma_region::DMARegion;
-use smos_sddf::notification_channel::{BidirectionalChannel, NotificationChannel, PPCForbidden};
-use smos_sddf::queue::QueuePair;
+use smos_sddf::{
+    config::RegionResource,
+    dma_region::DMARegion,
+    net_config::{NetConnectionResource, NetCopyConfig, SDDF_NET_MAGIC},
+    notification_channel::{BidirectionalChannel, NotificationChannel, PPCForbidden},
+    queue::{ActiveQueue, FreeQueue, Queue, QueuePair},
+    sddf_bindings::{init, sddf_event_loop, sddf_set_channel},
+    sddf_channel::sDDFChannel,
+};
+use smos_server::{
+    event::{
+        decode_entry_type, smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv,
+        EntryType,
+    },
+    reply::SMOSReply,
+    syscalls::{
+        sDDFChannelRegisterBidirectional, sDDFProvideDataRegion, sDDFQueueRegister, ConnOpen,
+        SMOS_Invocation,
+    },
+};
+
 extern crate alloc;
 use alloc::vec::Vec;
-use smos_common::error::InvocationError;
-use smos_common::local_handle::{
-    ConnRegistrationHandle, ConnectionHandle, HandleOrHandleCap, LocalHandle, ObjectHandle,
-};
-use smos_common::server_connection::ServerConnection;
-use smos_common::syscall::ReplyWrapper;
-use smos_sddf::queue::{ActiveQueue, FreeQueue, Queue};
-use smos_sddf::sddf_bindings::{sddf_event_loop, sddf_init, sddf_set_channel};
-use smos_sddf::sddf_channel::sDDFChannel;
-use smos_server::event::{decode_entry_type, EntryType};
-use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
-use smos_server::reply::SMOSReply;
-use smos_server::syscalls::SMOS_Invocation;
-use smos_server::syscalls::{
-    sDDFChannelRegisterBidirectional, sDDFProvideDataRegion, sDDFQueueRegister, ConnOpen,
-};
 
 #[repr(C)]
 struct Resources {
@@ -44,7 +53,7 @@ struct Resources {
 }
 
 extern "C" {
-    static mut resources: Resources;
+    static mut config: NetCopyConfig;
 }
 
 struct Client {
@@ -174,6 +183,7 @@ fn handle_queue_register(
                 HandleOrHandleCap::<ObjectHandle>::from(args.hndl_cap),
             )?);
         }
+        _ => return Err(InvocationError::InvalidArguments),
     }
 
     return Ok(SMOSReply::sDDFQueueRegister);
@@ -337,7 +347,7 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
         .sddf_get_data_region(&cspace.to_absolute_cptr(virt_rcv_dma_hndl_cap_slot))
         .expect("Failed to get data region");
 
-    let _rcv_dma_region = DMARegion::open(
+    let rcv_dma_region = DMARegion::open(
         &rs_conn,
         virt_rcv_dma_hndl_cap,
         VIRT_DMA_RECV_REGION,
@@ -359,21 +369,44 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
     .expect("Failed to create channel with with client");
 
     unsafe {
-        resources = Resources {
-            rx_free_virt: VIRT_FREE as u64,
-            rx_active_virt: VIRT_ACTIVE as u64,
-            virt_queue_size: VIRT_QUEUE_CAPACITY as u64,
-            rx_free_cli: CLI_FREE as u64,
-            rx_active_cli: CLI_ACTIVE as u64,
-            cli_queue_size: CLIENT_QUEUE_CAPACITY as u64,
-            virt_data_region: VIRT_DMA_RECV_REGION as u64,
-            cli_data_region: CLI_DMA_RCV_REGION as u64,
-            virt_id: virt_channel.from_bit.unwrap(),
-            cli_id: client.channel.unwrap().from_bit.unwrap(),
-        }
+        config = NetCopyConfig {
+            magic: SDDF_NET_MAGIC,
+            virt_rx: NetConnectionResource {
+                free_queue: RegionResource {
+                    vaddr: virt_queues.free.vaddr,
+                    size: virt_queues.free.size,
+                },
+                active_queue: RegionResource {
+                    vaddr: virt_queues.active.vaddr,
+                    size: virt_queues.active.size,
+                },
+                num_buffers: 512,
+                id: virt_channel.from_bit.unwrap(),
+            },
+            device_data: RegionResource {
+                vaddr: rcv_dma_region.vaddr,
+                size: rcv_dma_region.size,
+            },
+            client: NetConnectionResource {
+                free_queue: RegionResource {
+                    vaddr: client.free.unwrap().vaddr,
+                    size: client.free.unwrap().size,
+                },
+                active_queue: RegionResource {
+                    vaddr: client.active.unwrap().vaddr,
+                    size: client.active.unwrap().size,
+                },
+                num_buffers: 512,
+                id: client.channel.unwrap().from_bit.unwrap(),
+            },
+            client_data: RegionResource {
+                vaddr: client.data.as_ref().unwrap().vaddr,
+                size: client.data.as_ref().unwrap().size,
+            },
+        };
     }
 
-    unsafe { sddf_init() };
+    unsafe { init() };
 
     sddf_event_loop(listen_conn, reply);
 }

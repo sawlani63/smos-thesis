@@ -1,11 +1,17 @@
 #![no_std]
 #![no_main]
 
+use core::mem::MaybeUninit;
+
 use smos_common::client_connection::ClientConnection;
 use smos_common::connection::{sDDFConnection, RootServerConnection};
 use smos_common::syscall::RootServerInterface;
 use smos_cspace::SMOSUserCSpace;
 use smos_runtime::smos_declare_main;
+use smos_sddf::device_config::{
+    DeviceIrqResource, DeviceRegionResource, DeviceResources, DEVICE_MAX_IRQS, DEVICE_MAX_REGIONS,
+    SDDF_DEVICE_MAGIC,
+};
 use smos_sddf::notification_channel::{NotificationChannel, PPCForbidden, SendOnlyChannel};
 extern crate alloc;
 use alloc::vec::Vec;
@@ -14,7 +20,7 @@ use smos_common::local_handle::{ConnRegistrationHandle, ConnectionHandle, LocalH
 use smos_common::server_connection::ServerConnection;
 use smos_common::syscall::ReplyWrapper;
 use smos_sddf::irq_channel::IrqChannel;
-use smos_sddf::sddf_bindings::{sddf_event_loop_ppc, sddf_init, sddf_set_channel};
+use smos_sddf::sddf_bindings::{init, sddf_event_loop_ppc, sddf_set_channel};
 use smos_sddf::sddf_channel::sDDFChannel;
 use smos_server::event::{decode_entry_type, EntryType};
 use smos_server::event::{smos_serv_cleanup, smos_serv_decode_invocation, smos_serv_replyrecv};
@@ -27,13 +33,8 @@ const NTFN_BUFFER: *mut u8 = 0xB0000 as *mut u8;
 const REGS_BASE: *const u32 = 0xB000000 as *const u32;
 const TIMER_ID: usize = 2;
 
-#[repr(C)]
-struct Resources {
-    irq_id: u8,
-}
-
 extern "C" {
-    static mut resources: Resources;
+    static mut device_resources: DeviceResources;
 }
 
 struct Client {
@@ -187,11 +188,24 @@ fn main(rs_conn: RootServerConnection, mut cspace: SMOSUserCSpace) {
     .expect("Could not set up channel with client");
 
     unsafe {
-        resources = Resources {
-            irq_id: irq_channel.bit,
-        }
+        let regions: [MaybeUninit<DeviceRegionResource>; DEVICE_MAX_REGIONS] =
+            MaybeUninit::uninit().assume_init();
+        let mut irqs: [MaybeUninit<DeviceIrqResource>; DEVICE_MAX_IRQS] =
+            MaybeUninit::uninit().assume_init();
+
+        irqs[0] = MaybeUninit::new(DeviceIrqResource {
+            id: irq_channel.bit,
+        });
+
+        device_resources = DeviceResources {
+            magic: SDDF_DEVICE_MAGIC,
+            num_regions: 0,
+            num_irqs: 1,
+            regions: regions,
+            irqs: irqs,
+        };
     }
-    unsafe { sddf_init() }
+    unsafe { init() }
 
     sddf_event_loop_ppc(listen_conn, reply);
 }

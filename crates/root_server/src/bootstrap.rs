@@ -177,7 +177,8 @@ pub fn smos_bootstrap(bi: &sel4::BootInfo) -> Result<(CSpace, UTTable, DMAPool),
     n_slots -= BIT((DMA_RESERVATION_SIZE_BITS - sel4_sys::seL4_PageBits) as usize);
 
     /* now work out how many 2nd level nodes are required - with a buffer */
-    let n_cnodes = n_slots / CNODE_SLOTS(CNODE_SIZE_BITS) + 2;
+    let mut n_cnodes = n_slots / CNODE_SLOTS(CNODE_SIZE_BITS) + 2;
+    n_cnodes += 50; // @alwin: HACK BECAUSE I DONT WANT TO DEAL WITH CSPACE STUFF BEFORE RESOURCE CONTAINERS
     size += (n_cnodes * BIT(CNODE_SIZE_BITS)) + BIT(INITIAL_TASK_CNODE_SIZE_BITS);
 
     let (ut, _) = steal_untyped(bi, BYTES_TO_SIZE_BITS(size) + 1, &mut bootinfo_avail_bytes)

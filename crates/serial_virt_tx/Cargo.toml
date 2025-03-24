@@ -1,5 +1,5 @@
 [package]
-name = "smos-sddf"
+name = "serial_virt_tx"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,5 +11,5 @@ sel4-panicking = { git = "https://github.com/seL4/rust-sel4" }
 smos-runtime = { path = "../smos-runtime" }
 smos-cspace = { path = "../smos-cspace" }
 smos-common = { path = "../smos-common"}
-smos-server = { path = "../smos-server"}
-bitflags = "2.6.0"
+smos-server = { path = "../smos-server" }
+smos-sddf = { path = "../smos-sddf" }
