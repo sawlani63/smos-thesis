@@ -7,6 +7,9 @@
 /build/
 bin/
 seL4/
+libmicrokitco/
+microkit/
+ff15/
 target/
 .cargo/
 test.py
