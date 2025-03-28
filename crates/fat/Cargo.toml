@@ -1,0 +1,16 @@
+[package]
+name = "fat"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sel4 = { git = "https://github.com/seL4/rust-sel4", features = ["state", "thread-local-state"]}
+sel4-sys = { git = "https://github.com/seL4/rust-sel4" }
+sel4-config = { git = "https://github.com/seL4/rust-sel4" }
+sel4-panicking = { git = "https://github.com/seL4/rust-sel4" }
+smos-runtime = { path = "../smos-runtime" }
+smos-cspace = { path = "../smos-cspace" }
+smos-common = { path = "../smos-common"}
+smos-server = { path = "../smos-server" }
+smos-sddf = { path = "../smos-sddf" }
+bitflags = "2.6.0"

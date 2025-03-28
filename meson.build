@@ -15,6 +15,10 @@ lwip_dir = sddf / 'network/ipstacks/lwip/src'
 lwip_dir_core = lwip_dir / 'core'
 lwip_dir_core4 = lwip_dir_core / 'ipv4'
 
+fs = 'fs/fat'
+libmicrokitco = 'deps/libmicrokitco'
+microkit = 'deps/microkit/libmicrokit/include'
+ff15 = 'deps/ff15'
 
 libc_path = run_command('aarch64-none-elf-gcc', '--print-file-name', 'libc.a').stdout().strip()
 libc_full_path = run_command('realpath', libc_path).stdout().strip()
@@ -25,6 +29,16 @@ libc_dir = run_command('dirname', libc_full_path).stdout().strip()
 
 sddf_include_directories = include_directories(sddf / 'include', sddf / 'include/extern', sel4_install_dir / 'libsel4/include')
 lwip_include_directories = include_directories(lwip_dir / 'include', echo_server_dir / 'include/lwip' )
+
+fs_include_directories = include_directories(fs / 'config', 'include')
+
+# BUILD LIONSOS FAT FS LIBRARY
+libfat = static_library('fat',
+                        [fs / 'decl.h',
+                         fs / 'event.c',
+                         fs / 'io.c',
+                         fs / 'op.c'],
+                         include_directories: [fs_include_directories, libmicrokitco, ff15, microkit, sddf_include_directories])
 
 # BUILD SDDF C LIBRARIES
 
@@ -179,6 +193,8 @@ cargo_env.set('SERIAL_VIRT_RX_ELF', meson.current_build_dir() / 'serial_virt_rx.
 cargo_env.set('SERIAL_VIRT_TX_ELF', meson.current_build_dir() / 'serial_virt_tx.elf')
 
 
+cargo_env.set('FAT_ELF', meson.current_build_dir() / 'fat.elf')
+
 cargo_env.set('LOADER_LINKER_SCRIPT', meson.source_root() / 'crates/smos-loader/custom.ld')
 cargo_env.set('BUILD_DIR', meson.current_build_dir())
 cargo_env.set('LIBC_DIR', libc_dir)
@@ -201,6 +217,16 @@ cargo_command_base = [
 # one, so that the first one to fail halts the build process. This may slow down the build
 # as I think it might reduce parallelism. Still faster than Make tho (and seemingly more reliable)
 
+# Build fat fs
+fat = custom_target(
+  'fat',
+  output: 'fat.elf',
+  command: cargo_command_base + ['-p', 'fat'],
+  env: cargo_env,
+  build_always_stale: true,
+  depends: [libfat]
+)
+
 # Build eth_driver
 eth_driver = custom_target(
   'eth_driver',
@@ -208,7 +234,7 @@ eth_driver = custom_target(
   command: cargo_command_base + ['-p', 'eth_driver'],
   env: cargo_env,
   build_always_stale: true,
-  depends: [libeth_driver]
+  depends: [libeth_driver, fat]
 )
 
 serial_driver = custom_target(
