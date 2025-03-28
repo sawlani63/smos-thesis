@@ -21,6 +21,7 @@ A rewrite of the Secure Multiserver Operating System (SMOS) project using rust-s
 * ff15 fs deps // add link here
 * lions os fat fs // add link here
 * // will work on getting compiler to download these like how it does for sel4 if i have time lol
+* // also maybe work on omitting files that the loader or whatever creates initially instead of pushing here with fs (so include fs at startup somehow)
 
 ## Building
 ```
