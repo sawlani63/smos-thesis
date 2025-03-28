@@ -22,6 +22,7 @@ A rewrite of the Secure Multiserver Operating System (SMOS) project using rust-s
 * lions os fat fs // add link here
 * // will work on getting compiler to download these like how it does for sel4 if i have time lol
 * // also maybe work on omitting files that the loader or whatever creates initially instead of pushing here with fs (so include fs at startup somehow)
+* // fix sddf ignore where dir is empty like in smos-rs or a sym link but the other shi is ignored
 
 ## Building
 ```
