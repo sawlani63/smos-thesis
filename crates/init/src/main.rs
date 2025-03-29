@@ -24,6 +24,11 @@ fn main(rs_conn: RootServerConnection, _cspace: SMOSUserCSpace) -> sel4::Result<
         .process_spawn("serial_driver", "BOOT_FS", 254, Some(&["serial0"]))
         .expect("Failed to start serial_driver");
 
+    /* Start the blk driver */
+    rs_conn
+        .process_spawn("blk_driver", "BOOT_FS", 254, Some(&["blk0"]))
+        .expect("Failed to start blk_driver");
+
     /* eth components */
     /* Start the eth virt rx */
     rs_conn

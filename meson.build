@@ -15,6 +15,8 @@ lwip_dir = sddf / 'network/ipstacks/lwip/src'
 lwip_dir_core = lwip_dir / 'core'
 lwip_dir_core4 = lwip_dir_core / 'ipv4'
 
+blk_driver_dir = sddf / 'drivers/blk/virtio'
+
 fs = 'fs/fat'
 libmicrokitco = 'deps/libmicrokitco'
 microkit = 'deps/microkit/libmicrokit/include'
@@ -30,15 +32,15 @@ libc_dir = run_command('dirname', libc_full_path).stdout().strip()
 sddf_include_directories = include_directories(sddf / 'include', sddf / 'include/extern', sel4_install_dir / 'libsel4/include')
 lwip_include_directories = include_directories(lwip_dir / 'include', echo_server_dir / 'include/lwip' )
 
-fs_include_directories = include_directories(fs / 'config', 'include')
+#fs_include_directories = include_directories(fs / 'config', 'include')
 
 # BUILD LIONSOS FAT FS LIBRARY
-libfat = static_library('fat',
-                        [fs / 'decl.h',
-                         fs / 'event.c',
-                         fs / 'io.c',
-                         fs / 'op.c'],
-                         include_directories: [fs_include_directories, libmicrokitco, ff15, microkit, sddf_include_directories])
+#libfat = static_library('fat',
+#                        [fs / 'decl.h',
+#                         fs / 'event.c',
+#                         fs / 'io.c',
+#                         fs / 'op.c'],
+#                         include_directories: [fs_include_directories, libmicrokitco, ff15, microkit, sddf_include_directories])
 
 # BUILD SDDF C LIBRARIES
 
@@ -70,6 +72,13 @@ libserial_driver = static_library('serial_driver',
                                   serial_driver_dir / 'console.c',
                                   include_directories: [sddf_include_directories, serial_driver_dir / 'include'],
                                   link_with: libsddf_util)
+
+# @chirag: Add block.h???
+# Build the sDDF virtio blk driver
+libblk_driver = static_library('blk_driver',
+                               blk_driver_dir / 'block.c',
+                               include_directories: sddf_include_directories,
+                               link_with: libsddf_util)
 
 # Build the sDDF network components
 
@@ -192,6 +201,7 @@ cargo_env.set('SERIAL_DRIVER_ELF', meson.current_build_dir() / 'virtio_serial_dr
 cargo_env.set('SERIAL_VIRT_RX_ELF', meson.current_build_dir() / 'serial_virt_rx.elf')
 cargo_env.set('SERIAL_VIRT_TX_ELF', meson.current_build_dir() / 'serial_virt_tx.elf')
 
+cargo_env.set('BLK_DRIVER_ELF', meson.current_build_dir() / 'blk_driver.elf')
 
 cargo_env.set('FAT_ELF', meson.current_build_dir() / 'fat.elf')
 
@@ -218,14 +228,14 @@ cargo_command_base = [
 # as I think it might reduce parallelism. Still faster than Make tho (and seemingly more reliable)
 
 # Build fat fs
-fat = custom_target(
-  'fat',
-  output: 'fat.elf',
-  command: cargo_command_base + ['-p', 'fat'],
-  env: cargo_env,
-  build_always_stale: true,
-  depends: [libfat]
-)
+#fat = custom_target (
+#  'fat',
+#  output: 'fat.elf',
+#  command: cargo_command_base + ['-p', 'fat'],
+#  env: cargo_env,
+#  build_always_stale: true,
+#  depends: [libfat]
+#)
 
 # Build eth_driver
 eth_driver = custom_target(
@@ -234,7 +244,7 @@ eth_driver = custom_target(
   command: cargo_command_base + ['-p', 'eth_driver'],
   env: cargo_env,
   build_always_stale: true,
-  depends: [libeth_driver, fat]
+  depends: [libeth_driver]
 )
 
 serial_driver = custom_target(
@@ -246,6 +256,16 @@ serial_driver = custom_target(
   depends: [libserial_driver, eth_driver]
 )
 
+# Build blk_driver
+blk_driver = custom_target (
+  'blk_driver',
+  output: 'blk_driver.elf',
+  command: cargo_command_base + ['-p', 'blk_driver'],
+  env: cargo_env,
+  build_always_stale: true,
+  depends: [libblk_driver, serial_driver]
+)
+
 # Build the virt_rx
 eth_virt_rx = custom_target(
   'eth_virt_rx',
@@ -253,7 +273,7 @@ eth_virt_rx = custom_target(
   command: cargo_command_base + ['-p', 'eth_virt_rx'],
   env: cargo_env,
   build_always_stale: true,
-  depends: [libeth_virt_rx, serial_driver]
+  depends: [libeth_virt_rx, blk_driver]
 )
 
 # Build the virt_rx

@@ -37,7 +37,7 @@ use smos_server::ntfn_buffer::*;
 // to prevent information leakage. Maybe if another page aligned 'guard page' is added? Kinda
 // relying on the behaviour of the compiler
 
-const NUM_FILES: usize = 10;
+const NUM_FILES: usize = 11;
 const INIT_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("INIT_ELF"));
 const ETH_DRIVER_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("ETH_DRIVER_ELF"));
 const ETH_VIRT_RX_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("ETH_VIRT_RX_ELF"));
@@ -48,6 +48,8 @@ const TIMER_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("TIMER_ELF")
 const SERIAL_DRIVER_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("SERIAL_DRIVER_ELF"));
 const SERIAL_VIRT_RX_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("SERIAL_VIRT_RX_ELF"));
 const SERIAL_VIRT_TX_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("SERIAL_VIRT_TX_ELF"));
+
+const BLK_DRIVER_ELF_CONTENTS: &[u8] = include_bytes_aligned!(4096, env!("BLK_DRIVER_ELF"));
 
 #[derive(Debug, Copy, Clone)]
 struct File {
@@ -742,6 +744,10 @@ fn init_file_table() {
         FILES[9] = Some(File {
             name: "serial_virt_tx",
             data: SERIAL_VIRT_TX_ELF_CONTENTS,
+        });
+        FILES[10] = Some(File {
+            name: "blk_driver",
+            data: BLK_DRIVER_ELF_CONTENTS,
         });
     }
 }

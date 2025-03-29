@@ -14,3 +14,5 @@ pub mod sddf_bindings;
 pub mod sddf_channel;
 pub mod serial_config;
 pub mod timer_config;
+pub mod fs_config;
+pub mod blk_config;

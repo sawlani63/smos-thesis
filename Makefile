@@ -16,7 +16,9 @@ ECHO_SERVER := sddf/examples/echo_server
 SEL4_INSTALL_DIR := $(shell pwd)/deps/seL4/install
 sel4_prefix := $(SEL4_INSTALL_DIR)
 
-FS := fs/fat
+BLK_DRIVER := $(SDDF)/drivers/blk/virtio
+
+#FS := fs/fat
 
 # Kernel loader binary artifacts provided by Docker container:
 # - `sel4-kernel-loader`: The loader binary, which expects to have a payload appended later via
@@ -75,20 +77,20 @@ CFLAGS1 := \
 	-I$(ECHO_SERVER)/include/lwip \
 
 # Build static library for fat_fs
-$(BUILD_DIR)/decl.o: $(FS)/decl.h
-	$(CC1) -c $(CFLAGS1) $(FS)/decl.h -o $(BUILD_DIR)/decl.o
+#$(BUILD_DIR)/decl.o: $(FS)/decl.h
+#	$(CC1) -c $(CFLAGS1) $(FS)/decl.h -o $(BUILD_DIR)/decl.o
 
-$(BUILD_DIR)/event.o: $(FS)/event.c
-	$(CC1) -c $(CFLAGS1) $(FS)/event.c -o $(BUILD_DIR)/event.o
+#$(BUILD_DIR)/event.o: $(FS)/event.c
+#	$(CC1) -c $(CFLAGS1) $(FS)/event.c -o $(BUILD_DIR)/event.o
 
-$(BUILD_DIR)/io.o: $(FS)/io.c
-	$(CC1) -c $(CFLAGS1) $(FS)/io.c -o $(BUILD_DIR)/io.o
+#$(BUILD_DIR)/io.o: $(FS)/io.c
+#	$(CC1) -c $(CFLAGS1) $(FS)/io.c -o $(BUILD_DIR)/io.o
 
-$(BUILD_DIR)/op.o: $(FS)/op.c
-	$(CC1) -c $(CFLAGS1) $(FS)/op.c -o $(BUILD_DIR)/op.o
+#$(BUILD_DIR)/op.o: $(FS)/op.c
+#	$(CC1) -c $(CFLAGS1) $(FS)/op.c -o $(BUILD_DIR)/op.o
 
-$(BUILD_DIR)/libfat.a: $(BUILD_DIR)/decl.o $(BUILD_DIR)/event.o $(BUILD_DIR)/io.o $(BUILD_DIR)/op.o
-	$(AR) rvcs $@ $(BUILD_DIR)/decl.o $(BUILD_DIR)/event.o $(BUILD_DIR)/io.o $(BUILD_DIR)/op.o
+#$(BUILD_DIR)/libfat.a: $(BUILD_DIR)/decl.o $(BUILD_DIR)/event.o $(BUILD_DIR)/io.o $(BUILD_DIR)/op.o
+#	$(AR) rvcs $@ $(BUILD_DIR)/decl.o $(BUILD_DIR)/event.o $(BUILD_DIR)/io.o $(BUILD_DIR)/op.o
 
 # Build static library for sddf_util
 $(BUILD_DIR)/printf.o: $(SDDF)/util/printf.c
@@ -112,6 +114,13 @@ $(BUILD_DIR)/ethernet.o: $(ETH_DRIVER)/ethernet.c $(ETH_DRIVER)/ethernet.h
 
 $(BUILD_DIR)/libethernet.a: $(BUILD_DIR)/ethernet.o
 	${AR} rvcs $@ $(BUILD_DIR)/ethernet.o
+
+# Build static library for blk driver
+$(BUILD_DIR)/block.o: $(BLK_DRIVER)/block.c $(BLK_DRIVER)/block.h
+	$(CC1) -c $(CFLAGS1) $(BLK_DRIVER)/block.c -o $(BUILD_DIR)/block.o
+
+$(BUILD_DIR)/libblk_driver.a: $(BUILD_DIR)/block.o
+	${AR} rvcs $@ $(BUILD_DIR)/block.o
 
 # Build static library for rx_virt
 $(BUILD_DIR)/virt_rx.o: $(ETH_COMPONENTS)/virt_rx.c
@@ -193,22 +202,22 @@ $(BUILD_DIR)/libecho_server.a: $(addprefix $(BUILD_DIR)/, $(LWIP_OBJS))
 	${AR} rcvs $@ $^
 
 # Build the fat fs
-fat_crate := fat
-fat := $(BUILD_DIR)/$(fat_crate).elf
-$(fat): $(fat).intermediate
+#fat_crate := fat
+#fat := $(BUILD_DIR)/$(fat_crate).elf
+#$(fat): $(fat).intermediate
 
-.INTERMDIATE: $(fat).intermediate
-$(fat).intermediate: $(BUILD_DIR)/libfat.a
-	BUILD_DIR=$(BUILD_DIR) \
-	SEL4_PREFIX=$(sel4_prefix) \
-		cargo build \
-			-Z build-std=core,alloc,compiler_builtins \
-			-Z build-std-features=compiler-builtins-mem \
-			-Z unstable-options \
-			--target support/targets/aarch64-sel4.json \
-			--target-dir $(abspath $(BUILD_DIR)/target) \
-			--out-dir $(BUILD_DIR) \
-			-p $(fat_crate)
+#.INTERMDIATE: $(fat).intermediate
+#$(fat).intermediate: $(BUILD_DIR)/libfat.a
+#	BUILD_DIR=$(BUILD_DIR) \
+#	SEL4_PREFIX=$(sel4_prefix) \
+#		cargo build \
+#			-Z build-std=core,alloc,compiler_builtins \
+#			-Z build-std-features=compiler-builtins-mem \
+#			-Z unstable-options \
+#			--target support/targets/aarch64-sel4.json \
+#			--target-dir $(abspath $(BUILD_DIR)/target) \
+#			--out-dir $(BUILD_DIR) \
+#			-p $(fat_crate)
 
 # Build the eth driver
 eth_driver_crate := eth_driver
@@ -227,6 +236,24 @@ $(eth_driver).intermediate: $(BUILD_DIR)/libethernet.a $(BUILD_DIR)/libsddf_util
 			--target-dir $(abspath $(BUILD_DIR)/target) \
 			--out-dir $(BUILD_DIR) \
 			-p $(eth_driver_crate)
+
+# Build the blk driver
+blk_driver_crate := blk_driver
+blk_driver := $(BUILD_DIR)/$(blk_driver_crate).elf
+$(blk_driver): $(blk_driver).intermediate
+
+.INTERMDIATE: $(blk_driver).intermediate
+$(blk_driver).intermediate: $(BUILD_DIR)/libblk_driver.a $(BUILD_DIR)/libsddf_util.a
+	BUILD_DIR=$(BUILD_DIR) \
+	SEL4_PREFIX=$(sel4_prefix) \
+		cargo build \
+			-Z build-std=core,alloc,compiler_builtins \
+			-Z build-std-features=compiler-builtins-mem \
+			-Z unstable-options \
+			--target support/targets/aarch64-sel4.json \
+			--target-dir $(abspath $(BUILD_DIR)/target) \
+			--out-dir $(BUILD_DIR) \
+			-p $(blk_driver_crate)
 
 # Build the eth rx_virt
 eth_virt_rx_crate := eth_virt_rx

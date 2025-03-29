@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "diskio.h": "c",
+        "ff.h": "c"
+    }
+}
