@@ -179,7 +179,7 @@ lib_sddf_lwip = static_library('lib_sddf_lwip',
 
 # Build lib echo server
 libecho_server = static_library('echo_server',
-                                [echo_server_dir / 'echo.c', echo_server_dir / 'udp_echo_socket.c', echo_server_dir / 'tcp_echo_socket.c' ],
+                                [echo_server_dir / 'echo.c', echo_server_dir / 'udp_echo_socket.c', echo_server_dir / 'tcp_echo_socket.c'],
                                 link_with: [libsddf_util_serial, lib_sddf_lwip],
                                 include_directories: [sddf_include_directories, lwip_include_directories]
 )

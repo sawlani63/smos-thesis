@@ -63,6 +63,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "blk_virt"
+version = "0.1.0"
+dependencies = [
+ "sel4",
+ "sel4-config",
+ "sel4-panicking",
+ "sel4-sys",
+ "smos-common",
+ "smos-cspace",
+ "smos-runtime",
+ "smos-sddf",
+ "smos-server",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
